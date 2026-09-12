@@ -1,0 +1,63 @@
+name: Import MalGuard RC
+
+on:
+  push:
+    branches: [import-test]
+    paths:
+      - '.import/READY'
+
+permissions:
+  contents: write
+
+jobs:
+  import-release-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout import branch
+        uses: actions/checkout@v4
+        with:
+          ref: import-test
+          fetch-depth: 0
+
+      - name: Reconstruct, verify, import and test RC
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f .import/READY ]]; then
+            echo 'No import marker is present; nothing to do.'
+            exit 0
+          fi
+
+          cat .import/part-* > /tmp/malguard-rc.b64
+          base64 --decode /tmp/malguard-rc.b64 > /tmp/malguard-rc.zip
+          echo '3fa2adc4c0597116ee2a0bc70707bf45f7f5736e61e0835c8239e806ff75004c  /tmp/malguard-rc.zip' | sha256sum --check --strict
+
+          rm -rf /tmp/malguard-rc
+          mkdir -p /tmp/malguard-rc
+          unzip -q /tmp/malguard-rc.zip -d /tmp/malguard-rc
+
+          rsync -a /tmp/malguard-rc/ ./
+
+          # A commercial license has not been selected yet. Do not commit an invented one.
+          rm -f LICENSE SHA256SUMS.txt SHA256SUMS-0.9.0-rc.1.txt
+          rm -rf .import
+
+          node tests/run-all.js
+
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find . -type f -name '*.js' -not -path './.git/*' -print0)
+
+          git config user.name 'MalGuard CI'
+          git config user.email 'malguard.security@gmail.com'
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo 'Import produced no repository changes.'
+            exit 0
+          fi
+
+          git commit -m 'chore: import MalGuard 0.9.0-rc.1 hardened core'
+          git push origin HEAD:import-test
