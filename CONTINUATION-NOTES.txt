@@ -1,0 +1,14 @@
+MalGuard 0.9.0-rc.1 private repository continuation notes.
+
+This repository is the frozen hardened scanner-core baseline. Do not claim production-final security. Current engineering verdict remains CONDITIONAL PASS until live target-browser acceptance is completed and future native runtime/sandbox modules are implemented and validated.
+
+Next implementation order:
+1. Keep scanner core regression-green.
+2. Complete live browser acceptance.
+3. Define Desktop Guard IPC/state contract.
+4. Implement watched-directory pending-scan/quarantine flow.
+5. Add runtime attribution and restore.
+6. Add isolated behavioral sandbox interface and tests.
+7. Add secure update/signing/release infrastructure.
+
+Do not weaken fail-closed behavior to make tests pass.
