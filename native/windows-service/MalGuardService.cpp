@@ -1,5 +1,3 @@
-#define UNICODE
-#define _UNICODE
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -80,20 +78,30 @@ static bool LaunchGuardChild() {
   PROCESS_INFORMATION pi{};
   BOOL ok = CreateProcessW(
       node.c_str(), mutableCommand.data(), nullptr, nullptr, FALSE,
-      CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+      CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
       nullptr, workDir.c_str(), &si, &pi);
   if (!ok) {
     LogEvent(EVENTLOG_ERROR_TYPE, L"Failed to launch MalGuard desktop guard child process.");
     return false;
   }
 
-  CloseHandle(pi.hThread);
+  // The child must not execute a single instruction outside the service Job.
+  // Assign it while suspended, then resume only after containment succeeds.
   if (!AssignProcessToJobObject(g_job, pi.hProcess)) {
     TerminateProcess(pi.hProcess, ERROR_ACCESS_DENIED);
+    CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     LogEvent(EVENTLOG_ERROR_TYPE, L"Failed to place MalGuard child process in kill-on-close job.");
     return false;
   }
+  if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {
+    TerminateJobObject(g_job, ERROR_PROCESS_ABORTED);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    LogEvent(EVENTLOG_ERROR_TYPE, L"Failed to resume contained MalGuard child process.");
+    return false;
+  }
+  CloseHandle(pi.hThread);
   g_childProcess = pi.hProcess;
   return true;
 }

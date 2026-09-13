@@ -8,11 +8,23 @@ const ROOT=path.resolve(__dirname,'..');
 function runMutant(name,file,from,to,test){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'malguard-mutant-'));
   try{
-    fs.cpSync(ROOT,dir,{recursive:true});
-    const target=path.join(dir,file); let s=fs.readFileSync(target,'utf8');
-    assert.ok(s.includes(from),name+': mutation target missing');
-    fs.writeFileSync(target,s.replace(from,to));
-    const r=spawnSync(process.execPath,[path.join(dir,'tests',test)],{encoding:'utf8'});
+    fs.cpSync(ROOT,dir,{
+      recursive:true,
+      filter:(src)=>{
+        const rel=path.relative(ROOT,src);
+        return rel !== '.git' && !rel.startsWith('.git'+path.sep);
+      },
+    });
+    const target=path.join(dir,file);
+    // Git checkouts on Windows may materialize CRLF. Normalize only the temporary
+    // mutant copy so exact security mutations stay portable without weakening them.
+    let s=fs.readFileSync(target,'utf8').replace(/\r\n/g,'\n');
+    const normalizedFrom=from.replace(/\r\n/g,'\n');
+    const normalizedTo=to.replace(/\r\n/g,'\n');
+    assert.ok(s.includes(normalizedFrom),name+': mutation target missing');
+    fs.writeFileSync(target,s.replace(normalizedFrom,normalizedTo));
+    const r=spawnSync(process.execPath,[path.join(dir,'tests',test)],{encoding:'utf8',timeout:60000,windowsHide:true});
+    if(r.error && r.error.code==='ETIMEDOUT') throw new Error(name+': mutant verification timed out');
     assert.notEqual(r.status,0,name+': mutant survived; test suite did not detect weakened guard');
     return true;
   } finally { fs.rmSync(dir,{recursive:true,force:true}); }

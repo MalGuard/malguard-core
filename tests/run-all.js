@@ -36,7 +36,22 @@ const tests=[
  'model-selection-ui.test.js',
 ];
 for(const test of tests){
- const r=spawnSync(process.execPath,[path.join(__dirname,test)],{stdio:'inherit'});
- if(r.status!==0) process.exit(r.status||1);
+ const started=Date.now();
+ console.log(`→ ${test}`);
+ const r=spawnSync(process.execPath,[path.join(__dirname,test)],{
+  stdio:'inherit',
+  timeout:120000,
+  windowsHide:true,
+ });
+ const elapsed=Date.now()-started;
+ if(r.error && r.error.code==='ETIMEDOUT'){
+  console.error(`✗ ${test}: timed out after ${elapsed}ms`);
+  process.exit(124);
+ }
+ if(r.status!==0){
+  console.error(`✗ ${test}: exit=${r.status} signal=${r.signal||'none'} after ${elapsed}ms`);
+  process.exit(r.status||1);
+ }
+ console.log(`✓ ${test}: ${elapsed}ms`);
 }
 console.log(`✓ Full Engineering Hardening suite: ${tests.length}/${tests.length} test programs passed`);

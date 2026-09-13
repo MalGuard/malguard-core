@@ -18,12 +18,19 @@ function Invoke-CheckedProcess {
     [Parameter(Mandatory=$true)][string]$FilePath,
     [Parameter(Mandatory=$false)][string[]]$ArgumentList = @(),
     [Parameter(Mandatory=$true)][string]$WorkingDirectory,
-    [int]$ExpectedExitCode = 0
+    [int]$ExpectedExitCode = 0,
+    [int]$TimeoutSeconds = 180
   )
   $stdout = [System.IO.Path]::GetTempFileName()
   $stderr = [System.IO.Path]::GetTempFileName()
   try {
-    $p = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $p = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    if (-not $p.WaitForExit($TimeoutSeconds * 1000)) {
+      # Kill only the synthetic validation process tree started by this harness.
+      & taskkill.exe /PID $p.Id /T /F *> $null
+      throw "process timeout: $FilePath exceeded ${TimeoutSeconds}s"
+    }
+    $p.WaitForExit()
     $out = Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue
     $err = Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue
     if ($p.ExitCode -ne $ExpectedExitCode) {
@@ -108,7 +115,7 @@ try {
   if (-not $SkipRegression) {
     $check = New-Check 'full_regression_suite'
     try {
-      $reg = Invoke-CheckedProcess -FilePath 'node.exe' -ArgumentList @('tests/run-all.js') -WorkingDirectory $root
+      $reg = Invoke-CheckedProcess -FilePath 'node.exe' -ArgumentList @('tests/run-all.js') -WorkingDirectory $root -TimeoutSeconds 300
       $check.pass = $true
       $check.detail = (($reg.stdout -split "`r?`n") | Select-Object -Last 3) -join "`n"
     } catch {
@@ -149,7 +156,7 @@ try {
     $check = New-Check 'sandbox_native_acceptance'
     $sandboxReportPath = Join-Path $buildRoot 'sandbox-acceptance.json'
     try {
-      $runner = Invoke-CheckedProcess -FilePath 'node.exe' -ArgumentList @('tools/windows-acceptance-runner.js','--probe',$probeExe,'--report',$sandboxReportPath) -WorkingDirectory $root
+      $runner = Invoke-CheckedProcess -FilePath 'node.exe' -ArgumentList @('tools/windows-acceptance-runner.js','--probe',$probeExe,'--report',$sandboxReportPath) -WorkingDirectory $root -TimeoutSeconds 60
       $sandbox = Get-Content -LiteralPath $sandboxReportPath -Raw | ConvertFrom-Json
       $check.pass = ($sandbox.pass -eq $true)
       $check.detail = $sandbox
