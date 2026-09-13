@@ -1,0 +1,54 @@
+name: MalGuard Windows Native Acceptance
+
+on:
+  push:
+    branches:
+      - dev/current-malguard
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-native-acceptance:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Record Windows runner and toolchain
+        shell: pwsh
+        run: |
+          Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+          Write-Host "Node: $(node --version)"
+          Write-Host "CMake:"
+          cmake --version
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          if (Test-Path -LiteralPath $vswhere) {
+            Write-Host "MSVC installation:"
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion
+          } else {
+            throw 'vswhere.exe was not found'
+          }
+
+      - name: Run existing Windows Acceptance Harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $report = Join-Path $env:RUNNER_TEMP 'malguard-windows-acceptance-report.json'
+          & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\tools\windows-acceptance.ps1 -ProjectRoot (Get-Location).Path -ReportPath $report
+          $exitCode = $LASTEXITCODE
+          if (Test-Path -LiteralPath $report) {
+            Write-Host '--- Windows acceptance report ---'
+            Get-Content -LiteralPath $report -Raw
+          }
+          if ($exitCode -ne 0) {
+            throw "Windows Acceptance Harness failed with exit code $exitCode"
+          }
