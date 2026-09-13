@@ -17,6 +17,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Preserve repository line endings
+        shell: pwsh
+        run: |
+          git config --local core.autocrlf false
+          git -c core.autocrlf=false reset --hard HEAD
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
