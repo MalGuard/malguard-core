@@ -42,12 +42,6 @@ jobs:
           cmake --build $probeBuild --config Release
           if ($LASTEXITCODE -ne 0) { throw 'containment probe native build failed' }
 
-          $serviceBuild = Join-Path $buildRoot 'service'
-          cmake -S (Join-Path $root 'native/windows-service') -B $serviceBuild -A x64
-          if ($LASTEXITCODE -ne 0) { throw 'Windows Service CMake configure failed' }
-          cmake --build $serviceBuild --config Release
-          if ($LASTEXITCODE -ne 0) { throw 'Windows Service native build failed' }
-
           $probe = Get-ChildItem -LiteralPath $probeBuild -Filter 'MalGuardSandboxContainmentProbe.exe' -File -Recurse | Select-Object -First 1
           if (-not $probe) { throw 'containment probe executable was not produced' }
           $probeOutput = (& $probe.FullName '--self-test-json') -join [Environment]::NewLine
@@ -61,6 +55,18 @@ jobs:
             if ($probeReport.$key -ne $true) { throw "native containment check failed: $key" }
           }
 
+          $serviceBuildFailure = $null
+          try {
+            $serviceBuild = Join-Path $buildRoot 'service'
+            cmake -S (Join-Path $root 'native/windows-service') -B $serviceBuild -A x64
+            if ($LASTEXITCODE -ne 0) { throw 'Windows Service CMake configure failed' }
+            cmake --build $serviceBuild --config Release
+            if ($LASTEXITCODE -ne 0) { throw 'Windows Service native build failed' }
+          } catch {
+            $serviceBuildFailure = $_.Exception.Message
+            Write-Host "::error::$serviceBuildFailure"
+          }
+
           $report = Join-Path $env:RUNNER_TEMP 'malguard-windows-native-diagnostics.json'
           & node (Join-Path $root 'tools/windows-acceptance-runner.js') '--probe' $probe.FullName '--report' $report
           $runnerExit = $LASTEXITCODE
@@ -71,11 +77,13 @@ jobs:
             if ($data.selfTest.nativeContainment.ok -ne $true) { throw 'existing runner did not accept native containment' }
             if ($data.selfTest.isolationSelfTest.code -eq 'WINDOWS_SANDBOX_UNAVAILABLE') {
               Write-Host 'PENDING — REQUIRES WINDOWS HOST WITH WINDOWS SANDBOX / NESTED VIRTUALIZATION'
-              exit 0
-            }
-            if ($runnerExit -ne 0 -or $data.pass -ne $true) {
+            } elseif ($runnerExit -ne 0 -or $data.pass -ne $true) {
               throw "existing Windows acceptance runner failed with exit $runnerExit"
             }
           } else {
             throw 'existing Windows acceptance runner did not produce a report'
+          }
+
+          if ($serviceBuildFailure) {
+            throw "Windows Service compilation failed: $serviceBuildFailure"
           }
