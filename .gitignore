@@ -1,28 +1,15 @@
-# OS / editor junk
 .DS_Store
 Thumbs.db
-*.swp
+*.log
 *.tmp
-
-# Node / tooling
-node_modules/
-npm-debug.log*
-
-# Local build and coverage output
-coverage/
-dist/
-build/
-
-# Environment and secret-bearing files
+*.swp
 .env
 .env.*
 !.env.example
-*.pem
-*.key
-*.p12
-*.pfx
-
-# Local archives and scratch output
-*.log
-*.bak
-*.orig
+node_modules/
+coverage/
+dist/
+build/
+.vercel/
+.idea/
+.vscode/

@@ -1,0 +1,13 @@
+MalGuard Final Security Engineering Audit v1.1.0
+
+Security changes:
+- Fixed worker-client initialization race with scan reservation.
+- FREE no longer emits SAFE when official rules coverage is degraded.
+- PRO no longer emits base SAFE when MultiLayerSecurity is unavailable.
+- Worker result envelopes validate verdict/mode/app version.
+- Engine and ArchiveEntryReader re-check actual ArrayBuffer size.
+- Invalid scan modes are rejected instead of normalized.
+- Added live Self-Test surface and integrity regression.
+- Expanded adversarial fuzzing, worker crash/timeout/race coverage and mutation testing.
+
+No UI redesign was performed. See FINAL-SECURITY-AUDIT.txt.

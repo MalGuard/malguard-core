@@ -1,0 +1,16 @@
+MalGuard Desktop 0.2.0-dev
+
+Implemented product code, not documentation-only:
+- localhost-only desktop service
+- Scanner + Engine Test UI
+- real scanner-core bridge
+- Windows user-space Guard integration
+- quarantine + integrity-checked restore
+- managed scan-before-release installs
+- incident attribution
+- sandbox isolation plumbing self-test
+- fail-closed refusal to execute untrusted samples without a hardened OS backend
+
+Validation: 16/16 Engineering Hardening test programs PASS on 2026-09-13.
+
+Important: This is not yet a signed Windows installer/Windows Service and the sandbox does not detonate arbitrary untrusted samples. Those remain release blockers.

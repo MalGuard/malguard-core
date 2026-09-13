@@ -1,0 +1,442 @@
+[
+  {
+    "file": "benign-gta-menu.lua",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "mustNot": "malicious"
+  },
+  {
+    "file": "benign-config-read.lua",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "mustNot": "malicious",
+    "category": "filesystem_access"
+  },
+  {
+    "file": "benign-network-status.lua",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "c2_networking"
+  },
+  {
+    "file": "benign-unicode.lua",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "mustNot": "malicious"
+  },
+  {
+    "file": "benign-helper-command.lua",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "command_execution"
+  },
+  {
+    "file": "benign-gta-script.cs",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "mustNot": "malicious"
+  },
+  {
+    "file": "benign-config.cs",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "mustNot": "malicious",
+    "category": "filesystem_access"
+  },
+  {
+    "file": "benign-http.cs",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "c2_networking"
+  },
+  {
+    "file": "benign-comments.lua",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "mustNot": "malicious"
+  },
+  {
+    "file": "benign-comments.cs",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "mustNot": "malicious"
+  },
+  {
+    "file": "suspicious-encoded-command.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "command_execution"
+  },
+  {
+    "file": "suspicious-download-execute.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "network_download"
+  },
+  {
+    "file": "suspicious-dynamic-load.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "dynamic_execution"
+  },
+  {
+    "file": "suspicious-persistence.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "persistence"
+  },
+  {
+    "file": "suspicious-lua-dynamic.lua",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "dynamic_execution"
+  },
+  {
+    "file": "suspicious-lua-command-network.lua",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "command_execution"
+  },
+  {
+    "file": "malicious-synthetic-credential-exfil.cs",
+    "allowedVerdicts": [
+      "malicious"
+    ],
+    "category": "credential_theft"
+  },
+  {
+    "file": "malicious-synthetic-destruction.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "file_destruction"
+  },
+  {
+    "file": "malicious-synthetic-telegram.lua",
+    "allowedVerdicts": [
+      "malicious"
+    ],
+    "category": "credential_theft"
+  },
+  {
+    "file": "edge-invalid-utf8.cs",
+    "allowedVerdicts": [
+      "invalid"
+    ],
+    "errorCode": "invalid_utf8"
+  },
+  {
+    "file": "edge-binary.lua",
+    "allowedVerdicts": [
+      "invalid"
+    ],
+    "errorCode": "binary_like_input"
+  },
+  {
+    "file": "edge-empty.lua",
+    "allowedVerdicts": [
+      "invalid"
+    ],
+    "errorCode": "empty_file"
+  },
+  {
+    "file": "benign-event-loop.lua",
+    "allowedVerdicts": [
+      "safe"
+    ]
+  },
+  {
+    "file": "benign-json-config.lua",
+    "allowedVerdicts": [
+      "safe"
+    ]
+  },
+  {
+    "file": "benign-local-file.lua",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "category": "filesystem_access"
+  },
+  {
+    "file": "benign-ui.lua",
+    "allowedVerdicts": [
+      "safe"
+    ]
+  },
+  {
+    "file": "benign-vector.lua",
+    "allowedVerdicts": [
+      "safe"
+    ]
+  },
+  {
+    "file": "benign-httpclient.cs",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "c2_networking"
+  },
+  {
+    "file": "benign-file-write.cs",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "mustNot": "malicious",
+    "category": "filesystem_access"
+  },
+  {
+    "file": "benign-process-list.cs",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "system_recon"
+  },
+  {
+    "file": "benign-gta-tick.cs",
+    "allowedVerdicts": [
+      "safe"
+    ]
+  },
+  {
+    "file": "benign-comments2.cs",
+    "allowedVerdicts": [
+      "safe"
+    ]
+  },
+  {
+    "file": "benign-comments2.lua",
+    "allowedVerdicts": [
+      "safe"
+    ]
+  },
+  {
+    "file": "benign-base64-label.cs",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious"
+  },
+  {
+    "file": "suspicious-lua-popen.lua",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "command_execution"
+  },
+  {
+    "file": "suspicious-lua-loadstring.lua",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "dynamic_execution"
+  },
+  {
+    "file": "suspicious-lua-http-load.lua",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "dynamic_execution"
+  },
+  {
+    "file": "suspicious-lua-delete.lua",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "file_destruction"
+  },
+  {
+    "file": "suspicious-cs-powershell.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "command_execution"
+  },
+  {
+    "file": "suspicious-cs-download.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "network_download"
+  },
+  {
+    "file": "suspicious-cs-download-exec2.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "network_download"
+  },
+  {
+    "file": "suspicious-cs-registry.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "persistence"
+  },
+  {
+    "file": "suspicious-cs-assembly-load.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "dynamic_execution"
+  },
+  {
+    "file": "suspicious-cs-base64-load.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "dynamic_execution"
+  },
+  {
+    "file": "edge-recon-network.cs",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "c2_networking"
+  },
+  {
+    "file": "malicious-credential-webhook2.cs",
+    "allowedVerdicts": [
+      "malicious"
+    ],
+    "category": "credential_theft"
+  },
+  {
+    "file": "malicious-discord-token-telegram.lua",
+    "allowedVerdicts": [
+      "malicious"
+    ],
+    "category": "credential_theft"
+  },
+  {
+    "file": "malicious-shadow-delete.cs",
+    "allowedVerdicts": [
+      "suspicious",
+      "malicious"
+    ],
+    "category": "file_destruction"
+  },
+  {
+    "file": "malicious-wallet-exfil.lua",
+    "allowedVerdicts": [
+      "malicious"
+    ],
+    "category": "credential_theft"
+  },
+  {
+    "file": "edge-whitespace.lua",
+    "allowedVerdicts": [
+      "safe",
+      "invalid"
+    ]
+  },
+  {
+    "file": "edge-long-line.lua",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious"
+  },
+  {
+    "file": "edge-bom.lua",
+    "allowedVerdicts": [
+      "safe"
+    ]
+  },
+  {
+    "file": "edge-case-extension.LUA",
+    "allowedVerdicts": [
+      "safe"
+    ]
+  },
+  {
+    "file": "edge-url-only.cs",
+    "allowedVerdicts": [
+      "safe"
+    ],
+    "mustNot": "malicious"
+  },
+  {
+    "file": "edge-pastebin.cs",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "c2_networking"
+  },
+  {
+    "file": "edge-vmware-string.lua",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "anti_analysis"
+  },
+  {
+    "file": "edge-whoami-string.cs",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "system_recon"
+  },
+  {
+    "file": "edge-dofile.lua",
+    "allowedVerdicts": [
+      "safe",
+      "suspicious"
+    ],
+    "mustNot": "malicious",
+    "category": "dynamic_execution"
+  }
+]

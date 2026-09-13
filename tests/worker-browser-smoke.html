@@ -1,0 +1,43 @@
+<!doctype html>
+<html><body>
+<pre id="out">RUNNING</pre>
+<script src="../scan-worker-client.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById('out');
+  const report = [];
+  function ok(name, cond, detail) {
+    if (!cond) throw new Error(name + ' failed: ' + (detail || ''));
+    report.push('PASS ' + name + (detail ? ' — ' + detail : ''));
+  }
+  try {
+    const lua = new File(['print("GTA V benign worker test")'], 'worker-benign.lua', {type:'text/plain'});
+    const r1 = await scanFileInWorker(lua, 'pro');
+    ok('benign Lua uses worker', r1.execution && r1.execution.context === 'web_worker', JSON.stringify(r1.execution));
+    ok('benign Lua verdict', r1.finalVerdict === 'safe', r1.finalVerdict);
+
+    const suspicious = new File([
+      'class T { void Go() { var p = new ProcessStartInfo(); p.FileName = "powershell.exe"; p.Arguments = "-EncodedCommand SQBFAFgA"; Process.Start(p); } }'
+    ], 'worker-suspicious.cs', {type:'text/plain'});
+    const r2 = await scanFileInWorker(suspicious, 'pro');
+    ok('C# uses worker', r2.execution && r2.execution.context === 'web_worker', JSON.stringify(r2.execution));
+    ok('suspicious C# is not safe', r2.finalVerdict !== 'safe', r2.finalVerdict);
+
+    const zipResp = await fetch('fixtures/gtav-benign-scripts.zip');
+    const zipBuf = await zipResp.arrayBuffer();
+    const zip = new File([zipBuf], 'gtav-benign-scripts.zip', {type:'application/zip'});
+    const r3 = await scanFileInWorker(zip, 'pro');
+    ok('ZIP uses worker', r3.execution && r3.execution.context === 'web_worker', JSON.stringify(r3.execution));
+    ok('benign script ZIP is safe', r3.finalVerdict === 'safe', r3.finalVerdict);
+    ok('ZIP scripts analyzed', Array.isArray(r3.archiveScriptResults) && r3.archiveScriptResults.length === 2, String(r3.archiveScriptResults && r3.archiveScriptResults.length));
+
+    out.dataset.status = 'pass';
+    out.textContent = report.join('\n');
+    if (window.MalGuardWorkerScanner) window.MalGuardWorkerScanner.shutdown();
+  } catch (err) {
+    out.dataset.status = 'fail';
+    out.textContent = 'FAIL\n' + (err && err.stack ? err.stack : String(err));
+  }
+})();
+</script>
+</body></html>

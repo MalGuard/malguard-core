@@ -1,0 +1,22 @@
+MalGuard / GTA Guard
+Build: Final Security Engineering Audit v1.1.1
+Audit verdict: CONDITIONAL PASS (pending live target-browser result)
+Runtime contract: v1.1.0
+App integration: v1.5.1
+Worker host: v1.1.0
+Worker client: v1.2.0
+Self-Test: v1.1.0
+ScriptAnalyzer: v1.0.0
+ArchiveInspector: v1.1.0
+ArchiveEntryReader: v1.1.1
+Engine: v2.2.2
+Rules compatibility: v2.2.0
+Date: 2026-09-12
+
+v1.1.1 is a validation-harness update. Core engine/runtime versions are unchanged.
+Added an on-device HTTPS browser validation page for iPhone/Safari and other real browsers:
+  tests/iphone-browser-audit.html
+
+The page computes live PASS/FAIL results for Self-Test, Dedicated Worker initialization/isolation, benign/suspicious scanning, ZIP fixture scanning, scan-start concurrency rejection, abort/recovery, and browser worker crash/hard-termination semantics. It does not hard-code a PASS result.
+
+Scope exclusions preserved: no MalwareBazaar integration, no URLhaus expansion, no final visual redesign, no GitHub deployment.

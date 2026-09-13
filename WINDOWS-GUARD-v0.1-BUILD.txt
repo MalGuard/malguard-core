@@ -1,0 +1,22 @@
+MalGuard Windows Guard v0.1 user-space prototype
+
+Status: local engineering test PASS
+Full suite: 15/15 test programs passed
+
+Implemented:
+- recursive user-space folder watcher
+- core/agent handshake contract
+- SHA-256 identity revalidation around scans
+- fail-closed quarantine for SUSPICIOUS/MALICIOUS/INCONCLUSIVE
+- integrity manifest and explicit restore
+- managed install staging for scan-before-release
+- responsible-file/mod incident attribution
+
+Not claimed:
+- Windows kernel/minifilter interception
+- guaranteed pre-load blocking for files copied directly into watched folders
+- Windows Service packaging
+- code signing
+- behavioral sandbox
+
+The out-of-band watcher remains subject to a user-space event race. Managed installs have the stronger scan-before-release path.

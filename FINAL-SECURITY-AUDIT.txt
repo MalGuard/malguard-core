@@ -1,0 +1,86 @@
+MalGuard / GTA Guard — FINAL SECURITY ENGINEERING AUDIT
+Audit date: 2026-09-12
+Source actually audited: uploaded MalGuard-GTA-Guard-Engineering-Hardening-v1.0.0.zip
+Note: the user referred to Engineering-Acceptance-v1.3.0, but the uploaded sandbox artifact was the Hardening-v1.0.0 ZIP. This audit continued from the bytes actually supplied; it did not rebuild the project from scratch.
+
+FINAL VERDICT: CONDITIONAL PASS
+
+Why not ENGINEERING PASS
+------------------------
+The complete automated suite passes, including adversarial fuzzing and mutation checks. However, a real Chromium browser smoke run could not be completed in this execution environment: headless Chromium timed out before producing DOM output. Worker behavior is therefore covered by an isolated WorkerGlobalScope simulation and strict client tests, but not by a successful real-browser run in this audit. That remaining runtime-validation gap prevents an unconditional ENGINEERING PASS.
+
+Security defects found and fixed
+--------------------------------
+1) Worker client start-up concurrency race (important)
+   Two scan() calls could both pass the active-scan check while the shared Worker was still initializing. After await ensureWorker(), the second call could overwrite active state, causing request/result confusion and orphaned timeout behavior.
+   FIX: added a scan-start reservation gate across worker initialization; hasActiveScan includes the reserved state; adversarial race regression added.
+
+2) FREE fail-open on degraded rules coverage (important)
+   Engine could return SAFE while rulesStatus was fallback/incompatible. FREE integration forwarded that SAFE unchanged even though coverage was explicitly degraded.
+   FIX: SAFE + non-official rules is downgraded to INCONCLUSIVE with hardeningError=degraded_rules_coverage. Suspicious/malicious are never downgraded.
+
+3) PRO fail-open when MultiLayerSecurity is missing (important)
+   The integration previously returned the base Engine verdict. A base SAFE could therefore survive loss of the required Pro layer.
+   FIX: missing MultiLayer preserves malicious/suspicious, but SAFE/invalid/other base outcomes become INCONCLUSIVE with hardeningError=multilayer_unavailable.
+
+4) Worker result envelope under-validated (important boundary hardening)
+   The client checked resultSchemaVersion but did not strictly validate finalVerdict, mode, and app integration version before resolving the result.
+   FIX: result verdict must be in the runtime contract, mode must be free/pro, and appIntegrationVersion must match the pinned contract.
+
+5) Declared-size trust at direct Engine / ArchiveEntryReader boundaries (resource/bounds hardening)
+   Worker/File APIs normally provide trustworthy size metadata, but direct File-like/module calls could declare a small size and return a larger ArrayBuffer.
+   FIX: Engine and ArchiveEntryReader re-check actual byte length after arrayBuffer(); invalid/non-finite Engine size metadata is rejected before parsing.
+
+6) Invalid-mode normalization risk (unsafe assumption between layers)
+   Public integration/client boundaries now require exactly free or pro rather than silently treating unknown modes as FREE. Regression coverage verifies INVALID_MODE behavior.
+
+7) Missing real Self-Test surface
+   The build did not provide a user-invokable health check for the major engine components.
+   FIX: added self-test.js and a minimal Self-Test section without redesigning the application. It executes live component probes for contract/module versions, ScriptAnalyzer benign/binary controls, Engine invalid-input fail-closed behavior, malformed ZIP fail-closed behavior, invalid mode rejection, and Worker readiness. PASS is computed from probe results; it is not hard-coded. A test deliberately weakens ScriptAnalyzer and confirms Self-Test becomes FAIL.
+
+Adversarial / regression testing
+--------------------------------
+Automated suite after fixes:
+- Build/load-order/schema/syntax validation: PASS
+- ScriptAnalyzer unit/integration assertions: PASS
+- Regression corpus: 58/58 PASS
+- Quality benchmark: 0 malicious false positives among 22 benign-labeled cases; 1 suspicious among those 22; 0 SAFE escapes among 23 risk-labeled cases
+- Detector routing/packaging regression: 13/13 PASS
+- Malformed/random fuzz: 500 random cases PASS without uncaught parser failure
+- Mutated ZIP fuzz: 500 mutated ZIP cases PASS without uncaught parser failure
+- PE adversarial fuzz: 600 randomized PE-shaped cases PASS; malformed PE never escaped SAFE
+- Performance budget: 1 MiB-class benign Lua completed within budget without timeout/malicious false positive
+- Worker host: boot/version/schema/input/concurrency PASS
+- Worker client: isolation/protocol/start-race/crash/timeout/abort PASS
+- Final fail-closed invariants: PASS
+- Targeted security mutation testing: 3/3 fail-open guard mutants killed
+- ScriptAnalyzer mutation sensitivity: forced-SAFE scoring mutant killed
+- Self-Test integrity: weakened analyzer causes Self-Test FAIL
+
+The final 13-program suite was run three consecutive times after the final code changes and passed all three runs.
+
+Remaining limitations
+---------------------
+- No successful real-browser Chromium smoke execution in this audit environment; Chromium timed out before DOM output. This is the primary condition on the PASS.
+- Authenticode verification is not implemented.
+- Trustworthy PE checksum validation is not implemented.
+- 7z/RAR/RPF deep extraction is not implemented.
+- Nested archive recursion is not implemented; nested active content prevents SAFE.
+- Script analysis is static/heuristic, not compiler/AST or behavioral sandbox analysis.
+- The corpus is still small compared with production malware/benign diversity; false negatives outside the present corpus remain possible.
+- Browser memory limits vary by device. Hard byte/count/time caps reduce risk but do not prove absence of memory pressure on low-memory devices.
+- Cooperative analyzer time budgets cannot preempt synchronous CPU work by themselves; the Dedicated Worker hard timeout provides the browser-level termination boundary.
+- A pre-existing hash-only URLhaus reputation path exists in the supplied source. This audit did not expand, redesign, or integrate URLhaus/MalwareBazaar threat intelligence, per scope.
+- No final visual redesign and no GitHub deployment work was performed.
+
+Readiness
+---------
+Ready to proceed to the next LOCAL security-engineering milestone, subject to completing a real-browser Worker/Self-Test smoke run on target browsers/devices. Not approved by this audit for threat-intelligence expansion, final deployment, or a claim of being bug-free/penetration-proof.
+
+v1.1.1 target-browser validation harness
+----------------------------------------
+A phone-friendly real-browser audit page was added at tests/iphone-browser-audit.html. This is test infrastructure only; no core detector/scoring behavior was changed in v1.1.1.
+
+The page reports each check visibly and emits a raw JSON report. It requires HTTPS (or localhost) and dynamically exercises the live Self-Test, Dedicated Worker boot/isolation contract, benign worker scan, suspicious C# non-SAFE invariant, real benign ZIP fixture analysis, worker scan-start concurrency rejection, abort/worker-recovery behavior, and browser-level Worker crash/termination semantics.
+
+The complete automated Node regression suite was rerun after adding this harness: 13/13 test programs PASS. The audit verdict remains CONDITIONAL PASS until the new page is actually executed successfully in a real target browser. Merely including the harness is not evidence of a browser PASS.

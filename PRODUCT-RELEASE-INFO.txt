@@ -1,0 +1,23 @@
+MalGuard Product Release Candidate
+Product version: 0.9.0-rc.1
+Date: 2026-09-12
+
+Purpose:
+- Frozen scanner-core baseline for private GitHub product development.
+- Foundation for Desktop Guard, real-time protection, quarantine/restore,
+  runtime mod attribution, behavioral sandboxing, secure updates and signing.
+
+Local validation at packaging:
+- Full Engineering Hardening suite: PASS 13/13
+- Regression corpus: PASS 58/58
+- Random malformed fuzz: PASS 500 cases
+- Mutated ZIP fuzz: PASS 500 cases
+- PE adversarial fuzz: PASS 600 cases
+- Worker race/crash/timeout/abort hardening: PASS
+- Security mutation tests: PASS
+- Self-Test integrity: PASS
+
+Acceptance status:
+- Scanner core is release-candidate quality for the defined engineering scope.
+- Public/commercial release is NOT yet declared.
+- Real browser acceptance and future product modules remain tracked work.

@@ -1,0 +1,25 @@
+MalGuard / GTA Guard — continuation notes
+Current milestone: FINAL SECURITY ENGINEERING AUDIT v1.1.1
+Verdict: CONDITIONAL PASS
+
+Continue from this directory/ZIP; do not rebuild from scratch.
+
+Primary runtime path:
+UI -> scan-worker-client.js -> Dedicated Worker -> scanFileWithMode()
+No silent main-thread fallback is permitted by the current contract.
+
+NEXT ACTION TO CLOSE THE CONDITIONAL PASS:
+Serve this directory over HTTPS and open:
+  /tests/iphone-browser-audit.html
+
+The page must finish with:
+  PASS — LIVE BROWSER VALIDATION
+and every individual check must be PASS with no uncaught errors in the Raw report.
+
+A screenshot alone is useful for quick review; the Raw report is the stronger artifact because it includes browser/origin and check details.
+
+Out of scope and not started/expanded:
+- MalwareBazaar integration
+- URLhaus threat-intelligence expansion
+- final visual redesign
+- GitHub deployment
