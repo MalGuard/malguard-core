@@ -189,14 +189,14 @@ class WindowsSandboxBackend {
         stderrBytes += chunk.length;
         if (stderrBytes > 64 * 1024) finish({ ok: false, code: 'CONTAINMENT_PROBE_STDERR_TOO_LARGE' });
       });
-      const timer = setTimeout(() => finish({ ok: false, code: 'CONTAINMENT_PROBE_TIMEOUT' }), 10000);
+      const timer = setTimeout(() => finish({ ok: false, code: 'CONTAINMENT_PROBE_TIMEOUT' }), 30000);
       child.once('error', error => finish({ ok: false, code: 'CONTAINMENT_PROBE_LAUNCH_FAILED', detail: error.message }));
       child.once('exit', (code) => {
         if (settled) return;
         let parsed;
         try { parsed = JSON.parse(stdout.trim()); }
         catch (_) { return finish({ ok: false, code: 'CONTAINMENT_PROBE_JSON_INVALID' }); }
-        const required = ['jobObjectCreated','cpuHardCapConfigured','memoryLimitConfigured','killOnCloseConfigured','processCreatedSuspended','assignedBeforeResume','childResumed','childTerminated'];
+        const required = ['jobObjectCreated','cpuHardCapConfigured','cpuEnforcementTested','cpuEnforcementPassed','memoryLimitConfigured','memoryEnforcementTested','memoryEnforcementPassed','activeProcessLimitConfigured','activeProcessLimitTested','activeProcessLimitPassed','killOnCloseConfigured','processCreatedSuspended','assignedBeforeResume','childResumed','childTerminated'];
         const ok = code === 0 && parsed && parsed.schemaVersion === '1.0.0' && parsed.ok === true && required.every(key => parsed[key] === true);
         this._acceptance.containment = ok;
         finish(ok ? { ok: true, details: parsed } : { ok: false, code: 'CONTAINMENT_PROBE_FAILED', details: parsed || null, exitCode: code });

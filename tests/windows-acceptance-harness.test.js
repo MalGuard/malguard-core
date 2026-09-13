@@ -19,11 +19,28 @@ const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller
   assert.match(ps1, /windows-acceptance-runner\.js/);
   assert.doesNotMatch(ps1, /--install/);
   assert.doesNotMatch(ps1, /Start-Service|New-Service|sc\.exe\s+create/i);
+  assert.match(ps1, /cpu_limit_enforcement/);
+  assert.match(ps1, /memory_limit_enforcement/);
+  assert.match(ps1, /active_process_limit_enforcement/);
 
   assert.match(runner, /allowExperimentalDetonation:\s*false/);
   assert.match(runner, /untrustedSamplesExecuted:\s*false/);
   assert.doesNotMatch(runner, /analyzeUntrustedSample\s*\(/);
   assert.doesNotMatch(runner, /\.analyze\s*\(/);
+
+  const backendSource = fs.readFileSync(path.join(root, 'desktop-app', 'sandbox', 'windows-sandbox-backend.js'), 'utf8');
+  for (const key of [
+    'cpuEnforcementTested',
+    'cpuEnforcementPassed',
+    'memoryEnforcementTested',
+    'memoryEnforcementPassed',
+    'activeProcessLimitConfigured',
+    'activeProcessLimitTested',
+    'activeProcessLimitPassed',
+  ]) {
+    assert.match(backendSource, new RegExp(key));
+  }
+  assert.match(backendSource, /CONTAINMENT_PROBE_TIMEOUT[^\n]*30000/);
 
   // Regression for the acceptance-gate bug: capabilities must be read again
   // after native probes complete, otherwise releaseReady can never become true.

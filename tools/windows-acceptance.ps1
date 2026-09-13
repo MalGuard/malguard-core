@@ -42,6 +42,35 @@ function Invoke-CheckedProcess {
   }
 }
 
+
+function Get-ContainmentSubChecks {
+  param([Parameter(Mandatory=$true)]$SandboxReport)
+  $items = @()
+  $selfTestProperty = $SandboxReport.PSObject.Properties['selfTest']
+  if ($null -eq $selfTestProperty -or $null -eq $selfTestProperty.Value) { return $items }
+  $nativeProperty = $selfTestProperty.Value.PSObject.Properties['nativeContainment']
+  if ($null -eq $nativeProperty -or $null -eq $nativeProperty.Value) { return $items }
+  $detailsProperty = $nativeProperty.Value.PSObject.Properties['details']
+  if ($null -eq $detailsProperty -or $null -eq $detailsProperty.Value) { return $items }
+  $details = $detailsProperty.Value
+
+  $map = @(
+    @{ name = 'job_assignment_before_resume'; property = 'assignedBeforeResume' },
+    @{ name = 'cpu_limit_enforcement'; property = 'cpuEnforcementPassed' },
+    @{ name = 'memory_limit_enforcement'; property = 'memoryEnforcementPassed' },
+    @{ name = 'active_process_limit_enforcement'; property = 'activeProcessLimitPassed' },
+    @{ name = 'forced_termination'; property = 'childTerminated' }
+  )
+  foreach ($entry in $map) {
+    $check = New-Check $entry.name
+    $property = $details.PSObject.Properties[$entry.property]
+    $check.pass = ($null -ne $property -and $property.Value -eq $true)
+    $check.detail = $details
+    $items += $check
+  }
+  return $items
+}
+
 function Configure-And-Build {
   param(
     [Parameter(Mandatory=$true)][string]$SourceDir,
@@ -158,12 +187,15 @@ try {
     try {
       $runner = Invoke-CheckedProcess -FilePath 'node.exe' -ArgumentList @('tools/windows-acceptance-runner.js','--probe',$probeExe,'--report',$sandboxReportPath) -WorkingDirectory $root -TimeoutSeconds 60
       $sandbox = Get-Content -LiteralPath $sandboxReportPath -Raw | ConvertFrom-Json
+      $report.checks += @(Get-ContainmentSubChecks -SandboxReport $sandbox)
       $check.pass = ($sandbox.pass -eq $true)
       $check.detail = $sandbox
       if (-not $check.pass) { throw 'Sandbox native acceptance did not reach releaseReady=true' }
     } catch {
       if (Test-Path -LiteralPath $sandboxReportPath) {
-        $check.detail = Get-Content -LiteralPath $sandboxReportPath -Raw | ConvertFrom-Json
+        $sandbox = Get-Content -LiteralPath $sandboxReportPath -Raw | ConvertFrom-Json
+        $check.detail = $sandbox
+        $report.checks += @(Get-ContainmentSubChecks -SandboxReport $sandbox)
       } elseif (-not $check.detail) {
         $check.detail = $_.Exception.Message
       }

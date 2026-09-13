@@ -11,12 +11,21 @@ const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller
   assert.match(source, /JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP/);
   assert.match(source, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
   assert.match(source, /JOB_OBJECT_LIMIT_PROCESS_MEMORY/);
+  assert.match(source, /JOB_OBJECT_LIMIT_ACTIVE_PROCESS/);
   assert.match(source, /CREATE_SUSPENDED/);
   assert.match(source, /AssignProcessToJobObject/);
   assert.match(source, /ResumeThread/);
   assert.match(source, /TerminateJobObject/);
   assert.match(source, /GetModuleFileNameW\(nullptr/);
-  assert.match(source, /--child-busy/);
+  assert.match(source, /--child-busy-long/);
+  assert.match(source, /--child-memory-96/);
+  assert.match(source, /--child-sleep-long/);
+  assert.match(source, /cpuEnforcementTested/);
+  assert.match(source, /cpuEnforcementPassed/);
+  assert.match(source, /memoryEnforcementTested/);
+  assert.match(source, /memoryEnforcementPassed/);
+  assert.match(source, /activeProcessLimitTested/);
+  assert.match(source, /activeProcessLimitPassed/);
   assert.doesNotMatch(source, /argv\[2\]/, 'containment probe must not accept an arbitrary executable path');
 
   const backend = new WindowsSandboxBackend();
