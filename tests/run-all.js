@@ -5,6 +5,7 @@ const tests=[
  'build-validation.test.js',
  'packaging-foundation.test.js',
  'secure-update.test.js',
+ 'entitlement-gate.test.js',
  'script-analyzer.test.js',
  'regression-corpus.test.js',
  'quality-benchmark.test.js',
