@@ -1,0 +1,124 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const ROOT = path.resolve(__dirname, '..');
+const DIST = path.join(ROOT, 'dist');
+const desktopVersion = fs.readFileSync(path.join(ROOT, 'DESKTOP-VERSION'), 'utf8').trim();
+const OUT = path.join(DIST, `malguard-desktop-${desktopVersion}`);
+
+const ROOT_FILES = [
+  'LICENSE',
+  'SECURITY.md',
+  'VERSION',
+  'DESKTOP-VERSION',
+  'rules.json',
+  'malguard-contract.js',
+  'engine.js',
+  'multilayer.js',
+  'gta-mod-detector.js',
+  'archive-inspector.js',
+  'archive-entry-reader.js',
+  'script-analyzer.js',
+];
+
+const RUNTIME_DIRS = [
+  'desktop-app',
+  'desktop-guard',
+];
+
+const FORBIDDEN_BASENAMES = new Set([
+  '.env',
+  'abusech-auth.dpapi',
+]);
+const FORBIDDEN_EXTENSIONS = new Set(['.pem', '.p12', '.pfx', '.key']);
+
+function rejectSecretLikePath(relativePath) {
+  const base = path.basename(relativePath).toLowerCase();
+  const ext = path.extname(base);
+  if (FORBIDDEN_BASENAMES.has(base) || base.startsWith('.env.')) {
+    throw new Error(`Refusing to package secret-like file: ${relativePath}`);
+  }
+  if (FORBIDDEN_EXTENSIONS.has(ext)) {
+    throw new Error(`Refusing to package credential material: ${relativePath}`);
+  }
+}
+
+function ensureRegularFile(source, relativePath) {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) throw new Error(`Refusing symlink in package: ${relativePath}`);
+  if (!stat.isFile()) throw new Error(`Expected regular file: ${relativePath}`);
+}
+
+function copyFile(relativePath) {
+  rejectSecretLikePath(relativePath);
+  const source = path.join(ROOT, relativePath);
+  ensureRegularFile(source, relativePath);
+  const target = path.join(OUT, relativePath);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(source, target);
+}
+
+function copyTree(relativeDir) {
+  const sourceDir = path.join(ROOT, relativeDir);
+  const stat = fs.lstatSync(sourceDir);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Unsafe runtime directory: ${relativeDir}`);
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const relativePath = path.join(relativeDir, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`Refusing symlink in package: ${relativePath}`);
+    if (entry.isDirectory()) copyTree(relativePath);
+    else if (entry.isFile()) copyFile(relativePath);
+    else throw new Error(`Unsupported filesystem entry: ${relativePath}`);
+  }
+}
+
+function walkFiles(dir, base = dir, out = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walkFiles(full, base, out);
+    else if (entry.isFile()) out.push(path.relative(base, full).split(path.sep).join('/'));
+  }
+  return out;
+}
+
+function sha256(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+fs.rmSync(OUT, { recursive: true, force: true });
+fs.mkdirSync(OUT, { recursive: true });
+
+for (const file of ROOT_FILES) copyFile(file);
+for (const dir of RUNTIME_DIRS) copyTree(dir);
+
+const runtimePackage = {
+  name: 'malguard-desktop-runtime',
+  version: desktopVersion.replace(/-dev$/, ''),
+  private: true,
+  type: 'commonjs',
+  engines: { node: '>=20' },
+  scripts: { start: 'node desktop-app/server.js' },
+};
+fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify(runtimePackage, null, 2) + '\n', 'utf8');
+
+const files = walkFiles(OUT)
+  .filter(file => file !== 'SHA256SUMS.txt')
+  .sort();
+const sums = files.map(file => `${sha256(path.join(OUT, file))}  ${file}`).join('\n') + '\n';
+fs.writeFileSync(path.join(OUT, 'SHA256SUMS.txt'), sums, 'utf8');
+
+const manifest = {
+  schemaVersion: '1.0.0',
+  product: 'MalGuard Desktop',
+  desktopVersion,
+  createdAt: new Date().toISOString(),
+  entrypoint: 'desktop-app/server.js',
+  node: '>=20',
+  fileCount: files.length + 1,
+};
+fs.writeFileSync(path.join(OUT, 'PACKAGE-MANIFEST.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+
+console.log(`Portable package created: ${path.relative(ROOT, OUT)}`);
+console.log(`Runtime files: ${manifest.fileCount}`);
