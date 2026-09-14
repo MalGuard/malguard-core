@@ -14,6 +14,7 @@ const { SettingsStore } = require('./settings-store.js');
 const { ProtectedFolderAclGate } = require('../desktop-guard/windows-agent/acl-protection.js');
 const { ThreatIntelService } = require('./threat-intel/service.js');
 const { ModelScanPipelineManager } = require('./pro-scan-pipeline.js');
+const { EntitlementGate } = require('./entitlement/entitlement-gate.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC = path.join(__dirname, 'public');
@@ -23,6 +24,7 @@ const threatIntel = new ThreatIntelService();
 const scanner = new ScannerBridge({ threatIntel });
 const sandbox = new SandboxController({ allowExperimentalDetonation: process.env.MALGUARD_EXPERIMENTAL_SANDBOX === '1' });
 const modelPipeline = new ModelScanPipelineManager({ scanner, sandbox });
+const entitlementGate = new EntitlementGate();
 
 function json(res, status, body) {
   const data = Buffer.from(JSON.stringify(body, null, 2));
@@ -102,9 +104,17 @@ async function applySettings(nextSettings) {
 function normalizeVerdict(result) {
   const v = result && result.finalVerdict;
   if (v === 'safe' || v === 'suspicious' || v === 'malicious' || v === 'inconclusive') return v;
-  // `invalid` means the scanner could not establish a trusted security verdict.
-  // The guard contract therefore treats it as INCONCLUSIVE/HOLD, never as a separate releasable state.
   return 'inconclusive';
+}
+
+function entitlementDenied(res, error) {
+  return json(res, 403, {
+    ok: false,
+    code: error.code || 'ENTITLEMENT_REQUIRED',
+    message: error.message,
+    requiredPlan: error.requiredPlan || null,
+    currentPlan: error.currentPlan || 'standard',
+  });
 }
 
 function ensureAgent() {
@@ -155,6 +165,7 @@ async function handler(req, res) {
         product: 'MalGuard Desktop',
         version: '0.6.0-dev',
         supportedModels: ['standard', 'plus', 'pro'],
+        entitlement: entitlementGate.status(),
         scanner: 'hardened-core-bridge',
         guardConfigured: config.watchRoots.length > 0,
         watching: !!(agent && agent.watcher && agent.watcher.active),
@@ -164,6 +175,10 @@ async function handler(req, res) {
         sandboxMode: process.env.MALGUARD_EXPERIMENTAL_SANDBOX === '1' ? 'windows-sandbox-experimental' : 'fail-closed-acceptance-pending',
         threatIntel: await threatIntel.status(),
       });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/entitlement/status') {
+      return json(res, 200, { ok: true, entitlement: entitlementGate.status() });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/threat-intel/status') {
@@ -200,10 +215,13 @@ async function handler(req, res) {
       const body = await readJson(req);
       if (typeof body.path !== 'string' || !body.path.trim()) return json(res, 400, { ok: false, code: 'PATH_REQUIRED' });
       try {
-        const session = modelPipeline.start(body.path, body.model);
-        return json(res, 202, { ok: true, session });
+        const model = body.model || 'standard';
+        const entitlement = entitlementGate.requireModel(model);
+        const session = modelPipeline.start(body.path, model);
+        return json(res, 202, { ok: true, entitlement: { plan: entitlement.plan, source: entitlement.source }, session });
       } catch (error) {
         if (error.code === 'INVALID_MODEL') return json(res, 400, { ok: false, code: error.code, message: error.message });
+        if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error);
         throw error;
       }
     }
@@ -215,12 +233,17 @@ async function handler(req, res) {
       return json(res, 200, { ok: true, session });
     }
 
-    // Backward-compatible API: the old product "Pro" scan is now called Plus.
     if (req.method === 'POST' && url.pathname === '/api/pro-scan/start') {
       const body = await readJson(req);
       if (typeof body.path !== 'string' || !body.path.trim()) return json(res, 400, { ok: false, code: 'PATH_REQUIRED' });
-      const session = modelPipeline.start(body.path, 'plus');
-      return json(res, 202, { ok: true, deprecated: true, mappedModel: 'plus', session });
+      try {
+        const entitlement = entitlementGate.requireModel('plus');
+        const session = modelPipeline.start(body.path, 'plus');
+        return json(res, 202, { ok: true, deprecated: true, mappedModel: 'plus', entitlement: { plan: entitlement.plan, source: entitlement.source }, session });
+      } catch (error) {
+        if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error);
+        throw error;
+      }
     }
     if (req.method === 'GET' && url.pathname === '/api/pro-scan/status') {
       const id = url.searchParams.get('id');
@@ -340,4 +363,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { startServer, handler, scanner, sandbox, modelPipeline, proPipeline: modelPipeline, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }) };
+module.exports = { startServer, handler, scanner, sandbox, modelPipeline, proPipeline: modelPipeline, entitlementGate, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }) };
