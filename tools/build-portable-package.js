@@ -103,22 +103,22 @@ const runtimePackage = {
 };
 fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify(runtimePackage, null, 2) + '\n', 'utf8');
 
-const files = walkFiles(OUT)
-  .filter(file => file !== 'SHA256SUMS.txt')
-  .sort();
-const sums = files.map(file => `${sha256(path.join(OUT, file))}  ${file}`).join('\n') + '\n';
-fs.writeFileSync(path.join(OUT, 'SHA256SUMS.txt'), sums, 'utf8');
-
+const preManifestFiles = walkFiles(OUT).sort();
 const manifest = {
   schemaVersion: '1.0.0',
   product: 'MalGuard Desktop',
   desktopVersion,
-  createdAt: new Date().toISOString(),
   entrypoint: 'desktop-app/server.js',
   node: '>=20',
-  fileCount: files.length + 1,
+  fileCount: preManifestFiles.length + 2,
 };
 fs.writeFileSync(path.join(OUT, 'PACKAGE-MANIFEST.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+
+const hashedFiles = walkFiles(OUT)
+  .filter(file => file !== 'SHA256SUMS.txt')
+  .sort();
+const sums = hashedFiles.map(file => `${sha256(path.join(OUT, file))}  ${file}`).join('\n') + '\n';
+fs.writeFileSync(path.join(OUT, 'SHA256SUMS.txt'), sums, 'utf8');
 
 console.log(`Portable package created: ${path.relative(ROOT, OUT)}`);
 console.log(`Runtime files: ${manifest.fileCount}`);
