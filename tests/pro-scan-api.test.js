@@ -4,6 +4,23 @@ const fs = require('fs');
 const os = require('os');
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
+
+function makeToken(privateKey, claims) {
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+  const signature = crypto.sign(null, Buffer.from(payload, 'utf8'), privateKey).toString('base64url');
+  return `${payload}.${signature}`;
+}
+
+const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+process.env.MALGUARD_ENTITLEMENT_PUBLIC_KEY_PEM = publicKey.export({ type: 'spki', format: 'pem' });
+process.env.MALGUARD_ENTITLEMENT_TOKEN = makeToken(privateKey, {
+  schemaVersion: '1.0.0',
+  subject: 'synthetic-api-test',
+  plan: 'pro',
+  expiresAt: Date.now() + 60_000,
+});
+
 const { startServer } = require('../desktop-app/server.js');
 
 function request(port, method, urlPath, body) {
@@ -43,29 +60,34 @@ async function waitSession(port,id){
   try {
     const port = server.address().port;
 
-    // Standard is a normal local scan.
+    const ent = await request(port,'GET','/api/entitlement/status');
+    assert.equal(ent.status,200);
+    assert.equal(ent.body.entitlement.valid,true);
+    assert.equal(ent.body.entitlement.plan,'pro');
+
     const safeFile = path.join(__dirname,'corpus','benign-config-read.lua');
     let started = await request(port,'POST','/api/model-scan/start',{path:safeFile,model:'standard'});
     assert.equal(started.status,202);
+    assert.equal(started.body.entitlement.plan,'pro');
     let session=await waitSession(port,started.body.session.id);
     assert.equal(session.model,'standard');
     assert.equal(session.finalResult.sandboxRequested,false);
 
-    // Plus is the former Pro deep scan and routes suspicious input to Sandbox.
     const suspiciousFile = path.join(__dirname,'corpus','suspicious-cs-powershell.cs');
     started = await request(port,'POST','/api/model-scan/start',{path:suspiciousFile,model:'plus'});
     assert.equal(started.status,202);
+    assert.equal(started.body.entitlement.plan,'pro');
     session=await waitSession(port,started.body.session.id);
     assert.equal(session.model,'plus');
     assert.equal(session.finalResult.sandboxRequested,true);
     assert.notEqual(session.finalResult.verdict,'safe');
     assert(session.events.some(e=>e.phase==='sandbox_decision'));
 
-    // Pro goes directly to Sandbox after identity preflight; no static_scan event exists.
     const jsFile=path.join(tempDir,'sample.js');
     await fs.promises.writeFile(jsFile,'console.log("sandbox probe fixture");\n');
     started = await request(port,'POST','/api/model-scan/start',{path:jsFile,model:'pro'});
     assert.equal(started.status,202);
+    assert.equal(started.body.entitlement.plan,'pro');
     session=await waitSession(port,started.body.session.id);
     assert.equal(session.model,'pro');
     assert.equal(session.finalResult.sandboxRequested,true);
@@ -78,14 +100,14 @@ async function waitSession(port,id){
     assert.equal(invalid.status,400);
     assert.equal(invalid.body.code,'INVALID_MODEL');
 
-    // Old /api/pro-scan remains compatible but is explicitly mapped to Plus.
     const legacy=await request(port,'POST','/api/pro-scan/start',{path:safeFile});
     assert.equal(legacy.status,202);
     assert.equal(legacy.body.deprecated,true);
     assert.equal(legacy.body.mappedModel,'plus');
+    assert.equal(legacy.body.entitlement.plan,'pro');
   } finally {
     await fs.promises.rm(tempDir,{recursive:true,force:true});
     await new Promise(resolve=>server.close(resolve));
   }
-  console.log('✓ Model scan API: Choose Model semantics, Plus routing, direct Pro Sandbox and legacy compatibility passed');
+  console.log('✓ Model scan API: signed entitlement, Standard/Plus/Pro semantics and legacy compatibility passed');
 })().catch(e=>{console.error(e.stack||e);process.exit(1)});
