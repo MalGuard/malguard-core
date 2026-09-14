@@ -3,6 +3,7 @@ const {spawnSync}=require('child_process');
 const path=require('path');
 const tests=[
  'build-validation.test.js',
+ 'packaging-foundation.test.js',
  'script-analyzer.test.js',
  'regression-corpus.test.js',
  'quality-benchmark.test.js',
