@@ -70,10 +70,10 @@
       <button id="selfTest">Run Self-Test</button>
       <pre id="selfOut">Not run.</pre>
 
-      <h2>Virtual Windows Validation Lab & Final Sandbox Acceptance</h2>
-      <p class="muted">Runs MalGuard's platform-neutral Virtual Windows Validation Lab, synthetic embedded validation, and validated MXC ProcessContainer evidence. The virtual lab tests mapped-folder rules, network-denial policy, process exit/timeout/crash recovery, telemetry binding/signals, output quota and cleanup. It can reach 100% engineering validation without pretending that WindowsSandbox.exe ran. Real Windows Sandbox remains a separate Pro behavioral runtime certification gate.</p>
+      <h2>Virtual Windows Validation Lab & Release Profiles</h2>
+      <p class="muted">Runs MalGuard's platform-neutral Virtual Windows Validation Lab, synthetic embedded validation, and validated MXC ProcessContainer evidence. The lab can prove 100% engineering coverage without pretending that WindowsSandbox.exe ran. Release readiness is capability-scoped: Standard can be 100% release-ready on the validated engineering surface, while Plus/Pro sandbox-dependent behavior stays locked until real Windows Sandbox runtime certification succeeds.</p>
       <button id="finalSandboxTest">Run Full Validation Lab</button>
-      <p id="finalSandboxSummary" class="warning">Not run. Engineering validation and real Windows Sandbox certification are reported separately.</p>
+      <p id="finalSandboxSummary" class="warning">Not run. Deployable release profile and full Windows Sandbox certification are reported separately.</p>
       <pre id="finalSandboxOut">No validation-lab result yet.</pre>
     </section>
   </main>
