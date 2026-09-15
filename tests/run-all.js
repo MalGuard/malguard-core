@@ -26,6 +26,7 @@ const tests=[
  'windows-agent.test.js',
  'runtime-containment.test.js',
  'sandbox-backend.test.js',
+ 'embedded-validation-lab.test.js',
  'sandbox-telemetry.test.js',
  'sandbox-native-containment-source.test.js',
  'windows-service-source.test.js',
