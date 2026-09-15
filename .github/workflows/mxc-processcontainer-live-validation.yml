@@ -1,0 +1,45 @@
+name: MalGuard MXC ProcessContainer Live Validation
+
+on:
+  push:
+    branches:
+      - dev/appcontainer-native-sandbox
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mxc-processcontainer-live-validation:
+    runs-on: windows-11-vs2026-arm
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Record Windows 11 runner
+        shell: pwsh
+        run: |
+          Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "Architecture: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
+          Write-Host "Node: $(node --version)"
+          Write-Host "npm: $(npm --version)"
+
+      - name: Install pinned Microsoft MXC SDK
+        shell: pwsh
+        run: |
+          npm install --no-save --package-lock=false @microsoft/mxc-sdk@0.8.0
+
+      - name: Run synthetic MXC ProcessContainer live acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node .\tests\mxc-processcontainer-live-validation.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "MXC ProcessContainer live validation failed with exit code $LASTEXITCODE"
+          }
