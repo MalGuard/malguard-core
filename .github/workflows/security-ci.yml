@@ -31,6 +31,26 @@ jobs:
             node --check "$file"
           done < <(find . -type f -name '*.js' -print0)
 
+      - name: Locate Chromium for live browser acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+          elif command -v google-chrome-stable >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v google-chrome-stable)" >> "$GITHUB_ENV"
+          elif command -v chromium >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v chromium)" >> "$GITHUB_ENV"
+          elif command -v chromium-browser >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v chromium-browser)" >> "$GITHUB_ENV"
+          else
+            echo "No Chrome/Chromium executable found on this runner" >&2
+            exit 1
+          fi
+
+      - name: Run real Chromium Worker and Self-Test acceptance
+        run: node tests/chromium-live-validation.js
+
       - name: Build portable release candidate
         run: node tools/build-portable-package.js
 
