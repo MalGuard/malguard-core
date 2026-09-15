@@ -74,7 +74,36 @@ $('stopGuard').onclick=async()=>{out('guardOut',await api('/api/guard/stop','POS
 $('enableGate').onclick=async()=>out('gateOut',await api('/api/access-gate/enable','POST',{}));
 $('disableGate').onclick=async()=>out('gateOut',await api('/api/access-gate/disable','POST',{}));
 $('gateStatus').onclick=async()=>out('gateOut',await api('/api/access-gate/status'));
-$('sandboxTest').onclick=async()=>out('sandboxOut',await api('/api/sandbox/self-test','POST',{}));
+
+function renderFinalSandboxAcceptance(report){
+ const releaseReady=!!(report&&report.releaseReady===true);
+ const backend=report&&report.windowsSandbox?report.windowsSandbox:null;
+ const available=!!(backend&&backend.available===true);
+ const summary=$('finalSandboxSummary');
+ if(releaseReady){
+   summary.textContent='CERTIFIED — real Windows Sandbox containment and isolation acceptance PASS.';
+ }else if(available){
+   summary.textContent='PENDING — Windows Sandbox is present, but one or more final acceptance gates did not pass.';
+ }else{
+   summary.textContent='PENDING — Windows Sandbox is not available on this host. No certification has been claimed.';
+ }
+ out('finalSandboxOut',report);
+}
+$('finalSandboxTest').onclick=async()=>{
+ const button=$('finalSandboxTest');
+ button.disabled=true;
+ $('finalSandboxSummary').textContent='Running synthetic-only final Sandbox acceptance…';
+ $('finalSandboxOut').textContent='Running…';
+ try{
+   const report=await api('/api/sandbox/self-test','POST',{});
+   renderFinalSandboxAcceptance(report);
+ }catch(e){
+   $('finalSandboxSummary').textContent='FAIL — final Sandbox acceptance request could not complete.';
+   out('finalSandboxOut',{ok:false,code:'FINAL_SANDBOX_ACCEPTANCE_UI_ERROR',message:e.message});
+ }finally{
+   button.disabled=false;
+ }
+};
 $('selfTest').onclick=async()=>out('selfOut',await api('/api/self-test','POST',{}));
 $('refreshQ').onclick=async()=>{const d=await api('/api/quarantine');const box=$('quarantine');box.innerHTML='';for(const q of d.entries||[]){const e=document.createElement('div');e.className='qitem';const t=document.createElement('div');t.textContent=`${q.responsibleFile||'file'} • ${q.verdict} • ${q.state}`;const p=document.createElement('div');p.className='muted';p.textContent=q.originalPath||'';e.append(t,p);if(q.state==='quarantined'){const b=document.createElement('button');b.textContent='Restore';b.onclick=async()=>{await api('/api/quarantine/restore','POST',{id:q.id});$('refreshQ').click()};e.append(b)}box.append(e)}};
 async function loadSettings(){const d=await api('/api/settings');const x=d.settings||{};$('watchRoot').value=(x.watchRoots||[])[0]||'';$('quarantineRoot').value=x.quarantineRoot||'';$('stagingRoot').value=x.stagingRoot||'';out('settingsOut',d)}
