@@ -51,12 +51,16 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
  assert.equal(readinessResponse.statusCode,200);
  const readiness=readinessResponse.body;
  assert.equal(readiness.kind,'malguard-embedded-validation-lab');
+ assert.equal(readiness.engineeringValidationPercent,100,JSON.stringify(readiness,null,2));
  assert.equal(readiness.engineeringReady,true,JSON.stringify(readiness,null,2));
+ assert.equal(readiness.virtualWindowsLab.ok,true);
+ assert.equal(readiness.virtualWindowsLab.coveragePercent,100);
+ assert.equal(readiness.virtualWindowsLab.safety.realWindowsSandboxClaimed,false);
  assert.equal(readiness.mxcProcessContainer.validated,true);
  assert.equal(readiness.mxcProcessContainer.syntheticOnly,true);
  assert.equal(readiness.mxcProcessContainer.untrustedExecutionCertified,false);
  assert.equal(readiness.releaseReady,readiness.windowsSandboxCertified);
 
  await new Promise(resolve=>server.close(resolve));
- console.log('✓ Desktop app: scanner, canonical version, localhost service, scoped isolation-readiness API and fail-closed sandbox gateway passed');
+ console.log('✓ Desktop app: scanner, localhost service, 100% engineering validation surface, virtual Windows lab and fail-closed real Sandbox gate passed');
 })().catch(e=>{console.error(e.stack||e);process.exit(1)});

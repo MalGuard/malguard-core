@@ -70,11 +70,11 @@
       <button id="selfTest">Run Self-Test</button>
       <pre id="selfOut">Not run.</pre>
 
-      <h2>Isolation Readiness & Final Windows Sandbox Acceptance</h2>
-      <p class="muted">Runs MalGuard's synthetic-only embedded validation, reports the validated MXC ProcessContainer engineering evidence, and attempts real Windows Sandbox containment/isolation acceptance when that backend exists on this host. MXC synthetic evidence never unlocks Pro behavioral execution by itself.</p>
-      <button id="finalSandboxTest">Run Isolation Readiness</button>
-      <p id="finalSandboxSummary" class="warning">Not run. Full-release certification has not been claimed.</p>
-      <pre id="finalSandboxOut">No isolation readiness result yet.</pre>
+      <h2>Virtual Windows Validation Lab & Final Sandbox Acceptance</h2>
+      <p class="muted">Runs MalGuard's platform-neutral Virtual Windows Validation Lab, synthetic embedded validation, and validated MXC ProcessContainer evidence. The virtual lab tests mapped-folder rules, network-denial policy, process exit/timeout/crash recovery, telemetry binding/signals, output quota and cleanup. It can reach 100% engineering validation without pretending that WindowsSandbox.exe ran. Real Windows Sandbox remains a separate Pro behavioral runtime certification gate.</p>
+      <button id="finalSandboxTest">Run Full Validation Lab</button>
+      <p id="finalSandboxSummary" class="warning">Not run. Engineering validation and real Windows Sandbox certification are reported separately.</p>
+      <pre id="finalSandboxOut">No validation-lab result yet.</pre>
     </section>
   </main>
   <script src="/app.js"></script>
