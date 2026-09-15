@@ -7,6 +7,21 @@ const { ScannerBridge } = require('../desktop-app/scanner-bridge.js');
 const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller.js');
 const { startServer } = require('../desktop-app/server.js');
 
+function requestJson({ port, method = 'GET', path: requestPath }) {
+ return new Promise((resolve,reject)=>{
+   const req=http.request({host:'127.0.0.1',port,path:requestPath,method,headers:{'content-length':'0'}},res=>{
+     const chunks=[];
+     res.on('data',c=>chunks.push(c));
+     res.on('end',()=>{
+       try{resolve({statusCode:res.statusCode,body:JSON.parse(Buffer.concat(chunks).toString('utf8'))})}
+       catch(error){reject(error)}
+     });
+   });
+   req.on('error',reject);
+   req.end();
+ });
+}
+
 (async()=>{
  const scanner = new ScannerBridge();
  let r = await scanner.scanPath(path.join(__dirname,'corpus','benign-config-read.lua'),'pro');
@@ -24,16 +39,24 @@ const { startServer } = require('../desktop-app/server.js');
  const server = await startServer(0);
  const address = server.address();
  assert.equal(address.address,'127.0.0.1');
- const body = await new Promise((resolve,reject)=>{
-   http.get({host:'127.0.0.1',port:address.port,path:'/api/status'},res=>{
-     const chunks=[];res.on('data',c=>chunks.push(c));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));
-   }).on('error',reject);
- });
- const status=JSON.parse(body);
+ const statusResponse = await requestJson({port:address.port,path:'/api/status'});
+ assert.equal(statusResponse.statusCode,200);
+ const status=statusResponse.body;
  assert.equal(status.ok,true);
  assert.equal(status.product,'MalGuard Desktop');
  const expectedVersion=fs.readFileSync(path.join(__dirname,'..','DESKTOP-VERSION'),'utf8').trim();
  assert.equal(status.version,expectedVersion);
+
+ const readinessResponse = await requestJson({port:address.port,method:'POST',path:'/api/sandbox/readiness'});
+ assert.equal(readinessResponse.statusCode,200);
+ const readiness=readinessResponse.body;
+ assert.equal(readiness.kind,'malguard-embedded-validation-lab');
+ assert.equal(readiness.engineeringReady,true,JSON.stringify(readiness,null,2));
+ assert.equal(readiness.mxcProcessContainer.validated,true);
+ assert.equal(readiness.mxcProcessContainer.syntheticOnly,true);
+ assert.equal(readiness.mxcProcessContainer.untrustedExecutionCertified,false);
+ assert.equal(readiness.releaseReady,readiness.windowsSandboxCertified);
+
  await new Promise(resolve=>server.close(resolve));
- console.log('✓ Desktop app: real scanner bridge, canonical version, localhost UI service, guard surface and fail-closed sandbox gateway passed');
+ console.log('✓ Desktop app: scanner, canonical version, localhost service, scoped isolation-readiness API and fail-closed sandbox gateway passed');
 })().catch(e=>{console.error(e.stack||e);process.exit(1)});
