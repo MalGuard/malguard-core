@@ -13,12 +13,17 @@ const { EmbeddedValidationLab, LAB_SCHEMA_VERSION } = require('../desktop-app/sa
   assert.equal(report.safety.untrustedSamplesExecuted, false);
   assert.equal(report.safety.malwareDownloaded, false);
   assert.equal(report.safety.releaseGateBypassed, false);
+  assert.equal(report.safety.realWindowsSandboxClaimedByVirtualLab, false);
+  assert.equal(report.engineeringValidationPercent, 100, JSON.stringify(report, null, 2));
   assert.equal(report.engineeringReady, true, JSON.stringify(report, null, 2));
+  assert.equal(report.virtualWindowsLab.ok, true, JSON.stringify(report.virtualWindowsLab, null, 2));
+  assert.equal(report.virtualWindowsLab.coveragePercent, 100, JSON.stringify(report.virtualWindowsLab, null, 2));
+  assert.equal(report.virtualWindowsLab.safety.realWindowsSandboxClaimed, false);
   assert.equal(report.mxcProcessContainer.validated, true, JSON.stringify(report.mxcProcessContainer, null, 2));
   assert.equal(report.mxcProcessContainer.syntheticOnly, true);
   assert.equal(report.mxcProcessContainer.untrustedExecutionCertified, false);
   assert.equal(report.mxcProcessContainer.authoritativeForProBehavioralRelease, false);
-  assert.equal(report.releaseReady, report.windowsSandboxCertified, 'MXC engineering evidence must never bypass Windows Sandbox Pro certification');
+  assert.equal(report.releaseReady, report.windowsSandboxCertified, '100% engineering validation must never bypass Windows Sandbox Pro certification');
   assert.equal(report.proBehavioralSandboxReady, report.windowsSandboxCertified);
   assert.equal(report.scopedReadiness.standard, true);
   assert.equal(report.scopedReadiness.plusStaticAndReputation, true);
@@ -32,6 +37,7 @@ const { EmbeddedValidationLab, LAB_SCHEMA_VERSION } = require('../desktop-app/sa
     'windows_sandbox_policy_contract',
     'release_path_fails_closed_without_accepted_backend',
     'local_process_isolation_probe',
+    'virtual_windows_contract_lab',
   ]) {
     assert(names.has(required), `missing embedded validation check: ${required}`);
   }
@@ -50,7 +56,7 @@ const { EmbeddedValidationLab, LAB_SCHEMA_VERSION } = require('../desktop-app/sa
     assert(report.readinessBlockers.includes('windows_sandbox_runtime_certification_pending'));
   }
 
-  console.log(`✓ Embedded Validation Lab: ${report.checks.length}/${report.checks.length} synthetic safety checks PASS; MXC CI validated=${report.mxcProcessContainer.validated}; Windows Sandbox certified=${report.windowsSandboxCertified}`);
+  console.log(`✓ Embedded Validation Lab: engineering validation=${report.engineeringValidationPercent}%; virtual Windows=${report.virtualWindowsLab.coveragePercent}%; MXC CI validated=${report.mxcProcessContainer.validated}; Windows Sandbox certified=${report.windowsSandboxCertified}`);
 })().catch(error => {
   console.error(error.stack || error);
   process.exit(1);
