@@ -77,6 +77,8 @@ $('gateStatus').onclick=async()=>out('gateOut',await api('/api/access-gate/statu
 
 function renderIsolationReadiness(report){
  const releaseReady=!!(report&&report.releaseReady===true);
+ const deployable=!!(report&&report.deployableReleaseReady===true);
+ const profile=report&&report.deployableReleaseProfile?report.deployableReleaseProfile:'none';
  const engineeringReady=!!(report&&report.engineeringReady===true);
  const engineeringPercent=Number(report&&report.engineeringValidationPercent)||0;
  const virtual=report&&report.virtualWindowsLab?report.virtualWindowsLab:null;
@@ -85,26 +87,29 @@ function renderIsolationReadiness(report){
  const available=!!(backend&&backend.available===true);
  const mxc=report&&report.mxcProcessContainer?report.mxcProcessContainer:null;
  const mxcValidated=!!(mxc&&mxc.validated===true);
+ const standard=report&&report.releaseProfiles&&report.releaseProfiles.standard?report.releaseProfiles.standard:null;
  const summary=$('finalSandboxSummary');
  if(releaseReady){
-   summary.textContent=`FULL RELEASE READY — engineering validation ${engineeringPercent}% and real Windows Sandbox Pro acceptance PASS.`;
+   summary.textContent=`FULL PRODUCT RELEASE READY — engineering validation ${engineeringPercent}% and real Windows Sandbox Pro acceptance PASS.`;
+ }else if(deployable&&profile==='standard-only'&&standard&&standard.coverage===100){
+   summary.textContent='STANDARD RELEASE READY 100% — the validated Standard profile can ship now. Plus/Pro sandbox-dependent capabilities remain locked until real Windows Sandbox runtime certification passes.';
  }else if(engineeringReady&&engineeringPercent===100&&virtualPercent===100&&mxcValidated){
    summary.textContent=available
-     ? 'ENGINEERING VALIDATION 100% — Virtual Windows Lab 100% and MXC live isolation PASS. Real Windows Sandbox exists here but final Pro runtime certification is still pending.'
+     ? 'ENGINEERING VALIDATION 100% — Virtual Windows Lab 100% and MXC live isolation PASS. Real Windows Sandbox exists here but final behavioral certification is still pending.'
      : 'ENGINEERING VALIDATION 100% — Virtual Windows Lab 100% and MXC live isolation PASS. Real Windows Sandbox runtime certification remains pending and is not being faked.';
  }else if(engineeringReady&&mxcValidated){
    summary.textContent=`ENGINEERING PASS (${engineeringPercent}%) — MXC ProcessContainer live isolation is validated, but one or more virtual/full engineering checks are incomplete.`;
  }else if(available){
    summary.textContent='PENDING — Windows Sandbox is present, but one or more engineering or final acceptance gates did not pass.';
  }else{
-   summary.textContent='PENDING — engineering or Windows Sandbox certification is incomplete. No full-release certification has been claimed.';
+   summary.textContent='PENDING — engineering validation is incomplete. No unsupported capability is being marked release-ready.';
  }
  out('finalSandboxOut',report);
 }
 $('finalSandboxTest').onclick=async()=>{
  const button=$('finalSandboxTest');
  button.disabled=true;
- $('finalSandboxSummary').textContent='Running Virtual Windows Lab, embedded safety checks and isolation readiness…';
+ $('finalSandboxSummary').textContent='Running Virtual Windows Lab, embedded safety checks and capability-scoped release readiness…';
  $('finalSandboxOut').textContent='Running…';
  try{
    const report=await api('/api/sandbox/readiness','POST',{});
