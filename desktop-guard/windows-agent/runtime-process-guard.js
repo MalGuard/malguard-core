@@ -48,6 +48,7 @@ class RuntimeGameProcessGuard {
       monitoredProcesses: 0,
       lastAction: null,
       lastIncident: null,
+      lastError: null,
       moduleLoadProtection: true,
       memoryOnlyInjectionProtection: false,
       state: 'stopped',
@@ -82,7 +83,7 @@ class RuntimeGameProcessGuard {
       return Promise.reject(Object.assign(new Error('runtime process guard requires Windows'), { code: 'RUNTIME_PROCESS_WINDOWS_REQUIRED' }));
     }
     const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', this.helper, '-Mode', mode];
-    if (mode === 'Terminate') args.push('-Pid', String(pid), '-ExpectedPath', expectedPath);
+    if (mode === 'Terminate') args.push('-ProcessId', String(pid), '-ExpectedPath', expectedPath);
     return new Promise((resolve, reject) => {
       const env = { ...process.env, MALGUARD_RUNTIME_ROOTS_B64: this._rootsEnv() };
       const child = spawn('powershell.exe', args, { shell: false, windowsHide: true, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -219,9 +220,10 @@ class RuntimeGameProcessGuard {
       const processes = snapshot && Array.isArray(snapshot.processes) ? snapshot.processes : [];
       if (snapshot && snapshot.truncated === true) throw Object.assign(new Error('runtime process snapshot truncated'), { code: 'RUNTIME_SNAPSHOT_TRUNCATED' });
       for (const processInfo of processes) await this._inspectProcess(processInfo);
-      return this._set({ ok: true, active: true, healthy: true, monitoredProcesses: processes.length, state: 'healthy', reason: 'runtime_process_monitoring_active' });
+      return this._set({ ok: true, active: true, healthy: true, monitoredProcesses: processes.length, state: 'healthy', reason: 'runtime_process_monitoring_active', lastError:null });
     } catch (error) {
-      return this._set({ ok: false, active: true, healthy: false, state: 'degraded', reason: error && error.code ? error.code : 'RUNTIME_PROCESS_MONITOR_FAILED' });
+      const detail = String(error && error.message ? error.message : '').slice(0, 2048);
+      return this._set({ ok: false, active: true, healthy: false, state: 'degraded', reason: error && error.code ? error.code : 'RUNTIME_PROCESS_MONITOR_FAILED', lastError:detail || null });
     }
   }
 
