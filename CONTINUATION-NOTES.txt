@@ -1,25 +1,68 @@
 MalGuard / GTA Guard — continuation notes
-Current milestone: FINAL SECURITY ENGINEERING AUDIT v1.1.1
-Verdict: CONDITIONAL PASS
+Current milestone: post-threat-intelligence validation / release-readiness review
+Current engineering verdict: CONDITIONAL PASS — WINDOWS SANDBOX + REAL-BROWSER ACCEPTANCE PENDING
 
-Continue from this directory/ZIP; do not rebuild from scratch.
+Continue from this branch; do not rebuild from scratch.
 
-Primary runtime path:
-UI -> scan-worker-client.js -> Dedicated Worker -> scanFileWithMode()
-No silent main-thread fallback is permitted by the current contract.
+Current validated development baseline before this status-note commit:
+  364f970bb7fa1b2267fd983097e0b78563143e97
 
-NEXT ACTION TO CLOSE THE CONDITIONAL PASS:
-Serve this directory over HTTPS and open:
-  /tests/iphone-browser-audit.html
+COMPLETED / VERIFIED
+--------------------
+- MalwareBazaar authenticated live API validation: PASS
+  GitHub Actions Run ID: 34952917084
+  The pinned development commit was checked out and the live validation script completed successfully.
+  A real authenticated API request was made using only a synthetic SHA-256 lookup.
+  No malware was downloaded or executed and no credential was exposed.
 
-The page must finish with:
-  PASS — LIVE BROWSER VALIDATION
-and every individual check must be PASS with no uncaught errors in the Raw report.
+- Threat-intelligence integration: PASS
+  Exact known-malicious SHA-256 reputation can override a local SAFE result to malicious.
+  Threat-intelligence timeout/unavailability does not manufacture SAFE or erase complete local static analysis.
+  Cache TTL/corruption fail-closed behavior and credential non-disclosure tests pass.
 
-A screenshot alone is useful for quick review; the Raw report is the stronger artifact because it includes browser/origin and check details.
+- Security CI on 364f970bb7fa1b2267fd983097e0b78563143e97: PASS
+  GitHub Actions Run ID: 34950711193
+  Full Engineering Hardening suite: 38/38 test programs passed.
 
-Out of scope and not started/expanded:
-- MalwareBazaar integration
-- URLhaus threat-intelligence expansion
-- final visual redesign
-- GitHub deployment
+- Release candidate packaging/integrity: PASS
+  Artifact ID: 10389510462
+  Artifact ZIP digest recorded by GitHub:
+  sha256:fa25b7b1ce6fe671015b9670b141cef3aff34511fd76e3508c70d0e7c6ef0356
+  CI release-candidate verifier reports manifest/checksums/secrets PASS.
+
+- Windows native containment and build checks: PASS
+  Windows native probe and Windows service compile successfully.
+  Job Object creation, assignment-before-resume, CPU limit, memory limit,
+  active-process limit, kill-on-close and forced termination checks pass.
+
+REMAINING ACCEPTANCE GAPS
+-------------------------
+1) Real-browser acceptance
+   Serve this repository from a trustworthy HTTPS origin and open:
+     /tests/iphone-browser-audit.html
+   Required final result:
+     PASS — LIVE BROWSER VALIDATION
+   Every individual check must PASS with no uncaught errors in the Raw report.
+   Node/VM Worker tests already pass, but they do not substitute for this real-browser check.
+
+2) Windows Sandbox acceptance
+   Current GitHub-hosted Windows environments used for validation do not provide usable Windows Sandbox / nested virtualization.
+   Current code correctly fails closed with:
+     WINDOWS_SANDBOX_UNAVAILABLE
+     sandbox_release_gate_locked
+   Do not claim Sandbox isolation, Sandbox telemetry runtime acceptance, or release-grade Sandbox PASS until a suitable Windows host actually runs those checks.
+
+CURRENT PRODUCT MODEL
+---------------------
+Standard = normal static/reputation scan
+Plus     = deep step-by-step scan, Sandbox only when required
+Pro      = minimal preflight followed directly by Sandbox behavioral analysis
+
+SAFETY / SCOPE
+--------------
+- Do not use, download, or execute real malware for validation.
+- Use harmless synthetic fixtures only.
+- Do not fake or simulate a Windows Sandbox PASS.
+- Do not merge/release or modify main without explicit authorization.
+
+The historical FINAL-SECURITY-AUDIT.txt remains an audit record of its earlier date and should not be rewritten to pretend later work existed at that time.
