@@ -179,6 +179,21 @@ class WindowsUserSpaceGuardAgent {
     return { ok: true, action: finalDecision.action, verdict: scanResult.verdict, incident: report, quarantine: manifest, preScanHeld: true };
   }
 
+  async isTrustedPath(filePath) {
+    const resolved = assertWithinAny(filePath, this.roots);
+    const trusted = this.trustedIdentities.get(resolved);
+    if (!trusted) return false;
+    try {
+      const current = await hashFile(resolved);
+      if (sameIdentity(trusted, current)) return true;
+      this.trustedIdentities.delete(resolved);
+      return false;
+    } catch (error) {
+      if (error && error.code === 'ENOENT') this.trustedIdentities.delete(resolved);
+      return false;
+    }
+  }
+
   async startWatching() {
     await this.store.init();
     const result = await this.watcher.start();
