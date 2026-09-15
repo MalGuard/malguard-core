@@ -28,11 +28,12 @@ class RuntimeGameProcessGuard {
     if (!Array.isArray(roots) || !roots.length) throw new TypeError('roots required');
     if (typeof scanner !== 'function') throw new TypeError('scanner required');
     if (typeof trustedPath !== 'function') throw new TypeError('trustedPath required');
+    this.platform = platform;
     this.roots = roots.map(normalizeAbsolute);
+    this.canonicalRoots = this.roots.map(root => this._canonicalExisting(root));
     this.scanner = scanner;
     this.trustedPath = trustedPath;
     this.onIncident = typeof onIncident === 'function' ? onIncident : null;
-    this.platform = platform;
     this.serviceMode = serviceMode === true;
     this.intervalMs = Math.max(500, Number(intervalMs) || 1000);
     this.helper = path.join(__dirname, 'windows-tools', 'runtime-process-helper.ps1');
@@ -63,6 +64,7 @@ class RuntimeGameProcessGuard {
       serviceRequired: true,
       moduleLoadProtection: true,
       memoryOnlyInjectionProtection: false,
+      windowsPathAliasAware: true,
       threatModel: 'monitors executable/module paths of game processes launched from protected roots; does not claim kernel or memory-only injection coverage',
     };
   }
@@ -73,6 +75,36 @@ class RuntimeGameProcessGuard {
   }
 
   getCachedStatus() { return { ...this.state }; }
+
+  _canonicalExisting(filePath) {
+    const resolved = normalizeAbsolute(filePath);
+    if (this.platform !== 'win32') return resolved;
+    try { return fs.realpathSync.native(resolved); } catch (_) { return resolved; }
+  }
+
+  _pathKey(filePath) {
+    const canonical = this._canonicalExisting(filePath);
+    return this.platform === 'win32' ? canonical.toLowerCase() : canonical;
+  }
+
+  _protectedMapping(filePath) {
+    let canonical;
+    try { canonical = this._canonicalExisting(filePath); } catch (_) { return null; }
+    for (let i = 0; i < this.roots.length; i++) {
+      const canonicalRoot = this.canonicalRoots[i];
+      try {
+        if (!isWithin(canonical, canonicalRoot)) continue;
+        const relative = path.relative(canonicalRoot, canonical);
+        return {
+          canonicalPath: canonical,
+          canonicalRoot,
+          configuredRoot: this.roots[i],
+          configuredPath: relative ? path.join(this.roots[i], relative) : this.roots[i],
+        };
+      } catch (_) {}
+    }
+    return null;
+  }
 
   _rootsEnv() {
     return Buffer.from(JSON.stringify(this.roots), 'utf8').toString('base64');
@@ -125,7 +157,7 @@ class RuntimeGameProcessGuard {
   }
 
   _insideProtectedRoot(filePath) {
-    try { return this.roots.some(root => isWithin(filePath, root)); } catch (_) { return false; }
+    return this._protectedMapping(filePath) !== null;
   }
 
   _isRuntimeCode(filePath) {
@@ -133,18 +165,20 @@ class RuntimeGameProcessGuard {
   }
 
   _isTrustedSystemLocation(filePath) {
-    const candidates = [process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramW6432]
+    const candidate = this._canonicalExisting(filePath);
+    const roots = [process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramW6432]
       .filter(Boolean)
-      .map(value => path.resolve(value));
-    try { return candidates.some(root => isWithin(filePath, root)); } catch (_) { return false; }
+      .map(value => this._canonicalExisting(value));
+    try { return roots.some(root => isWithin(candidate, root)); } catch (_) { return false; }
   }
 
   async _fileCacheKey(filePath) {
+    const canonical = this._canonicalExisting(filePath);
     try {
-      const stat = await fs.promises.stat(filePath);
-      return `${path.resolve(filePath).toLowerCase()}|${stat.size}|${stat.mtimeMs}`;
+      const stat = await fs.promises.stat(canonical);
+      return `${this._pathKey(canonical)}|${stat.size}|${stat.mtimeMs}`;
     } catch (_) {
-      return `${path.resolve(filePath).toLowerCase()}|missing`;
+      return `${this._pathKey(canonical)}|missing`;
     }
   }
 
@@ -176,20 +210,22 @@ class RuntimeGameProcessGuard {
   async _inspectExternalModule(processInfo, modulePath) {
     if (!this._isRuntimeCode(modulePath) || this._insideProtectedRoot(modulePath) || this._isTrustedSystemLocation(modulePath)) return null;
     const key = await this._fileCacheKey(modulePath);
-    if (this.externalCache.get(modulePath) === key) return null;
+    if (this.externalCache.get(this._pathKey(modulePath)) === key) return null;
     let scanResult;
     try { scanResult = await this.scanner(modulePath, { runtimeModule: true, pid: processInfo.pid, processPath: processInfo.path }); }
     catch (_) { scanResult = { verdict: 'INCONCLUSIVE', reasons: ['runtime_module_scan_error'] }; }
     const verdict = normalizeVerdict(scanResult);
     if (verdict === 'SAFE') {
-      this.externalCache.set(modulePath, key);
+      this.externalCache.set(this._pathKey(modulePath), key);
       return null;
     }
     return this._terminateForViolation(processInfo, modulePath, verdict, `untrusted external runtime module: ${verdict.toLowerCase()}`);
   }
 
   async _inspectProcess(processInfo) {
-    if (!processInfo || !Number.isInteger(processInfo.pid) || typeof processInfo.path !== 'string' || !this._insideProtectedRoot(processInfo.path)) return { ignored: true };
+    if (!processInfo || !Number.isInteger(processInfo.pid) || typeof processInfo.path !== 'string') return { ignored: true };
+    const processMapping = this._protectedMapping(processInfo.path);
+    if (!processMapping) return { ignored: true };
     if (processInfo.moduleEnumerationOk !== true) {
       throw Object.assign(new Error('module enumeration failed for protected game process'), { code: 'RUNTIME_MODULE_ENUMERATION_FAILED' });
     }
@@ -198,13 +234,14 @@ class RuntimeGameProcessGuard {
     const seen = new Set();
     for (const candidate of loaded) {
       if (typeof candidate !== 'string' || !candidate.trim()) continue;
-      const resolved = path.resolve(candidate);
-      const key = this.platform === 'win32' ? resolved.toLowerCase() : resolved;
+      const resolved = normalizeAbsolute(candidate);
+      const key = this._pathKey(resolved);
       if (seen.has(key) || !this._isRuntimeCode(resolved)) continue;
       seen.add(key);
-      if (this._insideProtectedRoot(resolved)) {
-        const trusted = await this.trustedPath(resolved);
-        if (!trusted) return this._terminateForViolation(processInfo, resolved, 'INCONCLUSIVE', 'loaded code from protected game root is not in the current trusted identity set');
+      const mapping = this._protectedMapping(resolved);
+      if (mapping) {
+        const trusted = await this.trustedPath(mapping.configuredPath);
+        if (!trusted) return this._terminateForViolation(processInfo, mapping.canonicalPath, 'INCONCLUSIVE', 'loaded code from protected game root is not in the current trusted identity set');
       } else {
         const result = await this._inspectExternalModule(processInfo, resolved);
         if (result && result.terminated) return result;
