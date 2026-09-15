@@ -30,3 +30,27 @@ jobs:
           while IFS= read -r -d '' file; do
             node --check "$file"
           done < <(find . -type f -name '*.js' -print0)
+
+      - name: Build portable release candidate
+        run: node tools/build-portable-package.js
+
+      - name: Verify release candidate gate
+        run: node tools/verify-release-candidate.js
+
+      - name: Archive verified release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < DESKTOP-VERSION)"
+          tar -C dist -czf "dist/malguard-desktop-${version}.tar.gz" "malguard-desktop-${version}"
+          sha256sum "dist/malguard-desktop-${version}.tar.gz" > "dist/malguard-desktop-${version}.tar.gz.sha256"
+
+      - name: Upload verified release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: malguard-release-candidate
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
