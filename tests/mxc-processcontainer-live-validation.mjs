@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -146,7 +145,6 @@ try {
     String(port),
   ].join(' ');
   config.process.cwd = inputRoot;
-  config.process.env = {};
 
   const child = spawnSandboxFromConfig(config, { usePty: false });
   const result = await waitForChild(child);
