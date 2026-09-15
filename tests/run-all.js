@@ -7,6 +7,7 @@ const tests=[
  'secure-update.test.js',
  'entitlement-gate.test.js',
  'entitlement-api.test.js',
+ 'error-reporter.test.js',
  'script-analyzer.test.js',
  'regression-corpus.test.js',
  'quality-benchmark.test.js',
