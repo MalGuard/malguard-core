@@ -8,6 +8,7 @@ const { URL } = require('url');
 const { ScannerBridge } = require('./scanner-bridge.js');
 const { WindowsUserSpaceGuardAgent } = require('../desktop-guard/windows-agent/agent.js');
 const { ManagedInstallGuard } = require('../desktop-guard/windows-agent/managed-install.js');
+const { ProtectionCoordinator } = require('../desktop-guard/windows-agent/protection-coordinator.js');
 const { SandboxController } = require('./sandbox/sandbox-controller.js');
 const { EmbeddedValidationLab } = require('./sandbox/embedded-validation-lab.js');
 const { IncidentStore } = require('../desktop-guard/windows-agent/incident-store.js');
@@ -63,11 +64,21 @@ function safeConfig() {
   const persisted = settingsStore.loadSync(); const envWatch = process.env.MALGUARD_WATCH_ROOT ? [path.resolve(process.env.MALGUARD_WATCH_ROOT)] : persisted.watchRoots;
   return settingsStore.validate({ watchRoots: envWatch, quarantineRoot: path.resolve(process.env.MALGUARD_QUARANTINE_ROOT || persisted.quarantineRoot), stagingRoot: path.resolve(process.env.MALGUARD_STAGING_ROOT || persisted.stagingRoot) });
 }
-let config = safeConfig(); let incidentStore = new IncidentStore(config.quarantineRoot); let agent = null; let managedInstall = null; let aclGate = null;
+let config = safeConfig(); let incidentStore = new IncidentStore(config.quarantineRoot); let agent = null; let managedInstall = null; let aclGate = null; let protectionCoordinator = null;
 
 async function applySettings(nextSettings) {
-  const validated = settingsStore.validate(nextSettings); if (agent && agent.watcher && agent.watcher.active) await agent.stopWatching();
-  agent = null; managedInstall = null; aclGate = null; const saved = await settingsStore.save(validated); config = saved; incidentStore = new IncidentStore(config.quarantineRoot); return saved;
+  const validated = settingsStore.validate(nextSettings);
+  if (protectionCoordinator) {
+    const protection = protectionCoordinator.getCachedStatus();
+    if (protection.active || protection.accessGateProtected) {
+      const stopped = await protectionCoordinator.stop();
+      if (!stopped.ok) { const error = new Error('Real-time protection could not be stopped safely before settings change.'); error.code = 'REALTIME_PROTECTION_STOP_FAILED'; throw error; }
+    }
+  } else if (agent && agent.watcher && agent.watcher.active) {
+    await agent.stopWatching();
+  }
+  agent = null; managedInstall = null; aclGate = null; protectionCoordinator = null;
+  const saved = await settingsStore.save(validated); config = saved; incidentStore = new IncidentStore(config.quarantineRoot); return saved;
 }
 function normalizeVerdict(result) { const v = result && result.finalVerdict; return ['safe', 'suspicious', 'malicious', 'inconclusive'].includes(v) ? v : 'inconclusive'; }
 function entitlementDenied(res, error) { return json(res, 403, { ok: false, code: error.code || 'ENTITLEMENT_REQUIRED', message: error.message, requiredPlan: error.requiredPlan || null, currentPlan: error.currentPlan || 'standard' }); }
@@ -82,6 +93,7 @@ function ensureAgent() {
   if (!config.watchRoots.length) { const error = new Error('No watch root configured. Set MALGUARD_WATCH_ROOT.'); error.code = 'WATCH_ROOT_NOT_CONFIGURED'; throw error; }
   agent = new WindowsUserSpaceGuardAgent({ roots: config.watchRoots, quarantineRoot: config.quarantineRoot, scanner: async filePath => { const result = await scanner.scanPath(filePath, 'pro'); return { verdict: normalizeVerdict(result).toUpperCase(), reasons: [result.note || result.hardeningError || 'MalGuard desktop scan'], raw: result }; }, onIncident: async report => { await incidentStore.append(report); } });
   aclGate = new ProtectedFolderAclGate({ roots: config.watchRoots, stateRoot: config.quarantineRoot });
+  protectionCoordinator = new ProtectionCoordinator({ agent, accessGate: aclGate, serviceMode: process.env.MALGUARD_SERVICE_MODE === '1', platform: process.platform });
   managedInstall = new ManagedInstallGuard({ gameRoots: config.watchRoots, stagingRoot: config.stagingRoot, quarantineStore: agent.store, scanner: async filePath => { const result = await scanner.scanPath(filePath, 'pro'); return { verdict: normalizeVerdict(result).toUpperCase(), reasons: [result.note || result.hardeningError || 'MalGuard managed install scan'], raw: result }; } });
   return agent;
 }
@@ -89,7 +101,10 @@ function ensureAgent() {
 async function handler(req, res) {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
   try {
-    if (req.method === 'GET' && url.pathname === '/api/status') return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', guardConfigured: config.watchRoots.length > 0, watching: !!(agent && agent.watcher && agent.watcher.active), guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode: process.env.MALGUARD_EXPERIMENTAL_SANDBOX === '1' ? 'windows-sandbox-experimental' : 'fail-closed-acceptance-pending', threatIntel: await threatIntel.status() });
+    if (req.method === 'GET' && url.pathname === '/api/status') {
+      const protection = protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, accessGateProtected:false, watcherHealthy:false, state:'stopped', reason:null };
+      return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', guardConfigured: config.watchRoots.length > 0, watching: protection.completeProtection === true, realtimeProtection: protection, guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode: process.env.MALGUARD_EXPERIMENTAL_SANDBOX === '1' ? 'windows-sandbox-experimental' : 'fail-closed-acceptance-pending', threatIntel: await threatIntel.status() });
+    }
     if (req.method === 'GET' && url.pathname === '/api/entitlement/status') return json(res, 200, { ok: true, entitlement: entitlementGate.status() });
     if (req.method === 'GET' && url.pathname === '/api/threat-intel/status') return json(res, 200, { ok: true, status: await threatIntel.status() });
     if (req.method === 'POST' && url.pathname === '/api/threat-intel/credential') { const body = await readJson(req, 16 * 1024); if (typeof body.authKey !== 'string') return json(res, 400, { ok: false, code: 'AUTH_KEY_REQUIRED' }); const stored = await threatIntel.credentials.setAuthKey(body.authKey); return json(res, 200, { ok: true, storage: stored.storage }); }
@@ -103,9 +118,10 @@ async function handler(req, res) {
     if (req.method === 'GET' && url.pathname === '/api/pro-scan/status') { const id = url.searchParams.get('id'); if (!id) return json(res, 400, { ok: false, code: 'SCAN_ID_REQUIRED' }); const session = modelPipeline.snapshot(id); if (!session) return json(res, 404, { ok: false, code: 'PRO_SCAN_NOT_FOUND' }); return json(res, 200, { ok: true, deprecated: true, mappedModel: 'plus', session }); }
     if (req.method === 'GET' && url.pathname === '/api/access-gate/status') { ensureAgent(); return json(res, 200, await aclGate.status()); }
     if (req.method === 'POST' && url.pathname === '/api/access-gate/enable') { ensureAgent(); const result = await aclGate.protectAll(); return json(res, result.ok ? 200 : 409, result); }
-    if (req.method === 'POST' && url.pathname === '/api/access-gate/disable') { ensureAgent(); return json(res, 200, await aclGate.restoreAll()); }
-    if (req.method === 'POST' && url.pathname === '/api/guard/start') { const a = ensureAgent(); return json(res, 200, await a.startWatching()); }
-    if (req.method === 'POST' && url.pathname === '/api/guard/stop') { if (!agent) return json(res, 200, { ok: true, active: false }); return json(res, 200, await agent.stopWatching()); }
+    if (req.method === 'POST' && url.pathname === '/api/access-gate/disable') { ensureAgent(); const protection = protectionCoordinator.getCachedStatus(); if (protection.active) return json(res, 409, { ok:false, code:'ACCESS_GATE_REQUIRED_BY_ACTIVE_GUARD', protection }); return json(res, 200, await aclGate.restoreAll()); }
+    if (req.method === 'GET' && url.pathname === '/api/guard/status') { ensureAgent(); return json(res, 200, await protectionCoordinator.status({ refresh:true })); }
+    if (req.method === 'POST' && url.pathname === '/api/guard/start') { ensureAgent(); const result = await protectionCoordinator.start(); return json(res, result.ok ? 200 : 409, result); }
+    if (req.method === 'POST' && url.pathname === '/api/guard/stop') { if (!protectionCoordinator) return json(res, 200, { ok: true, active: false, completeProtection:false }); const result = await protectionCoordinator.stop(); return json(res, result.ok ? 200 : 409, result); }
     if (req.method === 'GET' && url.pathname === '/api/quarantine') { const a = ensureAgent(); return json(res, 200, { ok: true, entries: await a.listQuarantine() }); }
     if (req.method === 'POST' && url.pathname === '/api/quarantine/restore') { const body = await readJson(req); if (typeof body.id !== 'string') return json(res, 400, { ok: false, code: 'ID_REQUIRED' }); const a = ensureAgent(); return json(res, 200, { ok: true, entry: await a.restore(body.id) }); }
     if (req.method === 'POST' && url.pathname === '/api/install') { const body = await readJson(req); if (typeof body.source !== 'string' || typeof body.destination !== 'string') return json(res, 400, { ok: false, code: 'SOURCE_AND_DESTINATION_REQUIRED' }); ensureAgent(); return json(res, 200, await managedInstall.install(body.source, body.destination)); }
@@ -144,9 +160,14 @@ function installFatalErrorHandlers(reporter = errorReporter, exit = code => proc
 if (require.main === module) {
   installFatalErrorHandlers();
   startServer().then(async () => {
-    if (process.env.MALGUARD_SERVICE_MODE === '1') { if (!config.watchRoots.length) { const error = new Error('Windows service mode requires a configured protected game root.'); error.code = 'SERVICE_WATCH_ROOT_NOT_CONFIGURED'; throw error; } const a = ensureAgent(); const gate = await aclGate.protectAll(); if (!gate || gate.ok !== true) { const error = new Error('Protected-folder access gate failed during service startup.'); error.code = 'SERVICE_ACCESS_GATE_START_FAILED'; throw error; } const result = await a.startWatching(); if (!result || result.ok !== true || !result.health || result.health.state !== 'healthy') { const error = new Error('Real-time guard failed to reach healthy state during service startup.'); error.code = 'SERVICE_GUARD_START_FAILED'; throw error; } }
+    if (process.env.MALGUARD_SERVICE_MODE === '1') {
+      if (!config.watchRoots.length) { const error = new Error('Windows service mode requires a configured protected game root.'); error.code = 'SERVICE_WATCH_ROOT_NOT_CONFIGURED'; throw error; }
+      ensureAgent();
+      const result = await protectionCoordinator.start();
+      if (!result || result.ok !== true || result.completeProtection !== true) { const error = new Error('Real-time protection failed to reach protected healthy state during service startup.'); error.code = result && result.reason ? result.reason : 'SERVICE_GUARD_START_FAILED'; throw error; }
+    }
     console.log(`MalGuard Desktop ${DESKTOP_VERSION} running at http://${HOST}:${PORT}`); console.log('Localhost only. No remote binding.');
   }).catch(async error => { await recordRuntimeError(error, { area: 'startup' }); console.error(`MalGuard startup failed: ${safeText(error.code || error.name || 'INTERNAL_ERROR', 128)}`); process.exit(1); });
 }
 
-module.exports = { startServer, handler, scanner, sandbox, validationLab, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }) };
+module.exports = { startServer, handler, scanner, sandbox, validationLab, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }), getRealtimeProtectionStatus: () => protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, state:'stopped' } };
