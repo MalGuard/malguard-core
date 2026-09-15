@@ -29,6 +29,7 @@ const tests=[
  'embedded-validation-lab.test.js',
  'sandbox-telemetry.test.js',
  'sandbox-native-containment-source.test.js',
+ 'appcontainer-native-source.test.js',
  'windows-service-source.test.js',
  'windows-acceptance-harness.test.js',
  'settings-store.test.js',
