@@ -1,0 +1,9 @@
+MalGuard real-time protection invariant
+
+A guard session is only considered complete when both conditions are true:
+1. Protected-folder access control is enforced before the watcher begins.
+2. The recursive watcher reaches healthy state and remains monitored.
+
+If folder protection cannot be established, MalGuard must not advertise complete real-time protection.
+If watcher startup fails after folder protection was established, the folder remains protected until an explicit stop restores the saved ACL.
+Direct non-service desktop mode does not claim race-free real-time protection.
