@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('assert');
-const fs = require('fs');
 const path = require('path');
 const { ScannerBridge } = require('../desktop-app/scanner-bridge.js');
 
@@ -23,6 +22,19 @@ const FIXTURE = path.join(__dirname, 'corpus', 'benign-config-read.lua');
   assert.equal(observedHash, result.sourceIdentity.sha256);
   assert(result.reputationEvidence.some(x => x.rule === 'MALWAREBAZAAR-EXACT-SHA256'));
 
+  const notFound = new ScannerBridge({
+    threatIntel: {
+      async lookupSha256(hash) {
+        return { provider: 'malwarebazaar', status: 'not_found', source: 'live', hash };
+      },
+    },
+  });
+  const missed = await notFound.scanPath(FIXTURE, 'pro');
+  assert.equal(missed.finalVerdict, 'safe', 'reputation miss must leave the complete local static verdict unchanged');
+  assert.equal(missed.threatIntel.status, 'not_found');
+  assert.notEqual(missed.reputationOverride, 'malwarebazaar_exact_sha256');
+  assert(!Array.isArray(missed.reputationEvidence) || !missed.reputationEvidence.some(x => x.rule === 'MALWAREBAZAAR-EXACT-SHA256'));
+
   const unavailable = new ScannerBridge({
     threatIntel: { async lookupSha256(hash) { return { provider: 'malwarebazaar', status: 'unavailable', source: 'live', hash, reason: 'timeout' }; } },
   });
@@ -35,5 +47,5 @@ const FIXTURE = path.join(__dirname, 'corpus', 'benign-config-read.lua');
   const localOnly = await disabled.scanPath(FIXTURE, 'pro');
   assert.equal(localOnly.threatIntel.status, 'disabled');
 
-  console.log('✓ MalwareBazaar reputation integrates additively without false SAFE from reputation misses/outages PASS');
+  console.log('✓ MalwareBazaar reputation integrates additively: exact hits override, misses/outages never manufacture SAFE PASS');
 })().catch(error => { console.error(error); process.exit(1); });
