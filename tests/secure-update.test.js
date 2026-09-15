@@ -22,6 +22,11 @@ const signature = crypto.sign(null, Buffer.from(canonicalize(manifest)), private
 assert.equal(compareVersions('1.0.1', '1.0.0'), 1);
 assert.equal(compareVersions('1.0.0', '1.0.0'), 0);
 assert.equal(compareVersions('0.9.9', '1.0.0'), -1);
+assert.equal(compareVersions('1.0.0', '1.0.0-rc.1'), 1);
+assert.equal(compareVersions('1.0.0-rc.2', '1.0.0-rc.1'), 1);
+assert.equal(compareVersions('1.0.0-rc.1', '1.0.0'), -1);
+assert.equal(compareVersions('1.0.0-beta.11', '1.0.0-rc.1'), -1);
+assert.throws(() => compareVersions('1.0.0-01', '1.0.0'), /invalid semantic version/);
 assert.equal(verifyManifest({ manifest, signature, publicKeyPem, currentVersion: '1.0.0' }), true);
 
 const tampered = JSON.parse(JSON.stringify(manifest));
@@ -36,8 +41,10 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'malguard-update-'));
 const fixture = path.join(dir, 'package.bin');
 fs.writeFileSync(fixture, packageBytes);
 assert.equal(verifyPackageFile(fixture, sha256), true);
+assert.throws(() => verifyPackageFile(fixture, ''), /invalid expected package sha256/);
+assert.throws(() => verifyPackageFile(fixture, 'not-a-sha256'), /invalid expected package sha256/);
 fs.appendFileSync(fixture, 'tamper');
 assert.throws(() => verifyPackageFile(fixture, sha256), /sha256 mismatch/);
 fs.rmSync(dir, { recursive: true, force: true });
 
-console.log('✓ Secure update trust chain: Ed25519 signature, anti-downgrade and package SHA-256 PASS');
+console.log('✓ Secure update trust chain: Ed25519 signature, SemVer anti-downgrade and package SHA-256 PASS');
