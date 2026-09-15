@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+project(MalGuardRuntimeProcessSyntheticChild LANGUAGES CXX)
+add_executable(MalGuardRuntimeProcessSyntheticChild main.cpp)
+target_compile_features(MalGuardRuntimeProcessSyntheticChild PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(MalGuardRuntimeProcessSyntheticChild PRIVATE /W4 /WX)
+endif()

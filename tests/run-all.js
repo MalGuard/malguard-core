@@ -25,6 +25,7 @@ const tests=[
  'desktop-guard.test.js',
  'windows-agent.test.js',
  'protection-coordinator.test.js',
+ 'runtime-game-process-guard.test.js',
  'runtime-containment.test.js',
  'sandbox-backend.test.js',
  'virtual-windows-validation-lab.test.js',

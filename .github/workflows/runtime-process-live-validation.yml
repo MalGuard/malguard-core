@@ -1,0 +1,52 @@
+name: MalGuard Runtime Game Process Live Validation
+
+on:
+  push:
+    branches:
+      - main
+      - dev/runtime-game-process-protection
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-game-process-live-validation:
+    runs-on: windows-11-vs2026-arm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Record Windows runner
+        shell: pwsh
+        run: |
+          Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "Architecture: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
+          Write-Host "Node: $(node --version)"
+          cmake --version
+
+      - name: Build harmless ARM64 runtime fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S native/runtime-process-synthetic-child -B build/runtime-process-synthetic-child -A ARM64
+          cmake --build build/runtime-process-synthetic-child --config Release --parallel
+          $exe = Resolve-Path 'build/runtime-process-synthetic-child/Release/MalGuardRuntimeProcessSyntheticChild.exe'
+          "MALGUARD_RUNTIME_CHILD_EXE=$($exe.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run real Windows runtime process acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node .\tests\runtime-process-live-validation.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Runtime process live validation failed with exit code $LASTEXITCODE"
+          }
