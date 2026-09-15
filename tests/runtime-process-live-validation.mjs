@@ -18,6 +18,8 @@ await fs.promises.mkdir(game, { recursive:true });
 const gameExe = path.join(game, 'MalGuardSyntheticGame.exe');
 await fs.promises.copyFile(fixture, gameExe);
 
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
 function launch() {
   const child = spawn(gameExe, ['--sleep-ms', '30000'], { windowsHide:true, stdio:['ignore','pipe','pipe'] });
   return new Promise((resolve, reject) => {
@@ -40,6 +42,16 @@ function waitExit(child, timeoutMs = 5000) {
     const timer = setTimeout(() => reject(new Error('synthetic child did not exit')), timeoutMs);
     child.once('exit', code => { clearTimeout(timer); resolve(code); });
   });
+}
+
+async function pollUntilAction(guard, action, attempts = 6) {
+  let status = guard.getCachedStatus();
+  for (let i = 0; i < attempts && status.lastAction !== action; i++) {
+    if (i > 0) await delay(250);
+    status = await guard.poll();
+    if (!status.ok && status.reason) throw new Error(`runtime guard degraded while waiting for ${action}: ${status.reason}${status.lastError ? ` — ${status.lastError}` : ''}`);
+  }
+  return status;
 }
 
 let safeChild;
@@ -66,9 +78,10 @@ try {
     trustedPath:async()=>false,
     scanner:async()=>({verdict:'SAFE'}),
   });
-  const blockedStatus = await blocked.start();
-  assert.equal(blockedStatus.ok, true, JSON.stringify(blockedStatus));
-  assert.equal(blockedStatus.lastAction, 'terminated_game_process');
+  const blockedStart = await blocked.start();
+  assert.equal(blockedStart.ok, true, JSON.stringify(blockedStart));
+  const blockedStatus = await pollUntilAction(blocked, 'terminated_game_process');
+  assert.equal(blockedStatus.lastAction, 'terminated_game_process', JSON.stringify(blockedStatus));
   await waitExit(blockedChild);
   assert.notEqual(blockedChild.exitCode, null, 'untrusted protected-root process should be terminated');
   await blocked.stop();
@@ -78,6 +91,7 @@ try {
     kind:'malguard-runtime-game-process-live-validation',
     safeProcessObserved:true,
     untrustedProcessTerminated:true,
+    boundedDetectionPolling:true,
     syntheticOnly:true,
     malwareDownloaded:false,
     memoryInjectionPerformed:false,
