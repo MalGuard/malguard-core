@@ -19,6 +19,7 @@ const { LocalErrorReporter, safeText } = require('./diagnostics/error-reporter.j
 
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC = path.join(__dirname, 'public');
+const DESKTOP_VERSION = fs.readFileSync(path.join(ROOT, 'DESKTOP-VERSION'), 'utf8').trim();
 const PORT = Number(process.env.MALGUARD_PORT || 18777);
 const HOST = '127.0.0.1';
 const threatIntel = new ThreatIntelService();
@@ -86,7 +87,7 @@ function ensureAgent() {
 async function handler(req, res) {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
   try {
-    if (req.method === 'GET' && url.pathname === '/api/status') return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: '0.6.0-dev', supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', guardConfigured: config.watchRoots.length > 0, watching: !!(agent && agent.watcher && agent.watcher.active), guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode: process.env.MALGUARD_EXPERIMENTAL_SANDBOX === '1' ? 'windows-sandbox-experimental' : 'fail-closed-acceptance-pending', threatIntel: await threatIntel.status() });
+    if (req.method === 'GET' && url.pathname === '/api/status') return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', guardConfigured: config.watchRoots.length > 0, watching: !!(agent && agent.watcher && agent.watcher.active), guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode: process.env.MALGUARD_EXPERIMENTAL_SANDBOX === '1' ? 'windows-sandbox-experimental' : 'fail-closed-acceptance-pending', threatIntel: await threatIntel.status() });
     if (req.method === 'GET' && url.pathname === '/api/entitlement/status') return json(res, 200, { ok: true, entitlement: entitlementGate.status() });
     if (req.method === 'GET' && url.pathname === '/api/threat-intel/status') return json(res, 200, { ok: true, status: await threatIntel.status() });
     if (req.method === 'POST' && url.pathname === '/api/threat-intel/credential') { const body = await readJson(req, 16 * 1024); if (typeof body.authKey !== 'string') return json(res, 400, { ok: false, code: 'AUTH_KEY_REQUIRED' }); const stored = await threatIntel.credentials.setAuthKey(body.authKey); return json(res, 200, { ok: true, storage: stored.storage }); }
@@ -141,7 +142,7 @@ if (require.main === module) {
   installFatalErrorHandlers();
   startServer().then(async () => {
     if (process.env.MALGUARD_SERVICE_MODE === '1') { if (!config.watchRoots.length) { const error = new Error('Windows service mode requires a configured protected game root.'); error.code = 'SERVICE_WATCH_ROOT_NOT_CONFIGURED'; throw error; } const a = ensureAgent(); const gate = await aclGate.protectAll(); if (!gate || gate.ok !== true) { const error = new Error('Protected-folder access gate failed during service startup.'); error.code = 'SERVICE_ACCESS_GATE_START_FAILED'; throw error; } const result = await a.startWatching(); if (!result || result.ok !== true || !result.health || result.health.state !== 'healthy') { const error = new Error('Real-time guard failed to reach healthy state during service startup.'); error.code = 'SERVICE_GUARD_START_FAILED'; throw error; } }
-    console.log(`MalGuard Desktop 0.6.0-dev running at http://${HOST}:${PORT}`); console.log('Localhost only. No remote binding.');
+    console.log(`MalGuard Desktop ${DESKTOP_VERSION} running at http://${HOST}:${PORT}`); console.log('Localhost only. No remote binding.');
   }).catch(async error => { await recordRuntimeError(error, { area: 'startup' }); console.error(`MalGuard startup failed: ${safeText(error.code || error.name || 'INTERNAL_ERROR', 128)}`); process.exit(1); });
 }
 
