@@ -78,17 +78,22 @@ $('gateStatus').onclick=async()=>out('gateOut',await api('/api/access-gate/statu
 function renderIsolationReadiness(report){
  const releaseReady=!!(report&&report.releaseReady===true);
  const engineeringReady=!!(report&&report.engineeringReady===true);
+ const engineeringPercent=Number(report&&report.engineeringValidationPercent)||0;
+ const virtual=report&&report.virtualWindowsLab?report.virtualWindowsLab:null;
+ const virtualPercent=Number(virtual&&virtual.coveragePercent)||0;
  const backend=report&&report.windowsSandbox?report.windowsSandbox:null;
  const available=!!(backend&&backend.available===true);
  const mxc=report&&report.mxcProcessContainer?report.mxcProcessContainer:null;
  const mxcValidated=!!(mxc&&mxc.validated===true);
  const summary=$('finalSandboxSummary');
  if(releaseReady){
-   summary.textContent='FULL RELEASE READY — engineering validation and real Windows Sandbox Pro acceptance PASS.';
- }else if(engineeringReady&&mxcValidated){
+   summary.textContent=`FULL RELEASE READY — engineering validation ${engineeringPercent}% and real Windows Sandbox Pro acceptance PASS.`;
+ }else if(engineeringReady&&engineeringPercent===100&&virtualPercent===100&&mxcValidated){
    summary.textContent=available
-     ? 'ENGINEERING PASS — MXC ProcessContainer live isolation is validated. Pro Windows Sandbox acceptance is still pending on this host.'
-     : 'ENGINEERING PASS — MXC ProcessContainer live isolation is validated. Pro behavioral release remains pending because real Windows Sandbox is not certified on this host.';
+     ? 'ENGINEERING VALIDATION 100% — Virtual Windows Lab 100% and MXC live isolation PASS. Real Windows Sandbox exists here but final Pro runtime certification is still pending.'
+     : 'ENGINEERING VALIDATION 100% — Virtual Windows Lab 100% and MXC live isolation PASS. Real Windows Sandbox runtime certification remains pending and is not being faked.';
+ }else if(engineeringReady&&mxcValidated){
+   summary.textContent=`ENGINEERING PASS (${engineeringPercent}%) — MXC ProcessContainer live isolation is validated, but one or more virtual/full engineering checks are incomplete.`;
  }else if(available){
    summary.textContent='PENDING — Windows Sandbox is present, but one or more engineering or final acceptance gates did not pass.';
  }else{
@@ -99,13 +104,13 @@ function renderIsolationReadiness(report){
 $('finalSandboxTest').onclick=async()=>{
  const button=$('finalSandboxTest');
  button.disabled=true;
- $('finalSandboxSummary').textContent='Running synthetic-only isolation readiness checks…';
+ $('finalSandboxSummary').textContent='Running Virtual Windows Lab, embedded safety checks and isolation readiness…';
  $('finalSandboxOut').textContent='Running…';
  try{
    const report=await api('/api/sandbox/readiness','POST',{});
    renderIsolationReadiness(report);
  }catch(e){
-   $('finalSandboxSummary').textContent='FAIL — isolation readiness request could not complete.';
+   $('finalSandboxSummary').textContent='FAIL — validation-lab request could not complete.';
    out('finalSandboxOut',{ok:false,code:'ISOLATION_READINESS_UI_ERROR',message:e.message});
  }finally{
    button.disabled=false;
