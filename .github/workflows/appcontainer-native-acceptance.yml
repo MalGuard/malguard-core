@@ -1,9 +1,6 @@
-name: MalGuard AppContainer Native Acceptance
+name: MalGuard AppContainer Native Acceptance (Legacy Diagnostic)
 
 on:
-  push:
-    branches:
-      - dev/appcontainer-native-sandbox
   workflow_dispatch:
 
 permissions:
@@ -40,7 +37,7 @@ jobs:
         run: |
           cmake --build build/appcontainer-probe --config Release --parallel
 
-      - name: Run synthetic AppContainer isolation acceptance
+      - name: Run legacy synthetic AppContainer diagnostic
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -49,7 +46,7 @@ jobs:
           $exitCode = $LASTEXITCODE
           Write-Host $json
           if ($exitCode -ne 0) {
-            throw "AppContainer isolation probe failed with exit code $exitCode"
+            throw "Legacy direct AppContainer diagnostic failed with exit code $exitCode"
           }
           $report = $json | ConvertFrom-Json
           $required = @(
@@ -69,10 +66,10 @@ jobs:
           )
           foreach ($name in $required) {
             if ($report.$name -ne $true) {
-              throw "AppContainer acceptance field failed: $name"
+              throw "Legacy AppContainer diagnostic field failed: $name"
             }
           }
           if ([int]$report.childExitCode -ne 0) {
             throw "Synthetic child exit code was $($report.childExitCode)"
           }
-          Write-Host 'AppContainer native isolation acceptance PASS'
+          Write-Host 'Legacy direct AppContainer diagnostic PASS'
