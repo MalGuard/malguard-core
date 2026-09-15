@@ -34,6 +34,13 @@ function Test-WithinRoot([string]$Candidate, [string[]]$Roots) {
   return $false
 }
 
+function Test-AddressWithinModule([Int64]$Address, [object[]]$Ranges) {
+  foreach ($range in $Ranges) {
+    if ($Address -ge [Int64]$range.start -and $Address -lt [Int64]$range.end) { return $true }
+  }
+  return $false
+}
+
 $roots = @(Get-ConfiguredRoots)
 
 if ($Mode -eq 'Terminate') {
@@ -56,17 +63,45 @@ foreach ($p in (Get-Process | Sort-Object Id)) {
   if (-not (Test-WithinRoot $processPath $roots)) { continue }
 
   $modules = @()
+  $moduleRanges = @()
   $moduleEnumerationOk = $true
   try {
     foreach ($m in $p.Modules) {
       if ($modules.Count -ge 512) { $truncated = $true; break }
       try {
         $fileName = [string]$m.FileName
-        if (-not [string]::IsNullOrWhiteSpace($fileName)) { $modules += [IO.Path]::GetFullPath($fileName) }
+        if (-not [string]::IsNullOrWhiteSpace($fileName)) {
+          $modules += [IO.Path]::GetFullPath($fileName)
+          $baseAddress = [Int64]$m.BaseAddress.ToInt64()
+          $moduleSize = [Int64]$m.ModuleMemorySize
+          if ($baseAddress -gt 0 -and $moduleSize -gt 0) {
+            $moduleRanges += [pscustomobject]@{ start=$baseAddress; end=($baseAddress + $moduleSize) }
+          }
+        }
       } catch { }
     }
   } catch {
     $moduleEnumerationOk = $false
+  }
+
+  $threadEnumerationOk = $true
+  $threadCount = 0
+  $unbackedThreadCount = 0
+  if ($moduleEnumerationOk) {
+    try {
+      foreach ($t in $p.Threads) {
+        $threadCount++
+        if ($threadCount -gt 4096) { $truncated = $true; break }
+        try { $startAddress = [Int64]$t.StartAddress.ToInt64() }
+        catch { $threadEnumerationOk = $false; break }
+        if ($startAddress -le 0) { continue }
+        if (-not (Test-AddressWithinModule $startAddress $moduleRanges)) { $unbackedThreadCount++ }
+      }
+    } catch {
+      $threadEnumerationOk = $false
+    }
+  } else {
+    $threadEnumerationOk = $false
   }
 
   $processes += [pscustomobject][ordered]@{
@@ -75,6 +110,9 @@ foreach ($p in (Get-Process | Sort-Object Id)) {
     path = [IO.Path]::GetFullPath($processPath)
     moduleEnumerationOk = [bool]$moduleEnumerationOk
     modules = @($modules)
+    threadEnumerationOk = [bool]$threadEnumerationOk
+    threadCount = [int]$threadCount
+    unbackedThreadCount = [int]$unbackedThreadCount
   }
 }
 

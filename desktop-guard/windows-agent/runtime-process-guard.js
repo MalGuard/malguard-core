@@ -51,6 +51,9 @@ class RuntimeGameProcessGuard {
       lastIncident: null,
       lastError: null,
       moduleLoadProtection: true,
+      threadStartTelemetry: true,
+      unbackedThreadProtection: true,
+      memoryOnlyInjectionHeuristicDetection: true,
       memoryOnlyInjectionProtection: false,
       state: 'stopped',
       reason: null,
@@ -63,9 +66,12 @@ class RuntimeGameProcessGuard {
       platform: this.platform,
       serviceRequired: true,
       moduleLoadProtection: true,
+      threadStartTelemetry: true,
+      unbackedThreadProtection: true,
+      memoryOnlyInjectionHeuristicDetection: true,
       memoryOnlyInjectionProtection: false,
       windowsPathAliasAware: true,
-      threatModel: 'monitors executable/module paths of game processes launched from protected roots; does not claim kernel or memory-only injection coverage',
+      threatModel: 'monitors executable/module paths and thread start addresses for game processes launched from protected roots; terminates on executable code with untrusted identity or thread starts outside loaded module images; does not claim complete kernel or memory-only injection prevention',
     };
   }
 
@@ -228,6 +234,21 @@ class RuntimeGameProcessGuard {
     if (!processMapping) return { ignored: true };
     if (processInfo.moduleEnumerationOk !== true) {
       throw Object.assign(new Error('module enumeration failed for protected game process'), { code: 'RUNTIME_MODULE_ENUMERATION_FAILED' });
+    }
+    if (processInfo.threadEnumerationOk !== true) {
+      throw Object.assign(new Error('thread-start telemetry failed for protected game process'), { code: 'RUNTIME_THREAD_TELEMETRY_FAILED' });
+    }
+    const unbackedThreadCount = Number(processInfo.unbackedThreadCount || 0);
+    if (!Number.isFinite(unbackedThreadCount) || unbackedThreadCount < 0) {
+      throw Object.assign(new Error('invalid thread-start telemetry for protected game process'), { code: 'RUNTIME_THREAD_TELEMETRY_INVALID' });
+    }
+    if (unbackedThreadCount > 0) {
+      return this._terminateForViolation(
+        processInfo,
+        processMapping.canonicalPath,
+        'SUSPICIOUS',
+        `thread start address outside loaded module images detected (${Math.floor(unbackedThreadCount)})`,
+      );
     }
 
     const loaded = [processInfo.path, ...(Array.isArray(processInfo.modules) ? processInfo.modules : [])];

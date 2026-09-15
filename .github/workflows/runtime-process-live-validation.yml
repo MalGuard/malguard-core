@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - dev/runtime-game-process-protection
+      - dev/runtime-memory-telemetry-hardening
   workflow_dispatch:
 
 permissions:
