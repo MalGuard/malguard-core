@@ -75,31 +75,38 @@ $('enableGate').onclick=async()=>out('gateOut',await api('/api/access-gate/enabl
 $('disableGate').onclick=async()=>out('gateOut',await api('/api/access-gate/disable','POST',{}));
 $('gateStatus').onclick=async()=>out('gateOut',await api('/api/access-gate/status'));
 
-function renderFinalSandboxAcceptance(report){
+function renderIsolationReadiness(report){
  const releaseReady=!!(report&&report.releaseReady===true);
+ const engineeringReady=!!(report&&report.engineeringReady===true);
  const backend=report&&report.windowsSandbox?report.windowsSandbox:null;
  const available=!!(backend&&backend.available===true);
+ const mxc=report&&report.mxcProcessContainer?report.mxcProcessContainer:null;
+ const mxcValidated=!!(mxc&&mxc.validated===true);
  const summary=$('finalSandboxSummary');
  if(releaseReady){
-   summary.textContent='CERTIFIED — real Windows Sandbox containment and isolation acceptance PASS.';
+   summary.textContent='FULL RELEASE READY — engineering validation and real Windows Sandbox Pro acceptance PASS.';
+ }else if(engineeringReady&&mxcValidated){
+   summary.textContent=available
+     ? 'ENGINEERING PASS — MXC ProcessContainer live isolation is validated. Pro Windows Sandbox acceptance is still pending on this host.'
+     : 'ENGINEERING PASS — MXC ProcessContainer live isolation is validated. Pro behavioral release remains pending because real Windows Sandbox is not certified on this host.';
  }else if(available){
-   summary.textContent='PENDING — Windows Sandbox is present, but one or more final acceptance gates did not pass.';
+   summary.textContent='PENDING — Windows Sandbox is present, but one or more engineering or final acceptance gates did not pass.';
  }else{
-   summary.textContent='PENDING — Windows Sandbox is not available on this host. No certification has been claimed.';
+   summary.textContent='PENDING — engineering or Windows Sandbox certification is incomplete. No full-release certification has been claimed.';
  }
  out('finalSandboxOut',report);
 }
 $('finalSandboxTest').onclick=async()=>{
  const button=$('finalSandboxTest');
  button.disabled=true;
- $('finalSandboxSummary').textContent='Running synthetic-only final Sandbox acceptance…';
+ $('finalSandboxSummary').textContent='Running synthetic-only isolation readiness checks…';
  $('finalSandboxOut').textContent='Running…';
  try{
-   const report=await api('/api/sandbox/self-test','POST',{});
-   renderFinalSandboxAcceptance(report);
+   const report=await api('/api/sandbox/readiness','POST',{});
+   renderIsolationReadiness(report);
  }catch(e){
-   $('finalSandboxSummary').textContent='FAIL — final Sandbox acceptance request could not complete.';
-   out('finalSandboxOut',{ok:false,code:'FINAL_SANDBOX_ACCEPTANCE_UI_ERROR',message:e.message});
+   $('finalSandboxSummary').textContent='FAIL — isolation readiness request could not complete.';
+   out('finalSandboxOut',{ok:false,code:'ISOLATION_READINESS_UI_ERROR',message:e.message});
  }finally{
    button.disabled=false;
  }

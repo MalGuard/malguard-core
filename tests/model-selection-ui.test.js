@@ -16,11 +16,14 @@ assert.match(js, /Pro: direct Sandbox analysis/);
 assert.match(js, /Plus: deep staged analysis/);
 assert.doesNotMatch(js, /\/api\/sandbox\/analyze/, 'direct sample analysis should be reached through Pro model, not a duplicate UI control');
 
-assert.match(html, /Final Windows Sandbox Acceptance/);
+assert.match(html, /Isolation Readiness & Final Windows Sandbox Acceptance/);
 assert.match(html, /id="finalSandboxTest"/);
 assert.match(html, /id="finalSandboxSummary"/);
-assert.match(js, /\/api\/sandbox\/self-test/);
+assert.match(html, /MXC synthetic evidence never unlocks Pro behavioral execution by itself/);
+assert.match(js, /\/api\/sandbox\/readiness/);
 assert.match(js, /report\.releaseReady===true/);
-assert.match(js, /No certification has been claimed/);
+assert.match(js, /mxc\.validated===true/);
+assert.match(js, /Pro behavioral release remains pending/);
+assert.match(js, /No full-release certification has been claimed|No full-release certification/);
 
-console.log('✓ Choose Model UI: Standard/Plus/Pro semantics and in-app final Windows Sandbox acceptance surface passed');
+console.log('✓ Choose Model UI: Standard/Plus/Pro semantics and scoped in-app isolation readiness surface passed');

@@ -9,6 +9,7 @@ const { ScannerBridge } = require('./scanner-bridge.js');
 const { WindowsUserSpaceGuardAgent } = require('../desktop-guard/windows-agent/agent.js');
 const { ManagedInstallGuard } = require('../desktop-guard/windows-agent/managed-install.js');
 const { SandboxController } = require('./sandbox/sandbox-controller.js');
+const { EmbeddedValidationLab } = require('./sandbox/embedded-validation-lab.js');
 const { IncidentStore } = require('../desktop-guard/windows-agent/incident-store.js');
 const { SettingsStore } = require('./settings-store.js');
 const { ProtectedFolderAclGate } = require('../desktop-guard/windows-agent/acl-protection.js');
@@ -25,6 +26,7 @@ const HOST = '127.0.0.1';
 const threatIntel = new ThreatIntelService();
 const scanner = new ScannerBridge({ threatIntel });
 const sandbox = new SandboxController({ allowExperimentalDetonation: process.env.MALGUARD_EXPERIMENTAL_SANDBOX === '1' });
+const validationLab = new EmbeddedValidationLab({ windowsBackend: sandbox.windowsBackend });
 const modelPipeline = new ModelScanPipelineManager({ scanner, sandbox });
 const entitlementGate = new EntitlementGate();
 const errorReporter = new LocalErrorReporter();
@@ -109,6 +111,7 @@ async function handler(req, res) {
     if (req.method === 'POST' && url.pathname === '/api/install') { const body = await readJson(req); if (typeof body.source !== 'string' || typeof body.destination !== 'string') return json(res, 400, { ok: false, code: 'SOURCE_AND_DESTINATION_REQUIRED' }); ensureAgent(); return json(res, 200, await managedInstall.install(body.source, body.destination)); }
     if (req.method === 'GET' && url.pathname === '/api/incidents') return json(res, 200, { ok: true, incidents: await incidentStore.list(100) });
     if (req.method === 'POST' && url.pathname === '/api/sandbox/self-test') return json(res, 200, await sandbox.selfTest());
+    if (req.method === 'POST' && url.pathname === '/api/sandbox/readiness') return json(res, 200, await validationLab.run());
     if (req.method === 'POST' && url.pathname === '/api/sandbox/analyze') { const entitlement = requirePlanForApi(res, 'pro'); if (!entitlement) return; const body = await readJson(req); const result = await sandbox.analyzeUntrustedSample(body.path); return json(res, result.ok ? 200 : 409, result); }
     if (req.method === 'POST' && url.pathname === '/api/self-test') { const probe = await sandbox.selfTest(); const fixture = path.join(ROOT, 'tests', 'corpus', 'benign-config-read.lua'); const scan = await scanner.scanPath(fixture, 'pro'); return json(res, 200, { ok: probe.ok && scan.finalVerdict === 'safe', checks: { scanner: { ok: scan.finalVerdict === 'safe', verdict: scan.finalVerdict }, sandboxIsolationProbe: probe, guardConfiguration: { ok: config.watchRoots.length > 0, configured: config.watchRoots.length > 0 } } }); }
     if (req.method === 'GET' && await serveStatic(url.pathname, res)) return;
@@ -146,4 +149,4 @@ if (require.main === module) {
   }).catch(async error => { await recordRuntimeError(error, { area: 'startup' }); console.error(`MalGuard startup failed: ${safeText(error.code || error.name || 'INTERNAL_ERROR', 128)}`); process.exit(1); });
 }
 
-module.exports = { startServer, handler, scanner, sandbox, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }) };
+module.exports = { startServer, handler, scanner, sandbox, validationLab, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }) };

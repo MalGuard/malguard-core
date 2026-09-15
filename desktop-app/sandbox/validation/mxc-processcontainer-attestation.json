@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "malguard-mxc-processcontainer-ci-attestation",
+  "validatedAt": "2026-09-15T14:04:16Z",
+  "validatedCommit": "12247072da34c49b9e5781944f4233390d385ba3",
+  "workflow": {
+    "name": "MalGuard MXC ProcessContainer Live Validation",
+    "runId": 34979026477,
+    "jobId": 104414159007,
+    "conclusion": "success"
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Enterprise",
+    "osBuild": "10.0.26200",
+    "architecture": "Arm64",
+    "runnerImage": "windows-11-vs2026-arm64",
+    "runnerImageVersion": "20260907.151.1"
+  },
+  "backend": {
+    "name": "mxc-processcontainer",
+    "sdk": "@microsoft/mxc-sdk",
+    "sdkVersion": "0.8.0",
+    "isolationTier": "appcontainer-dacl"
+  },
+  "scope": {
+    "syntheticOnly": true,
+    "untrustedSamplesExecuted": false,
+    "malwareDownloaded": false,
+    "untrustedExecutionCertified": false,
+    "authoritativeForProBehavioralRelease": false
+  },
+  "checks": {
+    "hostBaselineConnected": true,
+    "childExitCodeZero": true,
+    "deniedReadBlocked": true,
+    "readonlyWriteBlocked": true,
+    "networkDenied": true,
+    "hostSecretAbsent": true,
+    "ok": true
+  },
+  "validatedHarnessBlobs": {
+    "tests/mxc-processcontainer-live-validation.mjs": "a08edfd28c18741c145ca0a415f5689b97147fbc",
+    "native/mxc-synthetic-child/MalGuardMxcSyntheticChild.cpp": "234a49404726303ccb9d9d88001f8d2dc1e3d67c",
+    "native/mxc-synthetic-child/CMakeLists.txt": "c1e2e86bf03458211453c446b56042a02158e6d7"
+  }
+}

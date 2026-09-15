@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { SandboxController } = require('./sandbox-controller.js');
 const { WindowsSandboxBackend } = require('./windows-sandbox-backend.js');
 const { TELEMETRY_SCHEMA_VERSION, validateTelemetry, evaluateTelemetry } = require('./telemetry-validator.js');
+const { loadMxcAttestation, evaluateIsolationReadiness } = require('./isolation-readiness.js');
 
 const LAB_SCHEMA_VERSION = '1.0.0';
 
@@ -118,7 +119,11 @@ class EmbeddedValidationLab {
       ));
 
       const embeddedChecksPassed = checks.every(item => item.ok === true);
-      const windowsSandboxCertified = controllerSelfTest && controllerSelfTest.releaseReady === true;
+      const readiness = evaluateIsolationReadiness({
+        embeddedChecksPassed,
+        controllerSelfTest,
+        mxcAttestation: loadMxcAttestation(),
+      });
 
       return {
         schemaVersion: LAB_SCHEMA_VERSION,
@@ -132,17 +137,19 @@ class EmbeddedValidationLab {
           releaseGateBypassed: false,
         },
         checks,
-        engineeringReady: embeddedChecksPassed,
-        windowsSandboxCertified,
-        releaseReady: windowsSandboxCertified,
+        engineeringReady: readiness.engineeringReady,
+        windowsSandboxCertified: readiness.windowsSandboxCertified,
+        proBehavioralSandboxReady: readiness.proBehavioralSandboxReady,
+        releaseReady: readiness.releaseReady,
+        mxcProcessContainer: readiness.mxcProcessContainer,
+        scopedReadiness: readiness.scopedReadiness,
+        readinessBlockers: readiness.blockers,
         windowsSandbox: controllerSelfTest ? {
           available: !!(controllerSelfTest.windowsSandbox && controllerSelfTest.windowsSandbox.available),
           releaseGrade: !!(controllerSelfTest.windowsSandbox && controllerSelfTest.windowsSandbox.releaseGrade),
           blockers: Array.isArray(controllerSelfTest.blockers) ? controllerSelfTest.blockers : [],
         } : null,
-        status: windowsSandboxCertified
-          ? 'PASS_WINDOWS_SANDBOX_CERTIFIED'
-          : (embeddedChecksPassed ? 'PASS_EMBEDDED_VALIDATION_WINDOWS_SANDBOX_PENDING' : 'FAIL_EMBEDDED_VALIDATION'),
+        status: readiness.status,
       };
     } finally {
       await fs.promises.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
