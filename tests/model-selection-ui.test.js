@@ -16,4 +16,11 @@ assert.match(js, /Pro: direct Sandbox analysis/);
 assert.match(js, /Plus: deep staged analysis/);
 assert.doesNotMatch(js, /\/api\/sandbox\/analyze/, 'direct sample analysis should be reached through Pro model, not a duplicate UI control');
 
-console.log('✓ Choose Model UI: Standard/Plus/Pro semantics and direct Pro Sandbox routing surface passed');
+assert.match(html, /Final Windows Sandbox Acceptance/);
+assert.match(html, /id="finalSandboxTest"/);
+assert.match(html, /id="finalSandboxSummary"/);
+assert.match(js, /\/api\/sandbox\/self-test/);
+assert.match(js, /report\.releaseReady===true/);
+assert.match(js, /No certification has been claimed/);
+
+console.log('✓ Choose Model UI: Standard/Plus/Pro semantics and in-app final Windows Sandbox acceptance surface passed');

@@ -70,10 +70,11 @@
       <button id="selfTest">Run Self-Test</button>
       <pre id="selfOut">Not run.</pre>
 
-      <h2>Sandbox backend test</h2>
-      <button id="sandboxTest">Run isolation probe</button>
-      <p class="warning">Pro uses the Sandbox directly. Behavioral execution remains fail-closed until the hardened Windows sandbox acceptance gates pass.</p>
-      <pre id="sandboxOut">No sandbox probe yet.</pre>
+      <h2>Final Windows Sandbox Acceptance</h2>
+      <p class="muted">Runs MalGuard's synthetic-only final Sandbox acceptance path. If a real Windows Sandbox backend is available on this host, MalGuard automatically attempts native containment and real isolation validation. It reports CERTIFIED only when the real release gate passes.</p>
+      <button id="finalSandboxTest">Run Final Windows Sandbox Acceptance</button>
+      <p id="finalSandboxSummary" class="warning">Not run. Windows Sandbox certification has not been claimed.</p>
+      <pre id="finalSandboxOut">No final Sandbox acceptance result yet.</pre>
     </section>
   </main>
   <script src="/app.js"></script>
