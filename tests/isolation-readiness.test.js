@@ -45,8 +45,18 @@ assert.equal(pending.scopedReadiness.standard, true);
 assert.equal(pending.scopedReadiness.plusStaticAndReputation, true);
 assert.equal(pending.scopedReadiness.plusSandboxEscalation, false);
 assert.equal(pending.scopedReadiness.proBehavioralSandbox, false);
+assert.equal(pending.releaseProfiles.standard.ready, true);
+assert.equal(pending.releaseProfiles.standard.coverage, 100);
+assert.equal(pending.releaseProfiles.plus.ready, false);
+assert.equal(pending.releaseProfiles.pro.ready, false);
+assert.equal(pending.deployableReleaseReady, true);
+assert.equal(pending.deployableReleaseProfile, 'standard-only');
+assert.deepEqual(pending.deployableBlockers, []);
+assert(pending.lockedCapabilities.includes('plus-sandbox-escalation'));
+assert(pending.lockedCapabilities.includes('pro-behavioral-sandbox'));
 assert.equal(pending.releaseReady, false, 'MXC synthetic evidence must never unlock full behavioral release');
-assert.equal(pending.status, 'ENGINEERING_READY_PRO_SANDBOX_PENDING');
+assert.equal(pending.fullProductReleaseReady, false);
+assert.equal(pending.status, 'STANDARD_RELEASE_READY_PLUS_PRO_LOCKED');
 assert(pending.blockers.includes('windows_sandbox_runtime_certification_pending'));
 
 const certifiedController = {
@@ -62,6 +72,13 @@ assert.equal(certified.engineeringReady, true);
 assert.equal(certified.windowsSandboxCertified, true);
 assert.equal(certified.proBehavioralSandboxReady, true);
 assert.equal(certified.releaseReady, true);
+assert.equal(certified.fullProductReleaseReady, true);
+assert.equal(certified.deployableReleaseReady, true);
+assert.equal(certified.deployableReleaseProfile, 'standard-plus-pro');
+assert.equal(certified.releaseProfiles.standard.ready, true);
+assert.equal(certified.releaseProfiles.plus.ready, true);
+assert.equal(certified.releaseProfiles.pro.ready, true);
+assert.deepEqual(certified.lockedCapabilities, []);
 assert.equal(certified.status, 'FULL_RELEASE_READY');
 
 const unsafeAttestation = JSON.parse(JSON.stringify(attestation));
@@ -74,6 +91,8 @@ const unsafeReadiness = evaluateIsolationReadiness({
   mxcAttestation: unsafeAttestation,
 });
 assert.equal(unsafeReadiness.engineeringReady, false);
+assert.equal(unsafeReadiness.deployableReleaseReady, false);
 assert.equal(unsafeReadiness.releaseReady, false);
+assert.equal(unsafeReadiness.deployableReleaseProfile, 'none');
 
-console.log('✓ Isolation readiness: MXC live evidence is scoped, source-pinned, and cannot bypass Pro Windows Sandbox certification');
+console.log('✓ Isolation readiness: Standard can be fully release-ready while Plus/Pro remain locked until real Windows Sandbox certification');
