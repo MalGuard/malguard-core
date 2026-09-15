@@ -10,7 +10,7 @@ const { TELEMETRY_SCHEMA_VERSION, validateTelemetry, evaluateTelemetry } = requi
 const { loadMxcAttestation, evaluateIsolationReadiness } = require('./isolation-readiness.js');
 const { VirtualWindowsValidationLab } = require('./virtual-windows-validation-lab.js');
 
-const LAB_SCHEMA_VERSION = '1.2.0';
+const LAB_SCHEMA_VERSION = '1.3.0';
 
 function check(name, ok, details = null) {
   return { name, ok: ok === true, details };
@@ -158,17 +158,26 @@ class EmbeddedValidationLab {
           malwareDownloaded: false,
           releaseGateBypassed: false,
           realWindowsSandboxClaimedByVirtualLab: false,
+          runtimeSandboxGateStillEnforced: true,
         },
         checks,
         engineeringValidationPercent,
         engineeringReady: readiness.engineeringReady,
+        productImplementationReady: readiness.productImplementationReady,
+        productReadinessPercent: readiness.productReadinessPercent,
+        productReleaseReady: readiness.productReleaseReady,
+        artifactReleaseReady: readiness.artifactReleaseReady,
         deployableReleaseReady: readiness.deployableReleaseReady,
         deployableReleaseProfile: readiness.deployableReleaseProfile,
         deployableBlockers: readiness.deployableBlockers,
         releaseProfiles: readiness.releaseProfiles,
         fullProductReleaseReady: readiness.fullProductReleaseReady,
         windowsSandboxCertified: readiness.windowsSandboxCertified,
+        runtimeCapabilitiesReadyOnCurrentHost: readiness.runtimeCapabilitiesReadyOnCurrentHost,
+        runtimeSelfCertification: readiness.runtimeSelfCertification,
+        runtimeBlockers: readiness.runtimeBlockers,
         proBehavioralSandboxReady: readiness.proBehavioralSandboxReady,
+        plusSandboxEscalationReady: readiness.plusSandboxEscalationReady,
         releaseReady: readiness.releaseReady,
         lockedCapabilities: readiness.lockedCapabilities,
         virtualWindowsLab: virtualWindows,

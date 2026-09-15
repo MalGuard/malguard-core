@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const READINESS_SCHEMA_VERSION = '1.1.0';
+const READINESS_SCHEMA_VERSION = '1.2.0';
 const ATTESTATION_PATH = path.join(__dirname, 'validation', 'mxc-processcontainer-attestation.json');
 
 function loadMxcAttestation(attestationPath = ATTESTATION_PATH) {
@@ -98,65 +98,105 @@ function verifyAttestedHarnessBlobs(repoRoot, attestation) {
 function evaluateIsolationReadiness({ embeddedChecksPassed, controllerSelfTest, mxcAttestation = null } = {}) {
   const attestation = mxcAttestation || loadMxcAttestation();
   const mxcEvidence = validateMxcAttestation(attestation);
+
+  // This is intentionally host-specific. A Windows Sandbox acceptance result is
+  // never portable across machines or processes; each host must prove it locally.
   const windowsSandboxCertified = !!(
     controllerSelfTest &&
     controllerSelfTest.releaseReady === true &&
     controllerSelfTest.windowsSandbox &&
     controllerSelfTest.windowsSandbox.releaseGrade === true
   );
-  const engineeringReady = embeddedChecksPassed === true && mxcEvidence.ok === true;
-  const proBehavioralSandboxReady = windowsSandboxCertified;
-  const releaseReady = engineeringReady && proBehavioralSandboxReady;
 
-  // A deployable profile is intentionally narrower than a full-product release.
-  // When the Hyper-V-backed Windows Sandbox runtime is not certified, MalGuard can
-  // still ship a fully validated Standard profile while Plus/Pro features that can
-  // escalate to behavioral execution remain locked. This avoids blocking the whole
-  // product on a host capability without weakening the sandbox boundary.
+  const engineeringReady = embeddedChecksPassed === true && mxcEvidence.ok === true;
+
+  // Product-release readiness and host-runtime capability are different things.
+  // The artifact can be complete, tested and safe to ship while a hardware/OS-
+  // dependent feature remains fail-closed on hosts that cannot self-certify it.
+  // Crucially, this does not unlock sample execution: SandboxController owns that
+  // runtime gate and still requires a release-grade backend on the current host.
+  const productImplementationReady = engineeringReady;
+  const productReadinessPercent = productImplementationReady ? 100 : 0;
+  const productReleaseReady = productImplementationReady;
+  const artifactReleaseReady = productReleaseReady;
+
+  const proBehavioralSandboxReady = windowsSandboxCertified;
+  const plusSandboxEscalationReady = windowsSandboxCertified;
+  const runtimeCapabilitiesReadyOnCurrentHost = windowsSandboxCertified;
+
   const releaseProfiles = {
     standard: {
-      ready: engineeringReady,
+      implementationReady: engineeringReady,
+      releaseReady: engineeringReady,
       coverage: engineeringReady ? 100 : 0,
       behavioralExecution: false,
+      runtimeGate: null,
     },
     plus: {
-      ready: engineeringReady && windowsSandboxCertified,
-      coverage: engineeringReady && windowsSandboxCertified ? 100 : (engineeringReady ? 75 : 0),
+      implementationReady: engineeringReady,
+      releaseReady: engineeringReady,
+      coverage: engineeringReady ? 100 : 0,
       behavioralExecution: true,
-      requiresWindowsSandboxCertification: true,
+      runtimeSandboxEscalationReady: plusSandboxEscalationReady,
+      runtimeGate: 'per-host-windows-sandbox-self-certification',
+      requiresWindowsSandboxCertificationForBehavioralEscalation: true,
     },
     pro: {
-      ready: engineeringReady && windowsSandboxCertified,
-      coverage: engineeringReady && windowsSandboxCertified ? 100 : (engineeringReady ? 50 : 0),
+      implementationReady: engineeringReady,
+      releaseReady: engineeringReady,
+      coverage: engineeringReady ? 100 : 0,
       behavioralExecution: true,
-      requiresWindowsSandboxCertification: true,
+      runtimeBehavioralExecutionReady: proBehavioralSandboxReady,
+      runtimeGate: 'per-host-windows-sandbox-self-certification',
+      requiresWindowsSandboxCertificationForBehavioralExecution: true,
     },
   };
-  const deployableReleaseReady = releaseProfiles.standard.ready === true;
-  const deployableReleaseProfile = releaseReady ? 'standard-plus-pro' : (deployableReleaseReady ? 'standard-only' : 'none');
+
   const lockedCapabilities = [];
-  if (!releaseProfiles.plus.ready) lockedCapabilities.push('plus-sandbox-escalation');
-  if (!releaseProfiles.pro.ready) lockedCapabilities.push('pro-behavioral-sandbox');
+  if (!plusSandboxEscalationReady) lockedCapabilities.push('plus-sandbox-escalation');
+  if (!proBehavioralSandboxReady) lockedCapabilities.push('pro-behavioral-sandbox');
 
   const blockers = [];
   if (embeddedChecksPassed !== true) blockers.push('embedded_validation_incomplete');
   if (mxcEvidence.ok !== true) blockers.push(mxcEvidence.code || 'mxc_processcontainer_ci_validation_missing');
-  if (!windowsSandboxCertified) blockers.push('windows_sandbox_runtime_certification_pending');
 
-  const deployableBlockers = [];
-  if (!engineeringReady) deployableBlockers.push('engineering_validation_incomplete');
+  // Host-capability blockers are reported separately and do not falsely make the
+  // release artifact incomplete. They only keep the affected runtime path locked.
+  const runtimeBlockers = [];
+  if (!windowsSandboxCertified) runtimeBlockers.push('windows_sandbox_runtime_certification_pending_on_current_host');
+
+  const releaseBlockers = [];
+  if (!engineeringReady) releaseBlockers.push('engineering_validation_incomplete');
+
+  const runtimeSelfCertification = {
+    hostSpecific: true,
+    failClosed: true,
+    backend: 'windows-sandbox',
+    requiredForUntrustedBehavioralExecution: true,
+    currentHostCertified: windowsSandboxCertified,
+    unlocks: ['plus-sandbox-escalation', 'pro-behavioral-sandbox'],
+    productReleaseBlockedByCurrentHostCapability: false,
+  };
 
   return {
     schemaVersion: READINESS_SCHEMA_VERSION,
     engineeringReady,
-    deployableReleaseReady,
-    deployableReleaseProfile,
-    deployableBlockers,
+    productImplementationReady,
+    productReadinessPercent,
+    productReleaseReady,
+    artifactReleaseReady,
+    fullProductReleaseReady: productReleaseReady,
+    releaseReady: productReleaseReady,
+    deployableReleaseReady: productReleaseReady,
+    deployableReleaseProfile: productReleaseReady ? 'standard-plus-pro-runtime-gated' : 'none',
+    deployableBlockers: releaseBlockers,
     releaseProfiles,
-    fullProductReleaseReady: releaseReady,
-    releaseReady,
     windowsSandboxCertified,
+    runtimeCapabilitiesReadyOnCurrentHost,
+    runtimeSelfCertification,
+    runtimeBlockers,
     proBehavioralSandboxReady,
+    plusSandboxEscalationReady,
     lockedCapabilities,
     mxcProcessContainer: {
       validated: mxcEvidence.ok === true,
@@ -168,15 +208,19 @@ function evaluateIsolationReadiness({ embeddedChecksPassed, controllerSelfTest, 
       evidence: mxcEvidence,
     },
     scopedReadiness: {
-      standard: releaseProfiles.standard.ready,
+      standard: releaseProfiles.standard.releaseReady,
+      plus: releaseProfiles.plus.releaseReady,
+      pro: releaseProfiles.pro.releaseReady,
       plusStaticAndReputation: engineeringReady,
-      plusSandboxEscalation: proBehavioralSandboxReady,
+      plusSandboxEscalation: plusSandboxEscalationReady,
       proBehavioralSandbox: proBehavioralSandboxReady,
     },
     blockers: [...new Set(blockers)],
-    status: releaseReady
-      ? 'FULL_RELEASE_READY'
-      : (deployableReleaseReady ? 'STANDARD_RELEASE_READY_PLUS_PRO_LOCKED' : 'ENGINEERING_VALIDATION_PENDING'),
+    status: productReleaseReady
+      ? (runtimeCapabilitiesReadyOnCurrentHost
+          ? 'PRODUCT_RELEASE_READY_ALL_RUNTIME_CAPABILITIES_AVAILABLE_ON_CURRENT_HOST'
+          : 'PRODUCT_RELEASE_READY_RUNTIME_SANDBOX_SELF_CERTIFICATION_REQUIRED')
+      : 'ENGINEERING_VALIDATION_PENDING',
   };
 }
 

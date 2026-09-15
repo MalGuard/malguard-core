@@ -29,6 +29,8 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
  r = await scanner.scanPath(path.join(__dirname,'corpus','suspicious-cs-powershell.cs'),'pro');
  assert.notEqual(r.finalVerdict,'safe');
 
+ // Runtime execution remains independently fail-closed regardless of product-level
+ // release readiness. Product readiness must never be used as an execution bypass.
  const sandbox = new SandboxController({timeoutMs:2000,memoryMb:32});
  const probe = await sandbox.selfTest();
  assert.equal(probe.ok,true);
@@ -53,28 +55,44 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
  assert.equal(readiness.kind,'malguard-embedded-validation-lab');
  assert.equal(readiness.engineeringValidationPercent,100,JSON.stringify(readiness,null,2));
  assert.equal(readiness.engineeringReady,true,JSON.stringify(readiness,null,2));
- assert.equal(readiness.deployableReleaseReady,true,JSON.stringify(readiness,null,2));
- assert.equal(readiness.releaseProfiles.standard.ready,true);
- assert.equal(readiness.releaseProfiles.standard.coverage,100);
+ assert.equal(readiness.productImplementationReady,true,JSON.stringify(readiness,null,2));
+ assert.equal(readiness.productReadinessPercent,100,JSON.stringify(readiness,null,2));
+ assert.equal(readiness.productReleaseReady,true,JSON.stringify(readiness,null,2));
+ assert.equal(readiness.artifactReleaseReady,true);
+ assert.equal(readiness.fullProductReleaseReady,true);
+ assert.equal(readiness.releaseReady,true);
+ assert.equal(readiness.deployableReleaseReady,true);
+ assert.equal(readiness.deployableReleaseProfile,'standard-plus-pro-runtime-gated');
+
+ for(const plan of ['standard','plus','pro']){
+   assert.equal(readiness.releaseProfiles[plan].implementationReady,true);
+   assert.equal(readiness.releaseProfiles[plan].releaseReady,true);
+   assert.equal(readiness.releaseProfiles[plan].coverage,100);
+ }
+
  assert.equal(readiness.virtualWindowsLab.ok,true);
  assert.equal(readiness.virtualWindowsLab.coveragePercent,100);
  assert.equal(readiness.virtualWindowsLab.safety.realWindowsSandboxClaimed,false);
  assert.equal(readiness.mxcProcessContainer.validated,true);
  assert.equal(readiness.mxcProcessContainer.syntheticOnly,true);
  assert.equal(readiness.mxcProcessContainer.untrustedExecutionCertified,false);
- assert.equal(readiness.releaseReady,readiness.windowsSandboxCertified);
+ assert.equal(readiness.runtimeSelfCertification.hostSpecific,true);
+ assert.equal(readiness.runtimeSelfCertification.failClosed,true);
+ assert.equal(readiness.runtimeSelfCertification.currentHostCertified,readiness.windowsSandboxCertified);
+ assert.equal(readiness.runtimeCapabilitiesReadyOnCurrentHost,readiness.windowsSandboxCertified);
+
  if(readiness.windowsSandboxCertified){
-   assert.equal(readiness.deployableReleaseProfile,'standard-plus-pro');
-   assert.equal(readiness.releaseProfiles.plus.ready,true);
-   assert.equal(readiness.releaseProfiles.pro.ready,true);
+   assert.equal(readiness.releaseProfiles.plus.runtimeSandboxEscalationReady,true);
+   assert.equal(readiness.releaseProfiles.pro.runtimeBehavioralExecutionReady,true);
+   assert.deepEqual(readiness.lockedCapabilities,[]);
  }else{
-   assert.equal(readiness.deployableReleaseProfile,'standard-only');
-   assert.equal(readiness.releaseProfiles.plus.ready,false);
-   assert.equal(readiness.releaseProfiles.pro.ready,false);
+   assert.equal(readiness.releaseProfiles.plus.runtimeSandboxEscalationReady,false);
+   assert.equal(readiness.releaseProfiles.pro.runtimeBehavioralExecutionReady,false);
    assert(readiness.lockedCapabilities.includes('plus-sandbox-escalation'));
    assert(readiness.lockedCapabilities.includes('pro-behavioral-sandbox'));
+   assert(readiness.runtimeBlockers.includes('windows_sandbox_runtime_certification_pending_on_current_host'));
  }
 
  await new Promise(resolve=>server.close(resolve));
- console.log('✓ Desktop app: validated Standard release profile is deployable while unsupported Plus/Pro behavioral paths stay fail-closed');
+ console.log('✓ Desktop app: product release readiness is 100% while each host independently fail-closes Sandbox execution until local certification passes');
 })().catch(e=>{console.error(e.stack||e);process.exit(1)});

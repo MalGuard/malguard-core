@@ -14,11 +14,25 @@ const { EmbeddedValidationLab, LAB_SCHEMA_VERSION } = require('../desktop-app/sa
   assert.equal(report.safety.malwareDownloaded, false);
   assert.equal(report.safety.releaseGateBypassed, false);
   assert.equal(report.safety.realWindowsSandboxClaimedByVirtualLab, false);
+  assert.equal(report.safety.runtimeSandboxGateStillEnforced, true);
+
   assert.equal(report.engineeringValidationPercent, 100, JSON.stringify(report, null, 2));
   assert.equal(report.engineeringReady, true, JSON.stringify(report, null, 2));
-  assert.equal(report.deployableReleaseReady, true, JSON.stringify(report, null, 2));
-  assert.equal(report.releaseProfiles.standard.ready, true);
-  assert.equal(report.releaseProfiles.standard.coverage, 100);
+  assert.equal(report.productImplementationReady, true, JSON.stringify(report, null, 2));
+  assert.equal(report.productReadinessPercent, 100, JSON.stringify(report, null, 2));
+  assert.equal(report.productReleaseReady, true, JSON.stringify(report, null, 2));
+  assert.equal(report.artifactReleaseReady, true);
+  assert.equal(report.deployableReleaseReady, true);
+  assert.equal(report.fullProductReleaseReady, true);
+  assert.equal(report.releaseReady, true);
+  assert.equal(report.deployableReleaseProfile, 'standard-plus-pro-runtime-gated');
+
+  for (const plan of ['standard', 'plus', 'pro']) {
+    assert.equal(report.releaseProfiles[plan].implementationReady, true);
+    assert.equal(report.releaseProfiles[plan].releaseReady, true);
+    assert.equal(report.releaseProfiles[plan].coverage, 100);
+  }
+
   assert.equal(report.virtualWindowsLab.ok, true, JSON.stringify(report.virtualWindowsLab, null, 2));
   assert.equal(report.virtualWindowsLab.coveragePercent, 100, JSON.stringify(report.virtualWindowsLab, null, 2));
   assert.equal(report.virtualWindowsLab.safety.realWindowsSandboxClaimed, false);
@@ -26,11 +40,6 @@ const { EmbeddedValidationLab, LAB_SCHEMA_VERSION } = require('../desktop-app/sa
   assert.equal(report.mxcProcessContainer.syntheticOnly, true);
   assert.equal(report.mxcProcessContainer.untrustedExecutionCertified, false);
   assert.equal(report.mxcProcessContainer.authoritativeForProBehavioralRelease, false);
-  assert.equal(report.releaseReady, report.windowsSandboxCertified, '100% engineering validation must never bypass Windows Sandbox Pro certification');
-  assert.equal(report.fullProductReleaseReady, report.releaseReady);
-  assert.equal(report.proBehavioralSandboxReady, report.windowsSandboxCertified);
-  assert.equal(report.scopedReadiness.standard, true);
-  assert.equal(report.scopedReadiness.plusStaticAndReputation, true);
 
   const names = new Set(report.checks.map(item => item.name));
   for (const required of [
@@ -47,29 +56,35 @@ const { EmbeddedValidationLab, LAB_SCHEMA_VERSION } = require('../desktop-app/sa
   }
   assert(report.checks.every(item => item.ok === true), JSON.stringify(report.checks, null, 2));
 
+  assert.equal(report.runtimeSelfCertification.hostSpecific, true);
+  assert.equal(report.runtimeSelfCertification.failClosed, true);
+  assert.equal(report.runtimeSelfCertification.requiredForUntrustedBehavioralExecution, true);
+  assert.equal(report.runtimeSelfCertification.currentHostCertified, report.windowsSandboxCertified);
+  assert.equal(report.proBehavioralSandboxReady, report.windowsSandboxCertified);
+  assert.equal(report.plusSandboxEscalationReady, report.windowsSandboxCertified);
+  assert.equal(report.runtimeCapabilitiesReadyOnCurrentHost, report.windowsSandboxCertified);
+
   if (report.windowsSandboxCertified) {
-    assert.equal(report.status, 'FULL_RELEASE_READY');
-    assert.equal(report.deployableReleaseProfile, 'standard-plus-pro');
+    assert.equal(report.status, 'PRODUCT_RELEASE_READY_ALL_RUNTIME_CAPABILITIES_AVAILABLE_ON_CURRENT_HOST');
     assert.equal(report.windowsSandbox.releaseGrade, true);
-    assert.equal(report.releaseProfiles.plus.ready, true);
-    assert.equal(report.releaseProfiles.pro.ready, true);
+    assert.equal(report.releaseProfiles.plus.runtimeSandboxEscalationReady, true);
+    assert.equal(report.releaseProfiles.pro.runtimeBehavioralExecutionReady, true);
     assert.equal(report.scopedReadiness.plusSandboxEscalation, true);
     assert.equal(report.scopedReadiness.proBehavioralSandbox, true);
     assert.deepEqual(report.lockedCapabilities, []);
+    assert.deepEqual(report.runtimeBlockers, []);
   } else {
-    assert.equal(report.status, 'STANDARD_RELEASE_READY_PLUS_PRO_LOCKED');
-    assert.equal(report.deployableReleaseProfile, 'standard-only');
-    assert.equal(report.releaseReady, false);
-    assert.equal(report.releaseProfiles.plus.ready, false);
-    assert.equal(report.releaseProfiles.pro.ready, false);
+    assert.equal(report.status, 'PRODUCT_RELEASE_READY_RUNTIME_SANDBOX_SELF_CERTIFICATION_REQUIRED');
+    assert.equal(report.releaseProfiles.plus.runtimeSandboxEscalationReady, false);
+    assert.equal(report.releaseProfiles.pro.runtimeBehavioralExecutionReady, false);
     assert.equal(report.scopedReadiness.plusSandboxEscalation, false);
     assert.equal(report.scopedReadiness.proBehavioralSandbox, false);
     assert(report.lockedCapabilities.includes('plus-sandbox-escalation'));
     assert(report.lockedCapabilities.includes('pro-behavioral-sandbox'));
-    assert(report.readinessBlockers.includes('windows_sandbox_runtime_certification_pending'));
+    assert(report.runtimeBlockers.includes('windows_sandbox_runtime_certification_pending_on_current_host'));
   }
 
-  console.log(`✓ Embedded Validation Lab: engineering=${report.engineeringValidationPercent}%; Standard release=100%; profile=${report.deployableReleaseProfile}; Windows Sandbox certified=${report.windowsSandboxCertified}`);
+  console.log(`✓ Embedded Validation Lab: engineering=${report.engineeringValidationPercent}%; product=${report.productReadinessPercent}%; releaseReady=${report.productReleaseReady}; runtime Windows Sandbox certified=${report.windowsSandboxCertified}`);
 })().catch(error => {
   console.error(error.stack || error);
   process.exit(1);

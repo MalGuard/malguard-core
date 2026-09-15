@@ -12,8 +12,8 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelect
 
 const MODEL_HINTS={
  standard:'Standard: local scan only.',
- plus:'Plus: deep staged analysis; suspicious or inconclusive files are routed to Sandbox automatically.',
- pro:'Pro: direct Sandbox analysis. No normal Standard/Plus scan is run before the Sandbox.',
+ plus:'Plus: deep staged analysis; suspicious or inconclusive files escalate to Sandbox only after this host passes its local runtime self-certification.',
+ pro:'Pro: direct Sandbox analysis after minimal preflight; behavioral execution stays locked on hosts that have not passed the real Windows Sandbox self-test.',
 };
 function currentModel(){return $('scanModel').value}
 function updateModelUi(){
@@ -76,46 +76,47 @@ $('disableGate').onclick=async()=>out('gateOut',await api('/api/access-gate/disa
 $('gateStatus').onclick=async()=>out('gateOut',await api('/api/access-gate/status'));
 
 function renderIsolationReadiness(report){
- const releaseReady=!!(report&&report.releaseReady===true);
- const deployable=!!(report&&report.deployableReleaseReady===true);
- const profile=report&&report.deployableReleaseProfile?report.deployableReleaseProfile:'none';
+ const productReady=!!(report&&report.productReleaseReady===true);
+ const productPercent=Number(report&&report.productReadinessPercent)||0;
  const engineeringReady=!!(report&&report.engineeringReady===true);
  const engineeringPercent=Number(report&&report.engineeringValidationPercent)||0;
+ const runtimeReady=!!(report&&report.runtimeCapabilitiesReadyOnCurrentHost===true);
+ const selfCert=report&&report.runtimeSelfCertification?report.runtimeSelfCertification:null;
  const virtual=report&&report.virtualWindowsLab?report.virtualWindowsLab:null;
  const virtualPercent=Number(virtual&&virtual.coveragePercent)||0;
- const backend=report&&report.windowsSandbox?report.windowsSandbox:null;
- const available=!!(backend&&backend.available===true);
  const mxc=report&&report.mxcProcessContainer?report.mxcProcessContainer:null;
  const mxcValidated=!!(mxc&&mxc.validated===true);
- const standard=report&&report.releaseProfiles&&report.releaseProfiles.standard?report.releaseProfiles.standard:null;
  const summary=$('finalSandboxSummary');
- if(releaseReady){
-   summary.textContent=`FULL PRODUCT RELEASE READY — engineering validation ${engineeringPercent}% and real Windows Sandbox Pro acceptance PASS.`;
- }else if(deployable&&profile==='standard-only'&&standard&&standard.coverage===100){
-   summary.textContent='STANDARD RELEASE READY 100% — the validated Standard profile can ship now. Plus/Pro sandbox-dependent capabilities remain locked until real Windows Sandbox runtime certification passes.';
- }else if(engineeringReady&&engineeringPercent===100&&virtualPercent===100&&mxcValidated){
-   summary.textContent=available
-     ? 'ENGINEERING VALIDATION 100% — Virtual Windows Lab 100% and MXC live isolation PASS. Real Windows Sandbox exists here but final behavioral certification is still pending.'
-     : 'ENGINEERING VALIDATION 100% — Virtual Windows Lab 100% and MXC live isolation PASS. Real Windows Sandbox runtime certification remains pending and is not being faked.';
- }else if(engineeringReady&&mxcValidated){
-   summary.textContent=`ENGINEERING PASS (${engineeringPercent}%) — MXC ProcessContainer live isolation is validated, but one or more virtual/full engineering checks are incomplete.`;
- }else if(available){
-   summary.textContent='PENDING — Windows Sandbox is present, but one or more engineering or final acceptance gates did not pass.';
+
+ if(productReady&&productPercent===100&&engineeringPercent===100&&virtualPercent===100&&mxcValidated){
+   if(runtimeReady){
+     summary.textContent='PRODUCT READINESS 100% — engineering, release artifact, Virtual Windows validation and this host\'s real Windows Sandbox runtime acceptance all PASS.';
+   }else{
+     summary.textContent='PRODUCT READINESS 100% — Standard, Plus and Pro implementation/release profiles are complete. This machine\'s Sandbox-dependent runtime paths remain safely LOCKED until its local Windows Sandbox self-test passes.';
+   }
+ }else if(engineeringReady){
+   summary.textContent=`PRODUCT VALIDATION INCOMPLETE — engineering ${engineeringPercent}%, product ${productPercent}%. Runtime capability gates remain fail-closed.`;
  }else{
-   summary.textContent='PENDING — engineering validation is incomplete. No unsupported capability is being marked release-ready.';
+   summary.textContent='PENDING — engineering validation is incomplete. No unsupported capability is being marked ready.';
+ }
+
+ if(selfCert&&selfCert.hostSpecific===true&&selfCert.failClosed===true){
+   summary.textContent += selfCert.currentHostCertified
+     ? ' Runtime self-certification: PASS on this host.'
+     : ' Runtime self-certification: required per host; current host has not certified Windows Sandbox.';
  }
  out('finalSandboxOut',report);
 }
 $('finalSandboxTest').onclick=async()=>{
  const button=$('finalSandboxTest');
  button.disabled=true;
- $('finalSandboxSummary').textContent='Running Virtual Windows Lab, embedded safety checks and capability-scoped release readiness…';
+ $('finalSandboxSummary').textContent='Running full product validation and this host\'s Sandbox self-certification check…';
  $('finalSandboxOut').textContent='Running…';
  try{
    const report=await api('/api/sandbox/readiness','POST',{});
    renderIsolationReadiness(report);
  }catch(e){
-   $('finalSandboxSummary').textContent='FAIL — validation-lab request could not complete.';
+   $('finalSandboxSummary').textContent='FAIL — validation request could not complete.';
    out('finalSandboxOut',{ok:false,code:'ISOLATION_READINESS_UI_ERROR',message:e.message});
  }finally{
    button.disabled=false;
