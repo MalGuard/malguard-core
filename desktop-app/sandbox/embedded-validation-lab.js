@@ -10,7 +10,7 @@ const { TELEMETRY_SCHEMA_VERSION, validateTelemetry, evaluateTelemetry } = requi
 const { loadMxcAttestation, evaluateIsolationReadiness } = require('./isolation-readiness.js');
 const { VirtualWindowsValidationLab } = require('./virtual-windows-validation-lab.js');
 
-const LAB_SCHEMA_VERSION = '1.1.0';
+const LAB_SCHEMA_VERSION = '1.2.0';
 
 function check(name, ok, details = null) {
   return { name, ok: ok === true, details };
@@ -162,9 +162,15 @@ class EmbeddedValidationLab {
         checks,
         engineeringValidationPercent,
         engineeringReady: readiness.engineeringReady,
+        deployableReleaseReady: readiness.deployableReleaseReady,
+        deployableReleaseProfile: readiness.deployableReleaseProfile,
+        deployableBlockers: readiness.deployableBlockers,
+        releaseProfiles: readiness.releaseProfiles,
+        fullProductReleaseReady: readiness.fullProductReleaseReady,
         windowsSandboxCertified: readiness.windowsSandboxCertified,
         proBehavioralSandboxReady: readiness.proBehavioralSandboxReady,
         releaseReady: readiness.releaseReady,
+        lockedCapabilities: readiness.lockedCapabilities,
         virtualWindowsLab: virtualWindows,
         mxcProcessContainer: readiness.mxcProcessContainer,
         scopedReadiness: readiness.scopedReadiness,
