@@ -53,6 +53,9 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
  assert.equal(readiness.kind,'malguard-embedded-validation-lab');
  assert.equal(readiness.engineeringValidationPercent,100,JSON.stringify(readiness,null,2));
  assert.equal(readiness.engineeringReady,true,JSON.stringify(readiness,null,2));
+ assert.equal(readiness.deployableReleaseReady,true,JSON.stringify(readiness,null,2));
+ assert.equal(readiness.releaseProfiles.standard.ready,true);
+ assert.equal(readiness.releaseProfiles.standard.coverage,100);
  assert.equal(readiness.virtualWindowsLab.ok,true);
  assert.equal(readiness.virtualWindowsLab.coveragePercent,100);
  assert.equal(readiness.virtualWindowsLab.safety.realWindowsSandboxClaimed,false);
@@ -60,7 +63,18 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
  assert.equal(readiness.mxcProcessContainer.syntheticOnly,true);
  assert.equal(readiness.mxcProcessContainer.untrustedExecutionCertified,false);
  assert.equal(readiness.releaseReady,readiness.windowsSandboxCertified);
+ if(readiness.windowsSandboxCertified){
+   assert.equal(readiness.deployableReleaseProfile,'standard-plus-pro');
+   assert.equal(readiness.releaseProfiles.plus.ready,true);
+   assert.equal(readiness.releaseProfiles.pro.ready,true);
+ }else{
+   assert.equal(readiness.deployableReleaseProfile,'standard-only');
+   assert.equal(readiness.releaseProfiles.plus.ready,false);
+   assert.equal(readiness.releaseProfiles.pro.ready,false);
+   assert(readiness.lockedCapabilities.includes('plus-sandbox-escalation'));
+   assert(readiness.lockedCapabilities.includes('pro-behavioral-sandbox'));
+ }
 
  await new Promise(resolve=>server.close(resolve));
- console.log('✓ Desktop app: scanner, localhost service, 100% engineering validation surface, virtual Windows lab and fail-closed real Sandbox gate passed');
+ console.log('✓ Desktop app: validated Standard release profile is deployable while unsupported Plus/Pro behavioral paths stay fail-closed');
 })().catch(e=>{console.error(e.stack||e);process.exit(1)});
