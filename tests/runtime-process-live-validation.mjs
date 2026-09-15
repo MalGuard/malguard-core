@@ -73,15 +73,29 @@ try {
   await waitExit(safeChild);
 
   blockedChild = await launch();
+  let trustedChecks = 0;
   const blocked = new RuntimeGameProcessGuard({
     roots:[game], serviceMode:true, platform:'win32', intervalMs:60000,
-    trustedPath:async()=>false,
+    trustedPath:async()=>{ trustedChecks++; return false; },
     scanner:async()=>({verdict:'SAFE'}),
   });
+
+  const diagnosticSnapshot = await blocked._runHelper('Snapshot');
+  const diagnosticProcesses = Array.isArray(diagnosticSnapshot.processes) ? diagnosticSnapshot.processes.map(p => ({
+    pid:p.pid,
+    path:p.path,
+    insideProtectedRoot:blocked._insideProtectedRoot(p.path),
+    runtimeCode:blocked._isRuntimeCode(p.path),
+    moduleEnumerationOk:p.moduleEnumerationOk,
+    moduleCount:Array.isArray(p.modules) ? p.modules.length : -1,
+  })) : [];
+  console.log(JSON.stringify({ kind:'runtime-live-classification-diagnostic', configuredRoot:game, childPid:blockedChild.pid, processes:diagnosticProcesses }, null, 2));
+
   const blockedStart = await blocked.start();
   assert.equal(blockedStart.ok, true, JSON.stringify(blockedStart));
   const blockedStatus = await pollUntilAction(blocked, 'terminated_game_process');
-  assert.equal(blockedStatus.lastAction, 'terminated_game_process', JSON.stringify(blockedStatus));
+  assert(trustedChecks > 0, JSON.stringify({ trustedChecks, blockedStatus, diagnosticProcesses }, null, 2));
+  assert.equal(blockedStatus.lastAction, 'terminated_game_process', JSON.stringify({ trustedChecks, blockedStatus, diagnosticProcesses }, null, 2));
   await waitExit(blockedChild);
   assert.notEqual(blockedChild.exitCode, null, 'untrusted protected-root process should be terminated');
   await blocked.stop();
