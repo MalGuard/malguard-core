@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node desktop-app/server.js",
     "test": "node tests/run-all.js",
+    "verify:readiness": "node tools/verify-product-readiness.js",
     "package:portable": "node tools/build-portable-package.js"
   }
 }
