@@ -1,0 +1,78 @@
+name: MalGuard AppContainer Native Acceptance
+
+on:
+  push:
+    branches:
+      - dev/appcontainer-native-sandbox
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  appcontainer-native-acceptance:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Preserve repository line endings
+        shell: pwsh
+        run: |
+          git config --local core.autocrlf false
+          git -c core.autocrlf=false reset --hard HEAD
+
+      - name: Record Windows runner
+        shell: pwsh
+        run: |
+          Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+          cmake --version
+
+      - name: Configure AppContainer isolation probe
+        shell: pwsh
+        run: |
+          cmake -S native/appcontainer-isolation-probe -B build/appcontainer-probe -A x64
+
+      - name: Build AppContainer isolation probe
+        shell: pwsh
+        run: |
+          cmake --build build/appcontainer-probe --config Release --parallel
+
+      - name: Run synthetic AppContainer isolation acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Resolve-Path 'build/appcontainer-probe/Release/MalGuardAppContainerIsolationProbe.exe'
+          $json = & $exe --self-test-json
+          $exitCode = $LASTEXITCODE
+          Write-Host $json
+          if ($exitCode -ne 0) {
+            throw "AppContainer isolation probe failed with exit code $exitCode"
+          }
+          $report = $json | ConvertFrom-Json
+          $required = @(
+            'ok',
+            'profileCreated',
+            'folderResolved',
+            'executableCopied',
+            'processCreated',
+            'assignedToJobBeforeResume',
+            'childCompleted',
+            'tokenIsAppContainer',
+            'containerWriteAllowed',
+            'hostWriteDenied',
+            'networkDenied',
+            'childProcessBlocked',
+            'cleanupCompleted'
+          )
+          foreach ($name in $required) {
+            if ($report.$name -ne $true) {
+              throw "AppContainer acceptance field failed: $name"
+            }
+          }
+          if ([int]$report.childExitCode -ne 0) {
+            throw "Synthetic child exit code was $($report.childExitCode)"
+          }
+          Write-Host 'AppContainer native isolation acceptance PASS'
