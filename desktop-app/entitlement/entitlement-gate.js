@@ -17,11 +17,8 @@ function decodeToken(token) {
   const [payloadB64, signatureB64, extra] = token.split('.');
   if (!payloadB64 || !signatureB64 || extra !== undefined) throw Object.assign(new Error('invalid entitlement token'), { code: 'ENTITLEMENT_INVALID' });
   let claims;
-  try {
-    claims = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-  } catch (_) {
-    throw Object.assign(new Error('invalid entitlement payload'), { code: 'ENTITLEMENT_INVALID' });
-  }
+  try { claims = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')); }
+  catch (_) { throw Object.assign(new Error('invalid entitlement payload'), { code: 'ENTITLEMENT_INVALID' }); }
   return { payloadB64, signatureB64, claims };
 }
 
@@ -48,13 +45,17 @@ class EntitlementGate {
     return { valid: true, plan: claims.plan, subject: claims.subject || null, expiresAt: claims.expiresAt, source: 'signed-token' };
   }
 
-  requireModel(model) {
-    if (!Object.hasOwn(PLAN_LEVEL, model)) throw Object.assign(new Error('invalid model'), { code: 'INVALID_MODEL' });
+  requirePlan(plan) {
+    if (!Object.hasOwn(PLAN_LEVEL, plan)) throw Object.assign(new Error('invalid entitlement plan'), { code: 'INVALID_MODEL' });
     const entitlement = this.verify();
-    if (PLAN_LEVEL[entitlement.plan] < PLAN_LEVEL[model]) {
-      throw Object.assign(new Error(`${model} requires a higher entitlement`), { code: 'ENTITLEMENT_REQUIRED', requiredPlan: model, currentPlan: entitlement.plan });
+    if (PLAN_LEVEL[entitlement.plan] < PLAN_LEVEL[plan]) {
+      throw Object.assign(new Error(`${plan} requires a higher entitlement`), { code: 'ENTITLEMENT_REQUIRED', requiredPlan: plan, currentPlan: entitlement.plan });
     }
     return entitlement;
+  }
+
+  requireModel(model) {
+    return this.requirePlan(model);
   }
 
   status() {
