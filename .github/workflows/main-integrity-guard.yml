@@ -1,0 +1,42 @@
+name: MalGuard Main Integrity Guard
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  main-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout main history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Reject force pushes and direct single-parent commits
+        shell: bash
+        env:
+          MALGUARD_PUSH_FORCED: ${{ github.event.forced }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${MALGUARD_PUSH_FORCED}" == "true" ]]; then
+            echo "::error::Force-push detected on main. MalGuard policy requires PR merge commits."
+            exit 1
+          fi
+
+          parent_line="$(git rev-list --parents -n 1 HEAD)"
+          parent_count="$(( $(awk '{print NF}' <<< "${parent_line}") - 1 ))"
+
+          if (( parent_count < 2 )); then
+            echo "::error::Direct or squash/rebase commit detected on main. MalGuard policy requires merge commits produced through pull requests."
+            exit 1
+          fi
+
+          echo "Main integrity policy PASS: merge commit detected and push was not forced."
