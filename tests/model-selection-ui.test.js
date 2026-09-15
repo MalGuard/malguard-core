@@ -16,17 +16,19 @@ assert.match(js, /Pro: direct Sandbox analysis/);
 assert.match(js, /Plus: deep staged analysis/);
 assert.doesNotMatch(js, /\/api\/sandbox\/analyze/, 'direct sample analysis should be reached through Pro model, not a duplicate UI control');
 
-assert.match(html, /Virtual Windows Validation Lab & Final Sandbox Acceptance/);
+assert.match(html, /Virtual Windows Validation Lab & Release Profiles/);
 assert.match(html, /id="finalSandboxTest"/);
 assert.match(html, /id="finalSandboxSummary"/);
-assert.match(html, /100% engineering validation without pretending that WindowsSandbox\.exe ran/);
-assert.match(html, /Real Windows Sandbox remains a separate Pro behavioral runtime certification gate/);
+assert.match(html, /100% engineering coverage without pretending that WindowsSandbox\.exe ran/);
+assert.match(html, /Standard can be 100% release-ready/);
+assert.match(html, /Plus\/Pro sandbox-dependent behavior stays locked/);
 assert.match(js, /\/api\/sandbox\/readiness/);
 assert.match(js, /report\.releaseReady===true/);
-assert.match(js, /engineeringValidationPercent/);
-assert.match(js, /virtualWindowsLab/);
-assert.match(js, /ENGINEERING VALIDATION 100%/);
+assert.match(js, /deployableReleaseReady/);
+assert.match(js, /deployableReleaseProfile/);
+assert.match(js, /releaseProfiles\.standard/);
+assert.match(js, /STANDARD RELEASE READY 100%/);
+assert.match(js, /Plus\/Pro sandbox-dependent capabilities remain locked/);
 assert.match(js, /runtime certification remains pending and is not being faked/);
-assert.match(js, /No full-release certification has been claimed/);
 
-console.log('✓ Choose Model UI: Standard/Plus/Pro semantics plus 100% engineering/virtual-Windows validation surface passed');
+console.log('✓ Choose Model UI: capability-scoped release reporting keeps Standard deployable and Plus/Pro sandbox paths locked until certification');
