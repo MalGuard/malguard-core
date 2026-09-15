@@ -3,6 +3,7 @@ name: MalGuard MXC ProcessContainer Live Validation
 on:
   push:
     branches:
+      - main
       - dev/appcontainer-native-sandbox
   workflow_dispatch:
 
