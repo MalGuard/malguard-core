@@ -1,0 +1,56 @@
+name: MalGuard MXC ProcessContainer Live Validation
+
+on:
+  push:
+    branches:
+      - main
+      - dev/appcontainer-native-sandbox
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mxc-processcontainer-live-validation:
+    runs-on: windows-11-vs2026-arm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Record Windows 11 runner
+        shell: pwsh
+        run: |
+          Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "Architecture: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
+          Write-Host "Node: $(node --version)"
+          Write-Host "npm: $(npm --version)"
+          cmake --version
+
+      - name: Install pinned Microsoft MXC SDK
+        shell: pwsh
+        run: |
+          npm install --no-save --package-lock=false @microsoft/mxc-sdk@0.8.0
+
+      - name: Build static ARM64 synthetic fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S native/mxc-synthetic-child -B build/mxc-synthetic-child -A ARM64
+          cmake --build build/mxc-synthetic-child --config Release --parallel
+          $exe = Resolve-Path 'build/mxc-synthetic-child/Release/MalGuardMxcSyntheticChild.exe'
+          "MALGUARD_MXC_CHILD_EXE=$($exe.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run synthetic MXC ProcessContainer live acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node .\tests\mxc-processcontainer-live-validation.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "MXC ProcessContainer live validation failed with exit code $LASTEXITCODE"
+          }
