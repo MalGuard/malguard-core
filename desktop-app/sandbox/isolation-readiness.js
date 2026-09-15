@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const READINESS_SCHEMA_VERSION = '1.0.0';
+const READINESS_SCHEMA_VERSION = '1.1.0';
 const ATTESTATION_PATH = path.join(__dirname, 'validation', 'mxc-processcontainer-attestation.json');
 
 function loadMxcAttestation(attestationPath = ATTESTATION_PATH) {
@@ -107,17 +107,57 @@ function evaluateIsolationReadiness({ embeddedChecksPassed, controllerSelfTest, 
   const engineeringReady = embeddedChecksPassed === true && mxcEvidence.ok === true;
   const proBehavioralSandboxReady = windowsSandboxCertified;
   const releaseReady = engineeringReady && proBehavioralSandboxReady;
+
+  // A deployable profile is intentionally narrower than a full-product release.
+  // When the Hyper-V-backed Windows Sandbox runtime is not certified, MalGuard can
+  // still ship a fully validated Standard profile while Plus/Pro features that can
+  // escalate to behavioral execution remain locked. This avoids blocking the whole
+  // product on a host capability without weakening the sandbox boundary.
+  const releaseProfiles = {
+    standard: {
+      ready: engineeringReady,
+      coverage: engineeringReady ? 100 : 0,
+      behavioralExecution: false,
+    },
+    plus: {
+      ready: engineeringReady && windowsSandboxCertified,
+      coverage: engineeringReady && windowsSandboxCertified ? 100 : (engineeringReady ? 75 : 0),
+      behavioralExecution: true,
+      requiresWindowsSandboxCertification: true,
+    },
+    pro: {
+      ready: engineeringReady && windowsSandboxCertified,
+      coverage: engineeringReady && windowsSandboxCertified ? 100 : (engineeringReady ? 50 : 0),
+      behavioralExecution: true,
+      requiresWindowsSandboxCertification: true,
+    },
+  };
+  const deployableReleaseReady = releaseProfiles.standard.ready === true;
+  const deployableReleaseProfile = releaseReady ? 'standard-plus-pro' : (deployableReleaseReady ? 'standard-only' : 'none');
+  const lockedCapabilities = [];
+  if (!releaseProfiles.plus.ready) lockedCapabilities.push('plus-sandbox-escalation');
+  if (!releaseProfiles.pro.ready) lockedCapabilities.push('pro-behavioral-sandbox');
+
   const blockers = [];
   if (embeddedChecksPassed !== true) blockers.push('embedded_validation_incomplete');
   if (mxcEvidence.ok !== true) blockers.push(mxcEvidence.code || 'mxc_processcontainer_ci_validation_missing');
   if (!windowsSandboxCertified) blockers.push('windows_sandbox_runtime_certification_pending');
 
+  const deployableBlockers = [];
+  if (!engineeringReady) deployableBlockers.push('engineering_validation_incomplete');
+
   return {
     schemaVersion: READINESS_SCHEMA_VERSION,
     engineeringReady,
+    deployableReleaseReady,
+    deployableReleaseProfile,
+    deployableBlockers,
+    releaseProfiles,
+    fullProductReleaseReady: releaseReady,
     releaseReady,
     windowsSandboxCertified,
     proBehavioralSandboxReady,
+    lockedCapabilities,
     mxcProcessContainer: {
       validated: mxcEvidence.ok === true,
       isolationTier: mxcEvidence.ok ? mxcEvidence.isolationTier : null,
@@ -128,7 +168,7 @@ function evaluateIsolationReadiness({ embeddedChecksPassed, controllerSelfTest, 
       evidence: mxcEvidence,
     },
     scopedReadiness: {
-      standard: engineeringReady,
+      standard: releaseProfiles.standard.ready,
       plusStaticAndReputation: engineeringReady,
       plusSandboxEscalation: proBehavioralSandboxReady,
       proBehavioralSandbox: proBehavioralSandboxReady,
@@ -136,7 +176,7 @@ function evaluateIsolationReadiness({ embeddedChecksPassed, controllerSelfTest, 
     blockers: [...new Set(blockers)],
     status: releaseReady
       ? 'FULL_RELEASE_READY'
-      : (engineeringReady ? 'ENGINEERING_READY_PRO_SANDBOX_PENDING' : 'ENGINEERING_VALIDATION_PENDING'),
+      : (deployableReleaseReady ? 'STANDARD_RELEASE_READY_PLUS_PRO_LOCKED' : 'ENGINEERING_VALIDATION_PENDING'),
   };
 }
 
