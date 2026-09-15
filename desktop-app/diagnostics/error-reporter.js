@@ -17,7 +17,8 @@ function defaultReportRoot() {
 function safeText(value, max = 2048) {
   return String(value == null ? '' : value)
     .replace(/[\r\n\t]+/g, ' ')
-    .replace(/(?:[A-Za-z]:\\|\/)[^ ]+/g, '[path]')
+    .replace(/[A-Za-z]:\\[^ ]+/g, '[path]')
+    .replace(/\/(?:home|Users|var|tmp|private|mnt|opt|etc)\/[^ ]+/g, '[path]')
     .replace(/(?:Bearer\s+)?[A-Za-z0-9_-]{24,}/g, '[redacted]')
     .slice(0, max);
 }
