@@ -31,7 +31,10 @@ function connectOnce(port, timeoutMs = 1500) {
 
 function listenLoopback() {
   return new Promise((resolve, reject) => {
-    const server = net.createServer((socket) => socket.end('malguard-baseline'));
+    const server = net.createServer((socket) => {
+      socket.on('error', () => {});
+      socket.end();
+    });
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => resolve(server));
   });
