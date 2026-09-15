@@ -23,6 +23,9 @@ jobs:
       - name: Run complete Engineering Hardening suite
         run: node tests/run-all.js
 
+      - name: Verify 100% product readiness gate
+        run: node tools/verify-product-readiness.js
+
       - name: Verify JavaScript syntax
         shell: bash
         run: |
