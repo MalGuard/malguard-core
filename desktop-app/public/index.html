@@ -70,11 +70,11 @@
       <button id="selfTest">Run Self-Test</button>
       <pre id="selfOut">Not run.</pre>
 
-      <h2>Final Windows Sandbox Acceptance</h2>
-      <p class="muted">Runs MalGuard's synthetic-only final Sandbox acceptance path. If a real Windows Sandbox backend is available on this host, MalGuard automatically attempts native containment and real isolation validation. It reports CERTIFIED only when the real release gate passes.</p>
-      <button id="finalSandboxTest">Run Final Windows Sandbox Acceptance</button>
-      <p id="finalSandboxSummary" class="warning">Not run. Windows Sandbox certification has not been claimed.</p>
-      <pre id="finalSandboxOut">No final Sandbox acceptance result yet.</pre>
+      <h2>Isolation Readiness & Final Windows Sandbox Acceptance</h2>
+      <p class="muted">Runs MalGuard's synthetic-only embedded validation, reports the validated MXC ProcessContainer engineering evidence, and attempts real Windows Sandbox containment/isolation acceptance when that backend exists on this host. MXC synthetic evidence never unlocks Pro behavioral execution by itself.</p>
+      <button id="finalSandboxTest">Run Isolation Readiness</button>
+      <p id="finalSandboxSummary" class="warning">Not run. Full-release certification has not been claimed.</p>
+      <pre id="finalSandboxOut">No isolation readiness result yet.</pre>
     </section>
   </main>
   <script src="/app.js"></script>
