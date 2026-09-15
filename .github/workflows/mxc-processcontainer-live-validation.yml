@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - dev/appcontainer-native-sandbox
+      - dev/isolation-readiness-integration
   workflow_dispatch:
 
 permissions:
