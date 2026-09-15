@@ -1,9 +1,6 @@
 name: MalGuard Real Browser Validation
 
 on:
-  push:
-    branches:
-      - dev/current-malguard
   workflow_dispatch:
 
 permissions:
