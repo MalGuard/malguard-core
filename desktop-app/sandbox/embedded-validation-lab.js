@@ -8,18 +8,20 @@ const { SandboxController } = require('./sandbox-controller.js');
 const { WindowsSandboxBackend } = require('./windows-sandbox-backend.js');
 const { TELEMETRY_SCHEMA_VERSION, validateTelemetry, evaluateTelemetry } = require('./telemetry-validator.js');
 const { loadMxcAttestation, evaluateIsolationReadiness } = require('./isolation-readiness.js');
+const { VirtualWindowsValidationLab } = require('./virtual-windows-validation-lab.js');
 
-const LAB_SCHEMA_VERSION = '1.0.0';
+const LAB_SCHEMA_VERSION = '1.1.0';
 
 function check(name, ok, details = null) {
   return { name, ok: ok === true, details };
 }
 
 class EmbeddedValidationLab {
-  constructor({ timeoutMs = 5000, memoryMb = 48, windowsBackend = null } = {}) {
+  constructor({ timeoutMs = 5000, memoryMb = 48, windowsBackend = null, virtualWindowsLab = null } = {}) {
     this.timeoutMs = timeoutMs;
     this.memoryMb = memoryMb;
     this.windowsBackend = windowsBackend || new WindowsSandboxBackend();
+    this.virtualWindowsLab = virtualWindowsLab || new VirtualWindowsValidationLab();
   }
 
   async run() {
@@ -28,6 +30,7 @@ class EmbeddedValidationLab {
     const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'malguard-embedded-lab-'));
     const samplePath = path.join(tempRoot, 'synthetic.exe');
     let controllerSelfTest = null;
+    let virtualWindows = null;
 
     try {
       await fs.promises.writeFile(samplePath, Buffer.from('MZ MALGUARD SYNTHETIC VALIDATION FIXTURE\n', 'utf8'), { mode: 0o600 });
@@ -118,12 +121,31 @@ class EmbeddedValidationLab {
         controllerSelfTest && controllerSelfTest.localProbe ? controllerSelfTest.localProbe : null
       ));
 
+      virtualWindows = await this.virtualWindowsLab.run();
+      checks.push(check(
+        'virtual_windows_contract_lab',
+        virtualWindows && virtualWindows.ok === true && virtualWindows.coveragePercent === 100,
+        virtualWindows ? {
+          mode: virtualWindows.mode,
+          passed: virtualWindows.passed,
+          total: virtualWindows.total,
+          coveragePercent: virtualWindows.coveragePercent,
+        } : null
+      ));
+
       const embeddedChecksPassed = checks.every(item => item.ok === true);
       const readiness = evaluateIsolationReadiness({
         embeddedChecksPassed,
         controllerSelfTest,
         mxcAttestation: loadMxcAttestation(),
       });
+      const engineeringRequirements = [
+        ...checks.map(item => item.ok === true),
+        readiness.mxcProcessContainer && readiness.mxcProcessContainer.validated === true,
+      ];
+      const engineeringValidationPercent = Math.round(
+        engineeringRequirements.filter(Boolean).length * 100 / engineeringRequirements.length
+      );
 
       return {
         schemaVersion: LAB_SCHEMA_VERSION,
@@ -135,12 +157,15 @@ class EmbeddedValidationLab {
           untrustedSamplesExecuted: false,
           malwareDownloaded: false,
           releaseGateBypassed: false,
+          realWindowsSandboxClaimedByVirtualLab: false,
         },
         checks,
+        engineeringValidationPercent,
         engineeringReady: readiness.engineeringReady,
         windowsSandboxCertified: readiness.windowsSandboxCertified,
         proBehavioralSandboxReady: readiness.proBehavioralSandboxReady,
         releaseReady: readiness.releaseReady,
+        virtualWindowsLab: virtualWindows,
         mxcProcessContainer: readiness.mxcProcessContainer,
         scopedReadiness: readiness.scopedReadiness,
         readinessBlockers: readiness.blockers,
