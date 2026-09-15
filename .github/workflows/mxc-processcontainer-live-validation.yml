@@ -35,6 +35,18 @@ jobs:
         run: |
           npm install --no-save --package-lock=false @microsoft/mxc-sdk@0.8.0
 
+      - name: Prepare ephemeral host for MXC AppContainer fallback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $hostPrep = Get-ChildItem '.\node_modules\@microsoft\mxc-sdk' -Recurse -Filter 'wxc-host-prep.exe' | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $hostPrep) { throw 'wxc-host-prep.exe not found in pinned MXC SDK package' }
+          Write-Host "MXC host prep: $hostPrep"
+          & $hostPrep prepare-system-drive
+          if ($LASTEXITCODE -ne 0) { throw "prepare-system-drive failed with exit code $LASTEXITCODE" }
+          & $hostPrep prepare-null-device --no-sacl
+          if ($LASTEXITCODE -ne 0) { throw "prepare-null-device failed with exit code $LASTEXITCODE" }
+
       - name: Run synthetic MXC ProcessContainer live acceptance
         shell: pwsh
         run: |
@@ -42,4 +54,14 @@ jobs:
           node .\tests\mxc-processcontainer-live-validation.mjs
           if ($LASTEXITCODE -ne 0) {
             throw "MXC ProcessContainer live validation failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Remove persistent MXC system-drive ACEs
+        if: always()
+        shell: pwsh
+        run: |
+          $hostPrep = Get-ChildItem '.\node_modules\@microsoft\mxc-sdk' -Recurse -Filter 'wxc-host-prep.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if ($hostPrep) {
+            & $hostPrep unprepare-system-drive
+            if ($LASTEXITCODE -ne 0) { Write-Warning "unprepare-system-drive exited $LASTEXITCODE" }
           }
