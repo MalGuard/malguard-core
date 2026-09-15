@@ -1,0 +1,13 @@
+MalGuard GitHub Sync Bundle
+Purpose: sync current working tree to a NEW development branch only.
+Target branch suggestion: dev/current-malguard
+Do NOT merge to main automatically.
+Core VERSION: 0.9.0-rc.1
+Desktop VERSION: 0.6.1-dev
+Local validation at bundle creation: 32/32 test programs PASS.
+This corrected bundle includes the three binary ZIP fixtures required by tests/run-all.js.
+GitHub repo truth remains authoritative after import; re-run tests in CI.
+Product model architecture:
+- Standard = normal scan
+- Plus = deep scan + Sandbox when required
+- Pro = minimal preflight + direct Sandbox

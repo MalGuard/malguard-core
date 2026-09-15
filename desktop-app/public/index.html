@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>MalGuard Desktop</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>MalGuard Desktop</h1>
+        <p>Scanner + Guard control surface</p>
+      </div>
+      <span id="status">Loading…</span>
+    </header>
+
+    <nav>
+      <button class="tab active" data-tab="scanner">Scanner</button>
+      <button class="tab" data-tab="engine">Engine Test</button>
+    </nav>
+
+    <section id="scanner" class="panel active">
+      <h2>Local file scan</h2>
+      <div class="model-picker">
+        <label for="scanModel">Choose Model</label>
+        <select id="scanModel" aria-label="Choose MalGuard scan model">
+          <option value="standard">Standard</option>
+          <option value="plus">Plus</option>
+          <option value="pro">Pro</option>
+        </select>
+        <span id="modelHint" class="muted">Standard local scan.</span>
+      </div>
+      <div class="row"><input id="scanPath" placeholder="C:\Games\GTA V\mods\example.asi"><button id="scanBtn">Scan</button></div>
+      <div id="modelFlow" hidden>
+        <h3 id="modelFlowTitle">Analysis flow</h3>
+        <div id="modelSteps" class="pipeline-list"></div>
+        <pre id="modelFinal">Waiting for scan.</pre>
+      </div>
+      <pre id="scanOut">No scan yet.</pre>
+
+      <h2>Threat Intelligence</h2>
+      <div class="stack">
+        <div class="row"><input id="abuseAuthKey" type="password" autocomplete="off" spellcheck="false" placeholder="abuse.ch Auth-Key (stored with Windows DPAPI)"><button id="saveThreatKey">Save Auth-Key</button><button id="clearThreatKey">Remove Auth-Key</button><button id="threatStatus">Refresh status</button></div>
+        <p class="muted">MalGuard sends only the file SHA-256 for MalwareBazaar reputation lookup. The Auth-Key is never returned by the local API or written to project source.</p>
+      </div>
+      <pre id="threatOut">Threat-intelligence status not checked.</pre>
+
+      <h2>Protection settings</h2>
+      <div class="stack">
+        <input id="watchRoot" placeholder="Protected game root, e.g. C:\Games\GTA V">
+        <input id="quarantineRoot" placeholder="Quarantine root">
+        <input id="stagingRoot" placeholder="Managed-install staging root">
+        <div class="row"><button id="saveSettings">Save protection settings</button><button id="loadSettings">Reload settings</button></div>
+      </div>
+      <pre id="settingsOut">Settings not loaded.</pre>
+
+      <h2>Real-time Guard</h2>
+      <div class="row"><button id="startGuard">Start Guard</button><button id="stopGuard">Stop Guard</button><button id="enableGate">Enable Protected Folder</button><button id="disableGate">Disable Protected Folder</button><button id="gateStatus">Gate Status</button><button id="refreshQ">Refresh Quarantine</button><button id="refreshIncidents">Refresh Incidents</button></div>
+      <pre id="guardOut">Guard status not checked.</pre>
+      <pre id="gateOut">Access gate status not checked.</pre>
+      <div id="quarantine"></div>
+      <pre id="incidentsOut">No incident journal loaded.</pre>
+    </section>
+
+    <section id="engine" class="panel">
+      <h2>Security Self-Test</h2>
+      <button id="selfTest">Run Self-Test</button>
+      <pre id="selfOut">Not run.</pre>
+
+      <h2>Sandbox backend test</h2>
+      <button id="sandboxTest">Run isolation probe</button>
+      <p class="warning">Pro uses the Sandbox directly. Behavioral execution remains fail-closed until the hardened Windows sandbox acceptance gates pass.</p>
+      <pre id="sandboxOut">No sandbox probe yet.</pre>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

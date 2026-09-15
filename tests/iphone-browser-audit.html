@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>MalGuard iPhone Browser Validation</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif; }
+    body { margin:0; background:#0a0d12; color:#eef4ff; }
+    main { max-width:820px; margin:0 auto; padding:20px 16px 48px; }
+    h1 { font-size:24px; margin:0 0 8px; }
+    p { color:#aeb9c9; line-height:1.45; }
+    .status { font-weight:800; font-size:28px; padding:16px; border:1px solid #344054; border-radius:14px; margin:16px 0; word-break:break-word; }
+    .meta,.card { border:1px solid #273244; border-radius:12px; padding:12px; margin:10px 0; background:#101722; }
+    .row { display:flex; gap:8px; align-items:flex-start; margin:8px 0; }
+    .badge { min-width:54px; font-weight:800; }
+    .pass { color:#78e08f; } .fail { color:#ff7b7b; } .warn { color:#ffd166; } .run { color:#8ac7ff; }
+    .detail { color:#aeb9c9; overflow-wrap:anywhere; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; color:#cbd5e1; }
+    button { appearance:none; border:1px solid #3c4e67; background:#172235; color:#fff; font-weight:700; padding:12px 16px; border-radius:10px; width:100%; margin-top:12px; }
+    body[data-status="PASS"] .status { border-color:#2b7a4b; }
+    body[data-status="FAIL"] .status { border-color:#9b3333; }
+  </style>
+</head>
+<body data-status="RUNNING">
+<main>
+  <h1>MalGuard Browser Engineering Validation</h1>
+  <p>This page performs live same-origin tests in the current browser. No PASS value is hard-coded.</p>
+  <div id="overall" class="status run">RUNNING…</div>
+  <div id="meta" class="meta"></div>
+  <div id="results"></div>
+  <button id="rerun" type="button">Run validation again</button>
+  <details class="card"><summary>Raw report</summary><pre id="raw">Waiting…</pre></details>
+</main>
+
+<script src="../malguard-contract.js"></script>
+<script src="../engine.js"></script>
+<script src="../multilayer.js"></script>
+<script src="../gta-mod-detector.js"></script>
+<script src="../archive-inspector.js"></script>
+<script src="../archive-entry-reader.js"></script>
+<script src="../script-analyzer.js"></script>
+<script src="../app.js"></script>
+<script src="../scan-worker-client.js"></script>
+<script src="../self-test.js"></script>
+<script src="iphone-browser-audit.js"></script>
+</body>
+</html>

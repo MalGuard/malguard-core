@@ -1,0 +1,89 @@
+name: MalGuard Windows Native Diagnostics
+
+on:
+  push:
+    branches:
+      - dev/current-malguard
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-native-diagnostics:
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Preserve repository line endings
+        shell: pwsh
+        run: |
+          git config --local core.autocrlf false
+          git -c core.autocrlf=false reset --hard HEAD
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build native components and run synthetic containment diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Get-Location).Path
+          $buildRoot = Join-Path $env:RUNNER_TEMP 'malguard-native-diagnostics'
+          New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+
+          $probeBuild = Join-Path $buildRoot 'containment'
+          cmake -S (Join-Path $root 'native/sandbox-containment-probe') -B $probeBuild -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'containment probe CMake configure failed' }
+          cmake --build $probeBuild --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'containment probe native build failed' }
+
+          $probe = Get-ChildItem -LiteralPath $probeBuild -Filter 'MalGuardSandboxContainmentProbe.exe' -File -Recurse | Select-Object -First 1
+          if (-not $probe) { throw 'containment probe executable was not produced' }
+          $probeOutput = (& $probe.FullName '--self-test-json') -join [Environment]::NewLine
+          $probeExit = $LASTEXITCODE
+          Write-Host '--- Native containment probe ---'
+          Write-Host $probeOutput
+          $probeReport = $probeOutput | ConvertFrom-Json
+          $required = @('jobObjectCreated','cpuHardCapConfigured','memoryLimitConfigured','killOnCloseConfigured','processCreatedSuspended','assignedBeforeResume','childResumed','childTerminated')
+          if ($probeExit -ne 0 -or $probeReport.ok -ne $true) { throw "native containment probe failed with exit $probeExit" }
+          foreach ($key in $required) {
+            if ($probeReport.$key -ne $true) { throw "native containment check failed: $key" }
+          }
+
+          $serviceBuildFailure = $null
+          try {
+            $serviceBuild = Join-Path $buildRoot 'service'
+            cmake -S (Join-Path $root 'native/windows-service') -B $serviceBuild -A x64
+            if ($LASTEXITCODE -ne 0) { throw 'Windows Service CMake configure failed' }
+            cmake --build $serviceBuild --config Release
+            if ($LASTEXITCODE -ne 0) { throw 'Windows Service native build failed' }
+          } catch {
+            $serviceBuildFailure = $_.Exception.Message
+            Write-Host "::error::$serviceBuildFailure"
+          }
+
+          $report = Join-Path $env:RUNNER_TEMP 'malguard-windows-native-diagnostics.json'
+          & node (Join-Path $root 'tools/windows-acceptance-runner.js') '--probe' $probe.FullName '--report' $report
+          $runnerExit = $LASTEXITCODE
+          if (Test-Path -LiteralPath $report) {
+            Write-Host '--- Existing Windows acceptance runner report ---'
+            Get-Content -LiteralPath $report -Raw
+            $data = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+            if ($data.selfTest.nativeContainment.ok -ne $true) { throw 'existing runner did not accept native containment' }
+            if ($data.selfTest.isolationSelfTest.code -eq 'WINDOWS_SANDBOX_UNAVAILABLE') {
+              Write-Host 'PENDING — REQUIRES WINDOWS HOST WITH WINDOWS SANDBOX / NESTED VIRTUALIZATION'
+            } elseif ($runnerExit -ne 0 -or $data.pass -ne $true) {
+              throw "existing Windows acceptance runner failed with exit $runnerExit"
+            }
+          } else {
+            throw 'existing Windows acceptance runner did not produce a report'
+          }
+
+          if ($serviceBuildFailure) {
+            throw "Windows Service compilation failed: $serviceBuildFailure"
+          }

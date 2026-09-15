@@ -1,0 +1,15 @@
+{
+  "name": "malguard-core",
+  "version": "0.6.1-dev",
+  "private": true,
+  "description": "MalGuard desktop security core and local control service",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node desktop-app/server.js",
+    "test": "node tests/run-all.js",
+    "package:portable": "node tools/build-portable-package.js"
+  }
+}

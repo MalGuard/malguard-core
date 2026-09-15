@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GTA Guard — اسکنر امنیتی مود</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>GTA Guard</h1>
+      <p>اسکنر امنیتی مودهای GTA — تحلیل فایل در مرورگر شما، با پردازش ایزوله</p>
+    </header>
+
+    <main>
+      <div id="modeToggle" class="mode-toggle" role="radiogroup" aria-label="انتخاب حالت اسکن">
+        <button type="button" id="modeFreeBtn" class="mode-btn active" role="radio" aria-checked="true">
+          <span class="mode-name">رایگان</span>
+          <span class="mode-desc">اسکن استاندارد</span>
+        </button>
+        <button type="button" id="modeProBtn" class="mode-btn" role="radio" aria-checked="false">
+          <span class="mode-name">Pro</span>
+          <span class="mode-desc">امنیت چندلایه</span>
+        </button>
+      </div>
+
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="انتخاب فایل مود">
+        <span class="icon">📁</span>
+        <p id="dropzoneText">فایل مود را اینجا بکشید یا کلیک کنید</p>
+        <input type="file" id="fileInput" accept=".asi,.dll" hidden>
+      </div>
+
+      <div id="fileInfo" class="file-info"></div>
+
+      <div class="scan-actions">
+        <button id="scanBtn" class="scan-btn" disabled>اسکن کن</button>
+        <button id="cancelScanBtn" class="cancel-scan-btn" type="button" hidden>لغو اسکن</button>
+      </div>
+
+      <div id="errorBanner" class="error-banner"></div>
+
+      <details id="selfTestPanel" class="pro-details">
+        <summary>Self-Test موتور امنیتی</summary>
+        <button id="selfTestBtn" class="scan-btn" type="button">اجرای Self-Test</button>
+        <pre id="selfTestOutput" class="archive-summary" aria-live="polite">هنوز اجرا نشده است.</pre>
+      </details>
+
+      <section id="results" class="results" aria-live="polite">
+        <div id="verdictCircle" class="verdict-circle">
+          <span id="scoreText" class="score"></span>
+          <span id="verdictLabel" class="label"></span>
+        </div>
+
+        <div class="reasons">
+          <h2>دلایل</h2>
+          <ul id="reasonsList"></ul>
+        </div>
+
+        <div id="hashBox" class="hash-box">
+          <label for="hashInput">هش SHA-256</label>
+          <input type="text" id="hashInput" readonly>
+        </div>
+
+        <details id="proDetails" class="pro-details" hidden>
+          <summary>جزئیات امنیت چندلایه (Pro)</summary>
+          <div id="proGatesList" class="pro-gates-list"></div>
+          <div id="proConflictNote" class="pro-conflict-note"></div>
+        </details>
+
+        <details id="archiveDetails" class="pro-details" hidden>
+          <summary>جزئیات بازرسی بسته / آرشیو (Pro)</summary>
+          <div id="archiveDetailsBody"></div>
+        </details>
+
+        <details id="scriptDetails" class="pro-details" hidden>
+          <summary>جزئیات تحلیل اسکریپت (Pro)</summary>
+          <div id="scriptDetailsBody"></div>
+        </details>
+      </section>
+    </main>
+
+    <footer>
+      این ابزار یک اسکنر اکتشافی (heuristic) است و نتیجهٔ آن تضمین قطعی امن یا مخرب بودن فایل نیست. بایت‌های فایل برای تحلیل به سرور MalGuard آپلود نمی‌شوند؛ Engine ممکن است فقط هش SHA-256 فایل‌های PE را برای بررسی اعتبار به URLhaus ارسال کند. همیشه از منابع معتبر برای دانلود مود استفاده کنید.
+    </footer>
+  </div>
+
+  <script src="malguard-contract.js"></script>
+  <script src="engine.js"></script>
+  <script src="multilayer.js"></script>
+  <script src="gta-mod-detector.js"></script>
+  <script src="archive-inspector.js"></script>
+  <script src="archive-entry-reader.js"></script>
+  <script src="script-analyzer.js"></script>
+  <script src="app.js"></script>
+  <script src="scan-worker-client.js"></script>
+  <script src="self-test.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const dropzone = document.getElementById('dropzone');
+      const dropzoneText = document.getElementById('dropzoneText');
+      const fileInput = document.getElementById('fileInput');
+      const fileInfo = document.getElementById('fileInfo');
+      const scanBtn = document.getElementById('scanBtn');
+      const cancelScanBtn = document.getElementById('cancelScanBtn');
+      const errorBanner = document.getElementById('errorBanner');
+      const results = document.getElementById('results');
+      const verdictCircle = document.getElementById('verdictCircle');
+      const scoreText = document.getElementById('scoreText');
+      const verdictLabel = document.getElementById('verdictLabel');
+      const reasonsList = document.getElementById('reasonsList');
+      const hashBox = document.getElementById('hashBox');
+      const hashInput = document.getElementById('hashInput');
+      const modeFreeBtn = document.getElementById('modeFreeBtn');
+      const modeProBtn = document.getElementById('modeProBtn');
+      const proDetails = document.getElementById('proDetails');
+      const proGatesList = document.getElementById('proGatesList');
+      const proConflictNote = document.getElementById('proConflictNote');
+      const archiveDetails = document.getElementById('archiveDetails');
+      const archiveDetailsBody = document.getElementById('archiveDetailsBody');
+      const scriptDetails = document.getElementById('scriptDetails');
+      const scriptDetailsBody = document.getElementById('scriptDetailsBody');
+      const selfTestBtn = document.getElementById('selfTestBtn');
+      const selfTestOutput = document.getElementById('selfTestOutput');
+
+      selfTestBtn.addEventListener('click', async () => {
+        selfTestBtn.disabled = true;
+        selfTestOutput.textContent = 'در حال اجرای آزمون‌های واقعی موتور...';
+        try {
+          const report = await window.MalGuardSelfTest.run();
+          selfTestOutput.textContent = (report.ok ? 'PASS' : 'FAIL') + '\n' + report.checks.map(c => (c.ok ? '✓ ' : '✗ ') + c.id + ': ' + c.detail).join('\n') + '\nزمان: ' + report.durationMs + ' ms';
+        } catch (e) {
+          selfTestOutput.textContent = 'FAIL\n' + (e && e.message ? e.message : String(e));
+        } finally { selfTestBtn.disabled = false; }
+      });
+
+      let selectedFile = null;
+      let currentMode = 'free'; // "free" | "pro"
+      let currentScanAbortController = null;
+
+      // پسوندهایی که Free همیشه می‌پذیرد (بدون تغییر نسبت به قبل).
+      const FREE_ACCEPTED_EXTENSIONS = ['.asi', '.dll'];
+      // پسوندهای اضافی که فقط در حالت Pro از طریق GtaModDetector قابل
+      // مسیریابی هستند (ENGINE / ARCHIVE_INSPECTION / INCONCLUSIVE).
+      // این فهرست باید با EXTENSION_TABLE در gta-mod-detector.js هماهنگ
+      // باشد؛ فقط برای فیلتر انتخاب‌گر فایل در UI استفاده می‌شود، نه
+      // برای هیچ تصمیم امنیتی.
+      const PRO_ACCEPTED_EXTENSIONS = [
+        '.asi', '.dll', '.exe', '.cs', '.lua',
+        '.ytd', '.ydd', '.yft', '.ymap',
+        '.meta', '.ini', '.json', '.xml',
+        '.rpf', '.zip', '.7z', '.rar',
+      ];
+
+      const VERDICT_META = {
+        safe: { label: 'امن', cls: 'verdict-safe' },
+        suspicious: { label: 'مشکوک', cls: 'verdict-suspicious' },
+        malicious: { label: 'مخرب', cls: 'verdict-malicious' },
+        inconclusive: { label: 'نامشخص', cls: 'verdict-invalid' },
+        invalid: { label: 'فایل نامعتبر', cls: 'verdict-invalid' }
+      };
+
+      const GATE_LABELS = {
+        file_integrity: 'صحت فایل',
+        pe_structure: 'ساختار PE',
+        rule_evidence: 'شواهد قانون‌محور',
+        reputation: 'اعتبار (Reputation)',
+        static_correlation: 'همبستگی رفتار ایستا',
+        anomaly_uncertainty: 'ناهنجاری/عدم‌قطعیت',
+      };
+
+      const GATE_RESULT_LABELS = { PASS: 'قبول', FAIL: 'رد', SUSPICIOUS: 'مشکوک', INCONCLUSIVE: 'نامشخص' };
+
+      function acceptedExtensionsForMode(mode) {
+        return mode === 'pro' ? PRO_ACCEPTED_EXTENSIONS : FREE_ACCEPTED_EXTENSIONS;
+      }
+
+      function setMode(mode) {
+        currentMode = mode;
+        const isPro = mode === 'pro';
+        modeFreeBtn.classList.toggle('active', !isPro);
+        modeProBtn.classList.toggle('active', isPro);
+        modeFreeBtn.setAttribute('aria-checked', String(!isPro));
+        modeProBtn.setAttribute('aria-checked', String(isPro));
+        fileInput.setAttribute('accept', acceptedExtensionsForMode(mode).join(','));
+        dropzoneText.textContent = isPro
+          ? 'فایل یا بستهٔ مود GTA را اینجا بکشید یا کلیک کنید'
+          : 'فایل مود را اینجا بکشید یا کلیک کنید';
+        selectedFile = null;
+        fileInfo.classList.remove('visible');
+        scanBtn.disabled = true;
+        resetResults();
+      }
+
+      modeFreeBtn.addEventListener('click', () => setMode('free'));
+      modeProBtn.addEventListener('click', () => setMode('pro'));
+
+      function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' بایت';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' کیلوبایت';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' مگابایت';
+      }
+
+      function showError(message) {
+        errorBanner.textContent = message;
+        errorBanner.classList.add('visible');
+      }
+
+      function clearError() {
+        errorBanner.textContent = '';
+        errorBanner.classList.remove('visible');
+      }
+
+      function resetResults() {
+        results.classList.remove('visible');
+        reasonsList.innerHTML = '';
+        hashBox.style.display = '';
+        proDetails.hidden = true;
+        proGatesList.textContent = '';
+        proConflictNote.textContent = '';
+        archiveDetails.hidden = true;
+        archiveDetailsBody.textContent = '';
+        scriptDetails.hidden = true;
+        scriptDetailsBody.textContent = '';
+      }
+
+      function setSelectedFile(file) {
+        clearError();
+        resetResults();
+
+        if (!file) {
+          selectedFile = null;
+          fileInfo.classList.remove('visible');
+          scanBtn.disabled = true;
+          return;
+        }
+
+        const nameLower = file.name.toLowerCase();
+        const accepted = acceptedExtensionsForMode(currentMode);
+        const matches = accepted.some(ext => nameLower.endsWith(ext));
+        if (!matches) {
+          selectedFile = null;
+          fileInfo.classList.remove('visible');
+          scanBtn.disabled = true;
+          showError(
+            currentMode === 'pro'
+              ? 'این پسوند در حال حاضر پشتیبانی نمی‌شود.'
+              : 'فقط فایل‌های با پسوند .asi یا .dll پذیرفته می‌شوند.'
+          );
+          return;
+        }
+
+        selectedFile = file;
+        fileInfo.textContent = file.name + ' — ' + formatSize(file.size);
+        fileInfo.classList.add('visible');
+        scanBtn.disabled = false;
+      }
+
+      // --- کلیک روی dropzone برای باز کردن انتخاب‌گر فایل ---
+      dropzone.addEventListener('click', () => fileInput.click());
+      dropzone.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          fileInput.click();
+        }
+      });
+
+      fileInput.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        setSelectedFile(file || null);
+      });
+
+      // --- درگ اند دراپ ---
+      ['dragenter', 'dragover'].forEach(evt => {
+        dropzone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.classList.add('dragover');
+        });
+      });
+
+      ['dragleave', 'drop'].forEach(evt => {
+        dropzone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.classList.remove('dragover');
+        });
+      });
+
+      dropzone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const file = dt && dt.files && dt.files[0];
+        setSelectedFile(file || null);
+      });
+
+      // --- Hardening v1: همهٔ اسکن‌ها فقط در Dedicated Web Worker اجرا می‌شوند.
+      // هیچ fallback بی‌صدایی به main thread وجود ندارد. Timeout یا لغو کاربر،
+      // Worker را terminate می‌کند تا پردازش CPU-bound واقعاً متوقف شود. ---
+      cancelScanBtn.addEventListener('click', () => {
+        if (currentScanAbortController) currentScanAbortController.abort();
+      });
+
+      scanBtn.addEventListener('click', async () => {
+        if (!selectedFile) return;
+
+        clearError();
+        resetResults();
+        scanBtn.disabled = true;
+        scanBtn.textContent = 'در حال اسکن...';
+        cancelScanBtn.hidden = false;
+        currentScanAbortController = new AbortController();
+
+        try {
+          const wrapped = await scanFileInWorker(selectedFile, currentMode, {
+            signal: currentScanAbortController.signal,
+          });
+          renderResult(wrapped);
+        } catch (err) {
+          console.error(err);
+          const code = err && err.code ? String(err.code) : '';
+          if (code === 'WORKER_ABORTED') {
+            showError('اسکن لغو شد؛ هیچ حکم امنیتی صادر نشد.');
+          } else if (code === 'WORKER_UNSUPPORTED' || code === 'WORKER_CREATE_FAILED') {
+            showError('این محیط امکان اجرای اسکن ایزوله در Web Worker را ندارد؛ برای ایمنی اسکن روی رشتهٔ اصلی اجرا نشد.');
+          } else if (code.startsWith('WORKER_') || code === 'RESULT_SCHEMA_MISMATCH') {
+            showError('پایپ‌لاین ایزولهٔ اسکن با خطا متوقف شد. هیچ نتیجهٔ SAFE صادر نشد.');
+          } else {
+            showError('خطای غیرمنتظره‌ای رخ داد. هیچ نتیجهٔ SAFE صادر نشد.');
+          }
+        } finally {
+          currentScanAbortController = null;
+          cancelScanBtn.hidden = true;
+          scanBtn.disabled = false;
+          scanBtn.textContent = 'اسکن کن';
+        }
+      });
+
+      function archiveVerdictClass(verdict) {
+        if (verdict === 'safe') return 'pass';
+        if (verdict === 'malicious') return 'fail';
+        if (verdict === 'suspicious' || verdict === 'invalid') return 'suspicious';
+        return 'inconclusive';
+      }
+
+      function renderResult(wrapped) {
+        const engineResult = wrapped.engineResult; // ممکن است null باشد (مسیرهای فقط-تشخیص‌دهنده در Pro)
+        const finalVerdict = wrapped.finalVerdict; // safe | suspicious | malicious | inconclusive | invalid
+        const meta = VERDICT_META[finalVerdict] || VERDICT_META.invalid;
+
+        verdictCircle.className = 'verdict-circle ' + meta.cls;
+        verdictLabel.textContent = meta.label;
+
+        if (!engineResult && wrapped.scriptAnalysis) {
+          // ScriptAnalyzer همان قرارداد score ایمنی 0..100 را نگه می‌دارد.
+          const scriptResult = wrapped.scriptAnalysis;
+          scoreText.textContent = typeof scriptResult.score === 'number' ? scriptResult.score + '%' : '';
+          if (scriptResult.hash) {
+            hashBox.style.display = '';
+            hashInput.value = scriptResult.hash;
+          } else {
+            hashBox.style.display = 'none';
+          }
+        } else if (!engineResult) {
+          // مسیر آرشیو/تشخیص‌دهنده‌ای که Engine اجرا نشده و ScriptAnalyzer هم ندارد.
+          scoreText.textContent = '';
+          hashBox.style.display = 'none';
+        } else if (finalVerdict === 'invalid') {
+          scoreText.textContent = '';
+          hashBox.style.display = 'none';
+        } else {
+          scoreText.textContent = (typeof engineResult.score === 'number' ? engineResult.score : 0) + '%';
+          hashBox.style.display = '';
+          hashInput.value = engineResult.hash || '—';
+        }
+
+        reasonsList.innerHTML = '';
+        const displayReasons = Array.isArray(wrapped.reasons) && wrapped.reasons.length
+          ? [wrapped.note, ...wrapped.reasons].filter(Boolean)
+          : engineResult
+            ? (engineResult.reasons || []).slice()
+            : [wrapped.note, ...((wrapped.detectorResult && wrapped.detectorResult.reasons) || [])].filter(Boolean);
+        if (wrapped.execution && wrapped.execution.context === 'main_thread_fallback') {
+          displayReasons.unshift('این مرورگر Web Worker را در دسترس قرار نداد؛ اسکن با مسیر سازگاری روی رشتهٔ اصلی انجام شد. نتیجهٔ امنیتی تغییر نکرده، اما رابط کاربری ممکن است هنگام پردازش سنگین کند شود.');
+        }
+        displayReasons.forEach(r => {
+          const li = document.createElement('li');
+          li.textContent = r;
+          reasonsList.appendChild(li);
+        });
+
+        // --- جزئیات Pro (فقط اگر Multi-Layer واقعاً اجرا شده باشد) ---
+        if (wrapped.mode === 'pro' && wrapped.multiLayer) {
+          proDetails.hidden = false;
+          proGatesList.textContent = '';
+
+          const table = document.createElement('table');
+          table.className = 'gate-table';
+          wrapped.multiLayer.gates.forEach(g => {
+            const row = document.createElement('tr');
+
+            const nameCell = document.createElement('td');
+            nameCell.textContent = GATE_LABELS[g.gate] || g.gate;
+            row.appendChild(nameCell);
+
+            const resultCell = document.createElement('td');
+            resultCell.textContent = GATE_RESULT_LABELS[g.result] || g.result;
+            resultCell.className = 'gate-result gate-' + g.result.toLowerCase();
+            row.appendChild(resultCell);
+
+            const reasonCell = document.createElement('td');
+            reasonCell.textContent = g.reason;
+            reasonCell.className = 'gate-reason';
+            row.appendChild(reasonCell);
+
+            table.appendChild(row);
+          });
+          proGatesList.appendChild(table);
+
+          const conflict = wrapped.multiLayer.conflict;
+          if (conflict && conflict.hasConflict) {
+            proConflictNote.textContent = '⚠ تعارض بین دروازه‌ها شناسایی شد: ' + conflict.note;
+          } else {
+            proConflictNote.textContent = '';
+          }
+        } else {
+          proDetails.hidden = true;
+        }
+
+        // --- جزئیات آرشیو Pro ---
+        if (wrapped.mode === 'pro' && wrapped.archiveInspection) {
+          archiveDetails.hidden = false;
+          archiveDetailsBody.textContent = '';
+
+          const inspection = wrapped.archiveInspection;
+          const summary = document.createElement('p');
+          summary.className = 'archive-summary';
+          summary.textContent =
+            'نوع: ' + String(inspection.archiveType || 'unknown').toUpperCase() +
+            ' | وضعیت: ' + (inspection.inspectionStatus || 'unknown') +
+            ' | ورودی‌ها: ' + (inspection.entryCount || 0) +
+            ' | پلاگین‌ها: ' + (inspection.pluginCount || 0) +
+            ' | اسکریپت‌ها: ' + (inspection.scriptCount || 0) +
+            ' | تودرتو: ' + (inspection.nestedArchiveCount || 0);
+          archiveDetailsBody.appendChild(summary);
+
+          const pluginResults = Array.isArray(wrapped.archivePluginResults) ? wrapped.archivePluginResults : [];
+          if (pluginResults.length > 0) {
+            const table = document.createElement('table');
+            table.className = 'gate-table';
+
+            pluginResults.forEach(item => {
+              const row = document.createElement('tr');
+
+              const nameCell = document.createElement('td');
+              nameCell.textContent = item.name || 'entry';
+              row.appendChild(nameCell);
+
+              const verdictCell = document.createElement('td');
+              const itemMeta = VERDICT_META[item.finalVerdict] || VERDICT_META.inconclusive;
+              verdictCell.textContent = itemMeta.label;
+              verdictCell.className = 'gate-result gate-' + archiveVerdictClass(item.finalVerdict);
+              row.appendChild(verdictCell);
+
+              const detailCell = document.createElement('td');
+              if (typeof item.score === 'number') {
+                detailCell.textContent = item.score + '%' + (item.crc32Verified ? ' · CRC تأیید شد' : '');
+              } else if (item.readerError) {
+                detailCell.textContent = 'خواندن امن ناموفق: ' + item.readerError;
+              } else {
+                detailCell.textContent = item.crc32Verified ? 'CRC تأیید شد' : '—';
+              }
+              detailCell.className = 'gate-reason';
+              row.appendChild(detailCell);
+
+              table.appendChild(row);
+            });
+
+            archiveDetailsBody.appendChild(table);
+          }
+
+          const scriptResults = Array.isArray(wrapped.archiveScriptResults) ? wrapped.archiveScriptResults : [];
+          if (scriptResults.length > 0) {
+            const heading = document.createElement('p');
+            heading.className = 'archive-summary';
+            heading.textContent = 'اسکریپت‌های تحلیل‌شده داخل بسته: ' + scriptResults.length;
+            archiveDetailsBody.appendChild(heading);
+
+            const table = document.createElement('table');
+            table.className = 'gate-table';
+            scriptResults.forEach(item => {
+              const row = document.createElement('tr');
+
+              const nameCell = document.createElement('td');
+              nameCell.textContent = item.name || 'script';
+              row.appendChild(nameCell);
+
+              const verdictCell = document.createElement('td');
+              const itemMeta = VERDICT_META[item.finalVerdict] || VERDICT_META.inconclusive;
+              verdictCell.textContent = itemMeta.label;
+              verdictCell.className = 'gate-result gate-' + archiveVerdictClass(item.finalVerdict);
+              row.appendChild(verdictCell);
+
+              const detailCell = document.createElement('td');
+              if (typeof item.score === 'number') {
+                detailCell.textContent = 'ScriptAnalyzer ' + item.score + '%' + (item.crc32Verified ? ' · CRC تأیید شد' : '');
+              } else if (item.readerError) {
+                detailCell.textContent = 'خواندن/تحلیل امن ناموفق: ' + item.readerError;
+              } else {
+                detailCell.textContent = item.crc32Verified ? 'CRC تأیید شد' : '—';
+              }
+              detailCell.className = 'gate-reason';
+              row.appendChild(detailCell);
+              table.appendChild(row);
+            });
+            archiveDetailsBody.appendChild(table);
+          }
+        } else {
+          archiveDetails.hidden = true;
+        }
+
+        // --- جزئیات Script Analyzer Pro ---
+        if (wrapped.mode === 'pro' && wrapped.scriptAnalysis) {
+          scriptDetails.hidden = false;
+          scriptDetailsBody.textContent = '';
+
+          const sr = wrapped.scriptAnalysis;
+          const summary = document.createElement('p');
+          summary.className = 'archive-summary';
+          summary.textContent =
+            'زبان: ' + (sr.language === 'csharp' ? 'C#' : (sr.language || 'unknown')) +
+            ' | Analyzer: ' + (sr.analyzerVersion || 'unknown') +
+            ' | اطمینان: ' + (sr.confidence || 'low') +
+            ' | یافته‌ها: ' + (Array.isArray(sr.evidence) ? sr.evidence.length : 0);
+          scriptDetailsBody.appendChild(summary);
+
+          const evidence = Array.isArray(sr.evidence) ? sr.evidence : [];
+          if (evidence.length > 0) {
+            const table = document.createElement('table');
+            table.className = 'gate-table';
+            evidence.slice(0, 30).forEach(item => {
+              const row = document.createElement('tr');
+
+              const categoryCell = document.createElement('td');
+              categoryCell.textContent = item.category || 'evidence';
+              row.appendChild(categoryCell);
+
+              const severityCell = document.createElement('td');
+              severityCell.textContent = item.severity || 'info';
+              severityCell.className = 'gate-result script-severity-' + String(item.severity || 'info');
+              row.appendChild(severityCell);
+
+              const detailCell = document.createElement('td');
+              detailCell.textContent =
+                (item.line ? 'خط ' + item.line + ' · ' : '') +
+                (item.explanation || item.rule || 'شاهد امنیتی');
+              detailCell.className = 'gate-reason';
+              row.appendChild(detailCell);
+
+              table.appendChild(row);
+            });
+            scriptDetailsBody.appendChild(table);
+
+            if (evidence.length > 30) {
+              const clipped = document.createElement('p');
+              clipped.className = 'archive-summary';
+              clipped.textContent = 'برای خوانایی فقط ۳۰ یافتهٔ اول نمایش داده شد؛ نتیجهٔ Analyzer از کل یافته‌های پردازش‌شده استفاده کرده است.';
+              scriptDetailsBody.appendChild(clipped);
+            }
+          }
+
+          const warnings = Array.isArray(sr.warnings) ? sr.warnings : [];
+          if (warnings.length > 0) {
+            const warningList = document.createElement('ul');
+            warningList.className = 'script-warning-list';
+            warnings.slice(0, 6).forEach(w => {
+              const li = document.createElement('li');
+              li.textContent = w;
+              warningList.appendChild(li);
+            });
+            scriptDetailsBody.appendChild(warningList);
+          }
+        } else {
+          scriptDetails.hidden = true;
+        }
+
+        results.classList.add('visible');
+        results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    })();
+  </script>
+</body>
+</html>

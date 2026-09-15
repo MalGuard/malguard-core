@@ -1,0 +1,76 @@
+name: MalGuard Security CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  engineering-hardening:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run complete Engineering Hardening suite
+        run: node tests/run-all.js
+
+      - name: Verify JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find . -type f -name '*.js' -print0)
+
+      - name: Locate Chromium for live browser acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+          elif command -v google-chrome-stable >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v google-chrome-stable)" >> "$GITHUB_ENV"
+          elif command -v chromium >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v chromium)" >> "$GITHUB_ENV"
+          elif command -v chromium-browser >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v chromium-browser)" >> "$GITHUB_ENV"
+          else
+            echo "No Chrome/Chromium executable found on this runner" >&2
+            exit 1
+          fi
+
+      - name: Run real Chromium Worker and Self-Test acceptance
+        run: node tests/chromium-live-validation.js
+
+      - name: Build portable release candidate
+        run: node tools/build-portable-package.js
+
+      - name: Verify release candidate gate
+        run: node tools/verify-release-candidate.js
+
+      - name: Archive verified release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < DESKTOP-VERSION)"
+          tar -C dist -czf "dist/malguard-desktop-${version}.tar.gz" "malguard-desktop-${version}"
+          sha256sum "dist/malguard-desktop-${version}.tar.gz" > "dist/malguard-desktop-${version}.tar.gz.sha256"
+
+      - name: Upload verified release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: malguard-release-candidate
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7

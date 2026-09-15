@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>MalGuard browser smoke</title></head>
+<body data-status="RUNNING"><pre id="out">RUNNING</pre>
+<script src="../malguard-contract.js"></script>
+<script src="../scan-worker-client.js"></script>
+<script>
+(async()=>{
+  const out=document.getElementById('out');
+  try {
+    const file=new File(['print("GTA V browser worker smoke")\n'],'browser-smoke.lua',{type:'text/plain'});
+    const result=await scanFileInWorker(file,'pro');
+    if(result && result.finalVerdict==='safe' && result.resultSchemaVersion==='1.0.0' && result.execution && result.execution.context==='web_worker'){
+      document.body.dataset.status='PASS'; out.textContent='PASS';
+    } else {
+      document.body.dataset.status='FAIL'; out.textContent='FAIL '+JSON.stringify(result);
+    }
+  } catch(e) {
+    document.body.dataset.status='FAIL'; out.textContent='FAIL '+(e&&e.code?e.code+': ':'')+(e&&e.message?e.message:String(e));
+  }
+})();
+</script>
+</body></html>

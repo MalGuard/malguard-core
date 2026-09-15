@@ -1,0 +1,411 @@
+/* ============================================================
+   GTA Guard — styles.css
+   طرح تیره، موبایل-اول، راست‌به‌چپ
+   ============================================================ */
+
+:root {
+  --bg: #0f1115;
+  --bg-elevated: #1a1d24;
+  --border: #2a2e37;
+  --text: #eaecef;
+  --text-dim: #9aa0ac;
+  --accent: #5b8def;
+  --green: #2ecc71;
+  --yellow: #f1c40f;
+  --red: #e74c3c;
+  --gray: #7f8c9a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  direction: rtl;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Vazirmatn', Tahoma, 'Segoe UI', Arial, sans-serif;
+  line-height: 1.7;
+  display: flex;
+  flex-direction: column;
+}
+
+.container {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+  flex: 1;
+}
+
+/* ---------- هدر ---------- */
+header {
+  text-align: center;
+  padding: 24px 0 8px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+header p {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+/* ---------- منطقهٔ رها کردن فایل ---------- */
+.dropzone {
+  margin-top: 24px;
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  padding: 32px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  background: var(--bg-elevated);
+}
+
+.dropzone.dragover {
+  border-color: var(--accent);
+  background: #16233d;
+}
+
+.dropzone p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 1rem;
+}
+
+.dropzone .icon {
+  font-size: 2.2rem;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.file-info {
+  margin-top: 14px;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: none;
+  word-break: break-all;
+}
+
+.file-info.visible {
+  display: block;
+}
+
+/* ---------- دکمهٔ اسکن ---------- */
+.scan-btn {
+  width: 100%;
+  margin-top: 20px;
+  padding: 14px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.scan-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.scan-btn:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+/* ---------- نتیجه ---------- */
+.results {
+  margin-top: 28px;
+  display: none;
+}
+
+.results.visible {
+  display: block;
+}
+
+.verdict-circle {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  color: #101215;
+  font-weight: 800;
+  transition: background 0.3s ease;
+}
+
+.verdict-circle .score {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.verdict-circle .label {
+  font-size: 1rem;
+  margin-top: 4px;
+}
+
+.verdict-safe { background: var(--green); }
+.verdict-suspicious { background: var(--yellow); }
+.verdict-malicious { background: var(--red); }
+.verdict-invalid { background: var(--gray); }
+
+.reasons {
+  margin-top: 20px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.reasons h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
+.reasons ul {
+  margin: 0;
+  padding-inline-start: 20px;
+}
+
+.reasons li {
+  margin-bottom: 6px;
+  font-size: 0.92rem;
+}
+
+.hash-box {
+  margin-top: 16px;
+}
+
+.hash-box label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.hash-box input {
+  width: 100%;
+  direction: ltr;
+  text-align: left;
+  font-family: 'Courier New', monospace;
+  font-size: 0.82rem;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---------- پیام خطا ---------- */
+.error-banner {
+  margin-top: 20px;
+  background: #3a1c1c;
+  border: 1px solid var(--red);
+  color: #ffb3ab;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  display: none;
+}
+
+.error-banner.visible {
+  display: block;
+}
+
+/* ---------- فوتر ---------- */
+footer {
+  text-align: center;
+  padding: 20px 16px 32px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+/* ---------- کلید انتخاب حالت (رایگان / Pro) ---------- */
+.mode-toggle {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.mode-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.mode-btn .mode-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.mode-btn .mode-desc {
+  font-size: 0.75rem;
+}
+
+.mode-btn.active {
+  border-color: var(--accent);
+  background: #16233d;
+}
+
+.mode-btn.active .mode-name {
+  color: var(--accent);
+}
+
+/* ---------- جزئیات Pro (دروازه‌های Multi-Layer) ---------- */
+.pro-details {
+  margin-top: 18px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.pro-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--accent);
+}
+
+.gate-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 0.82rem;
+}
+
+.gate-table tr {
+  border-top: 1px solid var(--border);
+}
+
+.gate-table td {
+  padding: 6px 4px;
+  vertical-align: top;
+}
+
+.gate-result {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.gate-pass { color: var(--green); }
+.gate-fail { color: var(--red); }
+.gate-suspicious { color: var(--yellow); }
+.gate-inconclusive { color: var(--gray); }
+
+.gate-reason {
+  color: var(--text-dim);
+}
+
+.pro-conflict-note {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: var(--yellow);
+}
+
+/* ---------- واکنش‌گرا برای دسکتاپ ---------- */
+@media (min-width: 640px) {
+  .container {
+    padding-top: 40px;
+  }
+}
+
+/* ---------- جزئیات آرشیو Pro ---------- */
+.archive-summary {
+  margin: 10px 0 0;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.8;
+}
+
+#archiveDetailsBody {
+  overflow-x: auto;
+}
+
+#archiveDetailsBody .gate-table td:first-child {
+  direction: ltr;
+  text-align: left;
+  word-break: break-all;
+}
+
+/* ---------- جزئیات Script Analyzer Pro ---------- */
+#scriptDetailsBody {
+  overflow-x: auto;
+}
+
+#scriptDetailsBody .gate-table td:first-child {
+  direction: ltr;
+  text-align: left;
+  word-break: break-word;
+}
+
+.script-severity-info { color: var(--gray); }
+.script-severity-low { color: var(--text-dim); }
+.script-severity-medium { color: var(--yellow); }
+.script-severity-high,
+.script-severity-critical { color: var(--red); }
+
+.script-warning-list {
+  margin: 10px 0 0;
+  padding-inline-start: 20px;
+  color: var(--yellow);
+  font-size: 0.82rem;
+}
+
+/* Engineering Hardening v1 */
+.scan-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.cancel-scan-btn {
+  border: 1px solid rgba(255, 83, 100, .45);
+  background: rgba(255, 83, 100, .08);
+  color: #ffd9de;
+  border-radius: 12px;
+  padding: 12px 18px;
+  font: inherit;
+  cursor: pointer;
+}
+.cancel-scan-btn:hover {
+  background: rgba(255, 83, 100, .14);
+}
+.cancel-scan-btn[hidden] {
+  display: none !important;
+}

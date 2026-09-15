@@ -1,0 +1,102 @@
+name: MalGuard Windows Sandbox Final Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-sandbox-final-acceptance:
+    # This job must run only on a Windows host that is explicitly provisioned
+    # with Windows Sandbox + nested virtualization and labeled accordingly.
+    runs-on: [self-hosted, windows, malguard-sandbox]
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Preserve repository line endings
+        shell: pwsh
+        run: |
+          git config --local core.autocrlf false
+          git -c core.autocrlf=false reset --hard HEAD
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Record host readiness without changing system configuration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "Commit: $env:GITHUB_SHA"
+          Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "Architecture: $env:PROCESSOR_ARCHITECTURE"
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+          Write-Host "Node: $(node --version)"
+          Write-Host "CMake:"
+          cmake --version
+
+          $sandboxExe = Join-Path $env:SystemRoot 'System32\WindowsSandbox.exe'
+          Write-Host "WindowsSandbox.exe present: $(Test-Path -LiteralPath $sandboxExe)"
+
+          try {
+            $feature = Get-WindowsOptionalFeature -Online -FeatureName 'Containers-DisposableClientVM' -ErrorAction Stop
+            Write-Host "Windows Sandbox feature state: $($feature.State)"
+          } catch {
+            Write-Host "Windows Sandbox feature state: unavailable ($($_.Exception.Message))"
+          }
+
+          try {
+            $cs = Get-CimInstance Win32_ComputerSystem
+            Write-Host "HypervisorPresent: $($cs.HypervisorPresent)"
+          } catch {
+            Write-Host "HypervisorPresent: unavailable"
+          }
+
+          try {
+            $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+            Write-Host "VirtualizationFirmwareEnabled: $($cpu.VirtualizationFirmwareEnabled)"
+            Write-Host "SecondLevelAddressTranslationExtensions: $($cpu.SecondLevelAddressTranslationExtensions)"
+          } catch {
+            Write-Host "Virtualization capability details: unavailable"
+          }
+
+      - name: Run final Windows Sandbox acceptance harness
+        id: acceptance
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $report = Join-Path $env:RUNNER_TEMP 'malguard-windows-sandbox-final-acceptance.json'
+          & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\tools\windows-acceptance.ps1 -ProjectRoot (Get-Location).Path -ReportPath $report
+          $exitCode = $LASTEXITCODE
+          "report_path=$report" >> $env:GITHUB_OUTPUT
+          "exit_code=$exitCode" >> $env:GITHUB_OUTPUT
+          if (Test-Path -LiteralPath $report) {
+            Write-Host '--- Windows Sandbox final acceptance report ---'
+            Get-Content -LiteralPath $report -Raw
+          }
+          exit 0
+
+      - name: Upload final acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-sandbox-final-acceptance-report
+          path: ${{ steps.acceptance.outputs.report_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce final acceptance result
+        shell: pwsh
+        run: |
+          $code = [int]'${{ steps.acceptance.outputs.exit_code }}'
+          if ($code -ne 0) {
+            throw "Windows Sandbox final acceptance failed with exit code $code"
+          }

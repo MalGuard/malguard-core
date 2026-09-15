@@ -1,0 +1,52 @@
+MalGuard Desktop 0.6.1-dev — Engineering Acceptance Snapshot
+Date: 2026-09-13
+
+SCANNER CORE — ACCEPTED FOR CURRENT DECLARED SCOPE
+- Rules thresholds are range-validated and cannot make arbitrary negative-score states SAFE.
+- max_score is constrained to the public 0..100 score contract.
+- Declared file size must match actual bytes read.
+- SHA-256 identity is mandatory for a non-invalid Engine result; hash failures fail closed.
+- App integration rejects incompatible runtime module versions.
+- SAFE Engine envelopes require a valid 64-hex SHA-256 and valid rules status/version.
+- Desktop path scans reject symlink targets and revalidate SHA-256 after the scan to detect path/content races.
+- Degraded rule coverage never returns SAFE.
+- Worker boot/version/schema/mode/crash/timeout/abort/concurrency failures fail closed.
+
+REAL-TIME GUARD — HARDENED USER-SPACE MILESTONE, NOT YET FINAL
+- Existing protected files are baseline-scanned before watcher start returns.
+- New/changed protected files are scanned.
+- Watcher health is explicit; errors degrade protection instead of being silently ignored.
+- Reconciliation recreates lost root watchers.
+- Default protected-file scope avoids quarantining ordinary game assets.
+- SAFE releases; SUSPICIOUS quarantines; MALICIOUS block+quarantines; INCONCLUSIVE holds/quarantines.
+- File identity is SHA-256 revalidated before/after scan.
+- Quarantine restore IDs are strict UUIDs.
+- Restore ignores manifest-provided quarantine payload paths and derives the payload path from the trusted store root.
+- Agent restore is constrained to configured protected roots.
+- Managed install scans in staging before release to the game root.
+
+KNOWN FINAL-GAP FOR REAL-TIME PRE-LOAD GUARANTEE
+The current out-of-band watcher is user-space. It cannot mathematically guarantee that a game process never opens a newly copied file in the tiny interval before a filesystem notification is handled. Managed installs do provide scan-before-release. Closing the out-of-band pre-load gap requires a Windows service + access gate/minifilter-class mechanism and Windows-native validation.
+
+SANDBOX — HARDENED CONTROL PLANE + WINDOWS ACCEPTANCE HARNESS, NATIVE RUN STILL PENDING
+- Release path remains fail-closed and does NOT execute arbitrary untrusted samples.
+- Preflight binds size/type/SHA-256 identity and staging re-checks that same identity.
+- Telemetry is schema-validated, size-bounded, session-bound, and conservatively assessed; quiet telemetry never proves SAFE.
+- Output is bounded by host watchdog quotas and non-regular/nested entries are rejected.
+- Synthetic Windows containment probe source configures Job Object hard CPU cap, memory limit, kill-on-close, suspended assignment, and forced termination.
+- Synthetic Windows Sandbox isolation self-test validates read-only input, isolated output, disabled network route, and disposable launch without detonating an untrusted sample.
+- Added a synthetic-only Windows acceptance harness that compiles the native containment probe + Windows service and executes the containment/isolation self-tests without installing the service or accepting an arbitrary sample.
+- Sandbox releaseGrade is process-local and can unlock only after BOTH Windows-native containment and Windows Sandbox isolation probes pass in that process.
+- Arbitrary behavioral execution stays locked until the native containment probe is compiled/run successfully on Windows and Windows Sandbox isolation validation passes.
+
+TEST STATUS
+- Full Engineering Hardening suite: 32/32 programs PASS.
+- Regression corpus: 58/58.
+- Quality benchmark: benign malicious FP 0/22; benign suspicious 1/22; risky SAFE escapes 0/23.
+- Malformed ZIP fuzz: 500 random + 500 mutated cases.
+- PE adversarial fuzz: 600 randomized PE-shaped cases.
+- Mutation security guards: 3/3 killed.
+- Full suite repeated 3 consecutive times after latest scanner/guard hardening: PASS/PASS/PASS.
+
+IMPORTANT
+"Accepted" means the defined milestone acceptance criteria pass. It does not mean bug-free, malware-proof, or production-final.

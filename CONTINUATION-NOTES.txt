@@ -1,0 +1,77 @@
+MalGuard / GTA Guard — continuation notes
+Current milestone: release-readiness review
+Current engineering verdict: CONDITIONAL PASS — WINDOWS SANDBOX ACCEPTANCE PENDING
+
+Continue from this branch; do not rebuild from scratch.
+
+CURRENT VALIDATED BASELINE
+--------------------------
+Security CI + real Chromium acceptance validated on:
+  0253d5f0c235da280b1a7e8239437078f40799ef
+
+COMPLETED / VERIFIED
+--------------------
+- MalwareBazaar authenticated live API validation: PASS
+  GitHub Actions Run ID: 34952917084
+  A real authenticated API request was made using only a synthetic SHA-256 lookup.
+  No malware was downloaded or executed and no credential was exposed.
+
+- Threat-intelligence integration: PASS
+  Exact known-malicious SHA-256 reputation can override a local SAFE result to malicious.
+  Threat-intelligence timeout/unavailability does not manufacture SAFE or erase complete local static analysis.
+  Cache TTL/corruption fail-closed behavior and credential non-disclosure tests pass.
+
+- Full Engineering Hardening suite: PASS
+  38/38 test programs pass.
+
+- Real-browser Worker/Self-Test acceptance: PASS
+  Standalone Chromium validation Run ID: 34956603288
+  Exact validated commit: 219c10cb6466239e24d0d221a89333054734fb4c
+  Result: PASS — LIVE BROWSER VALIDATION
+  All 12 live browser checks passed with an empty uncaught-error list.
+  Coverage includes live Self-Test, Dedicated Worker startup/isolation, benign and suspicious scans,
+  real ZIP fixture analysis, concurrency rejection, abort/recovery, Worker crash signaling and hard termination.
+  The intentional Worker-crash fixture was corrected to prevent the handled test error from being misreported
+  as an uncaught window error.
+
+- Real-browser acceptance is now part of the normal Security CI release-candidate path.
+  Security CI Run ID: 34956699297
+  Exact validated commit: 0253d5f0c235da280b1a7e8239437078f40799ef
+  Engineering suite, JavaScript syntax validation, real Chromium acceptance,
+  portable package build, release-candidate verification and artifact upload all completed successfully.
+
+- Release candidate packaging/integrity: PASS
+  The package verifier checks manifest/checksums/secrets before upload.
+  Prior independently checked artifact ZIP digest:
+  sha256:fa25b7b1ce6fe671015b9670b141cef3aff34511fd76e3508c70d0e7c6ef0356
+
+- Windows native containment and build checks: PASS
+  Windows native probe and Windows service compile successfully.
+  Job Object creation, assignment-before-resume, CPU limit, memory limit,
+  active-process limit, kill-on-close and forced termination checks pass.
+
+REMAINING ACCEPTANCE GAP
+------------------------
+Windows Sandbox acceptance only.
+
+Current GitHub-hosted Windows environments used for validation do not provide usable Windows Sandbox / nested virtualization.
+The code correctly fails closed with:
+  WINDOWS_SANDBOX_UNAVAILABLE
+  sandbox_release_gate_locked
+
+Do not claim Sandbox isolation, Sandbox telemetry runtime acceptance, or release-grade Sandbox PASS until a suitable Windows host actually runs those checks.
+
+CURRENT PRODUCT MODEL
+---------------------
+Standard = normal static/reputation scan
+Plus     = deep step-by-step scan, Sandbox only when required
+Pro      = minimal preflight followed directly by Sandbox behavioral analysis
+
+SAFETY / SCOPE
+--------------
+- Do not use, download, or execute real malware for validation.
+- Use harmless synthetic fixtures only.
+- Do not fake or simulate a Windows Sandbox PASS.
+- Do not merge/release or modify main without explicit authorization.
+
+The historical FINAL-SECURITY-AUDIT.txt remains an audit record of its earlier date and should not be rewritten to pretend later work existed at that time.
