@@ -57,12 +57,12 @@ for (const file of integrityFiles) {
 
 const forbiddenContent = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
-  /MALGUARD_ABUSECH_AUTH_KEY\s*=\s*[^\s]+/,
-  /MALGUARD_ENTITLEMENT_TOKEN\s*=\s*[^\s]+/,
+  /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/,
+  /\b(?:Bearer|Authorization:)\s+[A-Za-z0-9._~+\/-]{24,}/i,
 ];
 for (const file of files.filter(f => /\.(?:js|json|md|txt|yml|yaml)$/i.test(f))) {
   const text = fs.readFileSync(path.join(OUT, file), 'utf8');
-  for (const pattern of forbiddenContent) if (pattern.test(text)) fail(`credential-like content in ${file}`);
+  for (const pattern of forbiddenContent) if (pattern.test(text)) fail(`embedded credential-like content in ${file}`);
 }
 
 console.log(`✓ Release candidate gate: ${files.length} files, manifest/checksums/secrets PASS`);
