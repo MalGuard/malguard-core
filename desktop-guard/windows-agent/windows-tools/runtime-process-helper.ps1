@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory=$true)][ValidateSet('Snapshot','Terminate')][string]$Mode,
-  [Parameter(Mandatory=$false)][int]$Pid = 0,
+  [Parameter(Mandatory=$false)][int]$ProcessId = 0,
   [Parameter(Mandatory=$false)][string]$ExpectedPath = ''
 )
 
@@ -34,14 +34,14 @@ function Test-WithinRoot([string]$Candidate, [string[]]$Roots) {
 $roots = Get-ConfiguredRoots
 
 if ($Mode -eq 'Terminate') {
-  if ($Pid -le 0 -or [string]::IsNullOrWhiteSpace($ExpectedPath)) { throw 'pid and expected path are required' }
+  if ($ProcessId -le 0 -or [string]::IsNullOrWhiteSpace($ExpectedPath)) { throw 'process id and expected path are required' }
   $expected = [IO.Path]::GetFullPath($ExpectedPath)
   if (-not (Test-WithinRoot $expected $roots)) { throw 'expected process path is outside protected roots' }
-  $p = Get-Process -Id $Pid -ErrorAction Stop
+  $p = Get-Process -Id $ProcessId -ErrorAction Stop
   $actual = [IO.Path]::GetFullPath([string]$p.Path)
   if (-not $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) { throw 'process identity changed before termination' }
-  Stop-Process -Id $Pid -Force -ErrorAction Stop
-  Emit ([ordered]@{ ok=$true; mode='Terminate'; pid=$Pid; path=$actual; terminated=$true })
+  Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+  Emit ([ordered]@{ ok=$true; mode='Terminate'; pid=$ProcessId; path=$actual; terminated=$true })
 }
 
 $processes = New-Object System.Collections.Generic.List[object]
