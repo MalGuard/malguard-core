@@ -3,7 +3,7 @@
 #include <windows.h>
 
 #include <fstream>
-#include <sstream>
+#include <iterator>
 #include <string>
 
 static bool CanRead(const std::wstring& path) {
@@ -29,16 +29,50 @@ static bool CanWrite(const std::wstring& path) {
 static bool TryLoopback(unsigned short port) {
   WSADATA wsa{};
   if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
+
   SOCKET socketHandle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (socketHandle == INVALID_SOCKET) {
     WSACleanup();
     return false;
   }
+
+  u_long nonBlocking = 1;
+  if (ioctlsocket(socketHandle, FIONBIO, &nonBlocking) != 0) {
+    closesocket(socketHandle);
+    WSACleanup();
+    return false;
+  }
+
   sockaddr_in address{};
   address.sin_family = AF_INET;
   address.sin_port = htons(port);
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  const bool connected = connect(socketHandle, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
+
+  bool connected = false;
+  const int rc = connect(socketHandle, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+  if (rc == 0) {
+    connected = true;
+  } else if (WSAGetLastError() == WSAEWOULDBLOCK) {
+    fd_set writable{};
+    fd_set errors{};
+    FD_ZERO(&writable);
+    FD_ZERO(&errors);
+    FD_SET(socketHandle, &writable);
+    FD_SET(socketHandle, &errors);
+    timeval timeout{};
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 250000;
+    const int selected = select(0, nullptr, &writable, &errors, &timeout);
+    if (selected > 0 && FD_ISSET(socketHandle, &writable)) {
+      int socketError = 0;
+      int socketErrorLength = sizeof(socketError);
+      if (getsockopt(socketHandle, SOL_SOCKET, SO_ERROR,
+                     reinterpret_cast<char*>(&socketError), &socketErrorLength) == 0 && socketError == 0) {
+        connected = true;
+      }
+    }
+  }
+
   closesocket(socketHandle);
   WSACleanup();
   return connected;
