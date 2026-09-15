@@ -29,6 +29,7 @@ const tests=[
  'virtual-windows-validation-lab.test.js',
  'embedded-validation-lab.test.js',
  'isolation-readiness.test.js',
+ 'product-readiness-gate.test.js',
  'sandbox-telemetry.test.js',
  'sandbox-native-containment-source.test.js',
  'windows-service-source.test.js',
