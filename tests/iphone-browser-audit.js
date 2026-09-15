@@ -121,6 +121,7 @@ async function testCrashSignaling() {
       reject(new Error('browser did not surface worker crash within 2000ms'));
     }, 2000);
     worker.addEventListener('error', (event) => {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
       clearTimeout(timer);
       try { worker.terminate(); } catch (_) {}
       if (!event || typeof event.message !== 'string') {
