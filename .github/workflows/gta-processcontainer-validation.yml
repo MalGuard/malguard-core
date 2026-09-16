@@ -72,6 +72,15 @@ jobs:
             throw "MXC ProcessContainer live validation failed with exit code $LASTEXITCODE"
           }
 
+      - name: Build native GTA ProcessContainer harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S native/gta-processcontainer-harness -B build/gta-processcontainer-harness -A ARM64
+          cmake --build build/gta-processcontainer-harness --config Release --parallel
+          $harness = Resolve-Path 'build/gta-processcontainer-harness/Release/MalGuardGtaContextHarness.exe'
+          "MALGUARD_GTA_PROCESSCONTAINER_HARNESS_EXE=$($harness.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build harmless GTA-compatible plugin fixture
         shell: pwsh
         run: |
