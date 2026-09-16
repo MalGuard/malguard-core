@@ -18,6 +18,13 @@ int wmain() {
     directInput->Release();
   }
 
+  // Ultimate ASI Loader v9.7.0 supports deterministic deferred plugin loading
+  // through LoadFromAPI=GetSystemTimeAsFileTime. Calling this Win32 API from
+  // the executable exercises that documented loader path without directly
+  // loading the ASI from this fixture.
+  FILETIME fileTime{};
+  GetSystemTimeAsFileTime(&fileTime);
+
   // Keep the process alive long enough for MalGuard's in-container telemetry
   // to prove that both the external loader and staged ASI are mapped modules.
   Sleep(30000);
