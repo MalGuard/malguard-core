@@ -11,38 +11,131 @@ async function status(){try{const s=await api('/api/status');$('status').textCon
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')});
 
 const MODEL_HINTS={
- standard:'Standard: local scan only.',
- plus:'Plus: deep staged analysis; suspicious or inconclusive files escalate to Sandbox only after this host passes its local runtime self-certification.',
- pro:'Pro: direct Sandbox analysis after minimal preflight; behavioral execution stays locked on hosts that have not passed the real Windows Sandbox self-test.',
+ standard:'Standard: fast local protection and reputation analysis.',
+ plus:'Plus: deep multi-layer analysis with automatic isolated Sandbox escalation when needed.',
+ pro:'Pro: direct behavioral analysis inside an isolated Windows Sandbox after a minimal safety preflight.',
+};
+const VERDICT_COPY={
+ safe:{label:'Safe',tone:'safe',title:'No threat detected',message:'MalGuard completed the selected analysis and found no malicious behavior in the available evidence.'},
+ suspicious:{label:'Review recommended',tone:'warning',title:'Suspicious activity detected',message:'MalGuard found behavior or indicators that deserve caution. Keep the file blocked unless you trust its source.'},
+ malicious:{label:'Threat blocked',tone:'danger',title:'Malicious activity detected',message:'MalGuard detected malicious evidence. Keep the file quarantined and do not run it.'},
+ inconclusive:{label:'Protected',tone:'neutral',title:'More verification is required',message:'MalGuard did not mark this file safe. It remains protected while additional verification is required.'},
 };
 function currentModel(){return $('scanModel').value}
 function updateModelUi(){
  const model=currentModel();
  $('modelHint').textContent=MODEL_HINTS[model]||'';
  $('modelFlow').hidden=model==='standard';
- $('modelFlowTitle').textContent=model==='pro'?'Pro Sandbox flow':'Plus analysis flow';
+ $('modelFlowTitle').textContent=model==='pro'?'Pro secure analysis':'Plus deep analysis';
  if(model!=='standard'){
    $('modelSteps').innerHTML='';
-   $('modelFinal').textContent=model==='pro'?'Waiting for direct Sandbox analysis.':'Waiting for Plus scan.';
+   resetCustomerResult(model==='pro'?'Ready for isolated behavioral analysis.':'Ready for deep analysis.');
  }
 }
 $('scanModel').onchange=updateModelUi;
-updateModelUi();
 
+function resetCustomerResult(text='Ready to scan.'){
+ const box=$('modelFinal');
+ if(!box)return;
+ box.className='scan-result result-neutral';
+ box.textContent=text;
+ const diagnostics=$('modelDiagnostics');
+ if(diagnostics)diagnostics.hidden=true;
+}
+function setScanSummary(text,tone='neutral'){
+ const box=$('scanOut');
+ box.className=`scan-summary result-${tone}`;
+ box.textContent=text;
+}
+function friendlyPhase(event){
+ const phase=event&&event.phase;
+ const status=event&&event.status;
+ if(phase==='prepare')return 'Preparing secure analysis';
+ if(phase==='standard_scan')return status==='completed'?'Standard protection scan completed':'Running Standard protection scan';
+ if(phase==='static_scan')return status==='completed'?'Deep static analysis completed':'Running deep static analysis';
+ if(phase==='archive_analysis')return 'Archive inspection completed';
+ if(phase==='script_analysis')return 'Script analysis completed';
+ if(phase==='correlation')return 'Security signals correlated';
+ if(phase==='threat_intelligence')return 'Threat-intelligence check completed';
+ if(phase==='sandbox_decision')return status==='warning'?'Additional isolated analysis selected':'Sandbox decision completed';
+ if(phase==='preflight')return status==='completed'?'File prepared for isolated analysis':status==='blocked'?'File could not be prepared safely':'Preparing file for isolated analysis';
+ if(phase==='sandbox_analysis'){
+   if(status==='blocked')return 'Secure Sandbox setup is required on this PC';
+   if(status==='completed')return 'Isolated behavioral analysis completed';
+   return 'Running isolated behavioral analysis';
+ }
+ if(phase==='final_verdict')return status==='failed'?'Analysis stopped safely':'Analysis result ready';
+ return event&&event.message?event.message:'Security check';
+}
+function friendlyMeta(event){
+ const status=event&&event.status;
+ if(status==='completed')return 'Completed';
+ if(status==='running')return 'In progress';
+ if(status==='blocked')return 'Protected';
+ if(status==='warning')return 'Additional protection';
+ if(status==='failed')return 'Stopped safely';
+ return 'Queued';
+}
+function sandboxSetupRequired(result){
+ return !!(result&&(
+   result.completionState==='sandbox_unavailable_fail_closed'||
+   (result.sandboxRequested===true&&result.sandboxCompleted===false&&result.completionState!=='preflight_failed_closed')
+ ));
+}
+function renderCustomerResult(session){
+ const result=session&&session.finalResult?session.finalResult:null;
+ const box=$('modelFinal');
+ box.innerHTML='';
+ const diagnostics=$('modelDiagnostics');
+ const diagnosticsOut=$('modelDiagnosticsOut');
+ if(diagnostics&&diagnosticsOut&&session){
+   diagnostics.hidden=false;
+   diagnosticsOut.textContent=JSON.stringify(session,null,2);
+ }
+ if(!result){
+   box.className='scan-result result-neutral';
+   box.textContent='Analysis is still running securely.';
+   return;
+ }
+ const setupRequired=sandboxSetupRequired(result);
+ const preflightBlocked=result.completionState==='preflight_failed_closed';
+ let copy=VERDICT_COPY[result.verdict]||VERDICT_COPY.inconclusive;
+ if(setupRequired){
+   copy={label:'Protected',tone:'setup',title:'Secure Sandbox setup required',message:'MalGuard kept the file protected because isolated execution is not ready on this PC. The file was not executed outside the Sandbox.'};
+ }else if(preflightBlocked){
+   copy={label:'Protected',tone:'setup',title:'File kept protected',message:'MalGuard could not prepare this file for isolated execution safely, so it stopped before running it.'};
+ }
+ box.className=`scan-result result-${copy.tone}`;
+ const header=document.createElement('div');header.className='result-header';
+ const title=document.createElement('div');title.className='result-title';title.textContent=copy.title;
+ const badge=document.createElement('span');badge.className='result-badge';badge.textContent=copy.label;
+ header.append(title,badge);
+ const message=document.createElement('p');message.className='result-message';message.textContent=copy.message;
+ box.append(header,message);
+ if(setupRequired){
+   const note=document.createElement('p');note.className='result-note';note.textContent='Plus and Pro stay fail-closed until this device passes the real Windows Sandbox compatibility check.';
+   const actions=document.createElement('div');actions.className='result-actions';
+   const check=document.createElement('button');check.type='button';check.textContent='Check Sandbox compatibility';
+   check.onclick=()=>{const tab=document.querySelector('.tab[data-tab="engine"]');if(tab)tab.click();const button=$('finalSandboxTest');if(button)button.click();};
+   const standard=document.createElement('button');standard.type='button';standard.className='button-secondary';standard.textContent='Run Standard scan instead';
+   standard.onclick=()=>{$('scanModel').value='standard';updateModelUi();$('scanBtn').click();};
+   actions.append(check,standard);box.append(note,actions);
+ }
+}
 function renderPipeline(session){
  const list=$('modelSteps'); list.innerHTML='';
  for(const e of session.events||[]){
    const row=document.createElement('div'); row.className=`pipeline-step step-${e.status}`;
-   const dot=document.createElement('span'); dot.className='pipeline-dot'; dot.textContent=e.status==='completed'?'✓':e.status==='failed'?'×':e.status==='warning'?'!':e.status==='blocked'?'!':'•';
+   const dot=document.createElement('span'); dot.className='pipeline-dot'; dot.textContent=e.status==='completed'?'✓':e.status==='running'?'•':e.status==='blocked'?'✓':e.status==='failed'?'×':'•';
    const text=document.createElement('div');
-   const title=document.createElement('div'); title.className='pipeline-message'; title.textContent=e.message;
-   const meta=document.createElement('div'); meta.className='muted'; meta.textContent=`${e.phase} · ${e.status}`;
+   const title=document.createElement('div'); title.className='pipeline-message'; title.textContent=friendlyPhase(e);
+   const meta=document.createElement('div'); meta.className='muted'; meta.textContent=friendlyMeta(e);
    text.append(title,meta); row.append(dot,text); list.append(row);
  }
- if(session.finalResult){$('modelFinal').textContent=JSON.stringify(session.finalResult,null,2)}
+ renderCustomerResult(session);
 }
 async function runModelScan(path,model){
- $('modelSteps').innerHTML=''; $('modelFinal').textContent='Waiting for final verdict…';
+ $('modelSteps').innerHTML=''; resetCustomerResult('Starting secure analysis…');
  const started=await api('/api/model-scan/start','POST',{path,model});
  const id=started.session.id;
  if(model!=='standard') renderPipeline(started.session);
@@ -58,11 +151,28 @@ async function runModelScan(path,model){
 $('scanBtn').onclick=async()=>{
  const p=$('scanPath').value;
  const model=currentModel();
+ if(!p.trim()){
+   setScanSummary('Choose a file path to begin scanning.','neutral');
+   return;
+ }
+ setScanSummary('MalGuard is scanning the file securely…','neutral');
  try{
    const session=await runModelScan(p,model);
-   out('scanOut',{ok:true,model,finalResult:session.finalResult});
+   const result=session&&session.finalResult?session.finalResult:null;
+   if(model!=='standard')renderCustomerResult(session);
+   if(sandboxSetupRequired(result)){
+     setScanSummary('File kept protected. Secure Sandbox setup is required before isolated execution can run on this PC.','setup');
+   }else if(result&&result.completionState==='preflight_failed_closed'){
+     setScanSummary('File kept protected because MalGuard could not prepare it safely for isolated execution.','setup');
+   }else{
+     const copy=VERDICT_COPY[result&&result.verdict]||VERDICT_COPY.inconclusive;
+     setScanSummary(`${copy.title}. ${copy.message}`,copy.tone);
+   }
  }catch(e){
-   out('scanOut',{ok:false,model,code:'MODEL_SCAN_UI_ERROR',message:e.message});
+   setScanSummary('MalGuard could not finish this scan. The file was not marked safe and no unsafe fallback was used.','setup');
+   const diagnostics=$('modelDiagnostics');
+   const diagnosticsOut=$('modelDiagnosticsOut');
+   if(diagnostics&&diagnosticsOut){diagnostics.hidden=false;diagnosticsOut.textContent=JSON.stringify({code:'MODEL_SCAN_UI_ERROR',message:e.message},null,2);}
  }
 };
 async function loadThreatStatus(){out('threatOut',await api('/api/threat-intel/status'))}
@@ -77,47 +187,33 @@ $('gateStatus').onclick=async()=>out('gateOut',await api('/api/access-gate/statu
 
 function renderIsolationReadiness(report){
  const productReady=!!(report&&report.productReleaseReady===true);
- const productPercent=Number(report&&report.productReadinessPercent)||0;
- const engineeringReady=!!(report&&report.engineeringReady===true);
- const engineeringPercent=Number(report&&report.engineeringValidationPercent)||0;
  const runtimeReady=!!(report&&report.runtimeCapabilitiesReadyOnCurrentHost===true);
- const selfCert=report&&report.runtimeSelfCertification?report.runtimeSelfCertification:null;
- const virtual=report&&report.virtualWindowsLab?report.virtualWindowsLab:null;
- const virtualPercent=Number(virtual&&virtual.coveragePercent)||0;
- const mxc=report&&report.mxcProcessContainer?report.mxcProcessContainer:null;
- const mxcValidated=!!(mxc&&mxc.validated===true);
  const summary=$('finalSandboxSummary');
-
- if(productReady&&productPercent===100&&engineeringPercent===100&&virtualPercent===100&&mxcValidated){
-   if(runtimeReady){
-     summary.textContent='PRODUCT READINESS 100% — engineering, release artifact, Virtual Windows validation and this host\'s real Windows Sandbox runtime acceptance all PASS.';
-   }else{
-     summary.textContent='PRODUCT READINESS 100% — Standard, Plus and Pro implementation/release profiles are complete. This machine\'s Sandbox-dependent runtime paths remain safely LOCKED until its local Windows Sandbox self-test passes.';
-   }
- }else if(engineeringReady){
-   summary.textContent=`PRODUCT VALIDATION INCOMPLETE — engineering ${engineeringPercent}%, product ${productPercent}%. Runtime capability gates remain fail-closed.`;
+ summary.className=runtimeReady?'health-card health-ready':'health-card health-setup';
+ if(runtimeReady){
+   summary.textContent='Secure Sandbox is ready on this PC. Plus and Pro can run isolated behavioral analysis.';
+ }else if(productReady){
+   summary.textContent='MalGuard is installed correctly. Secure Sandbox needs setup or compatibility approval on this PC before Plus/Pro can execute files in isolation.';
  }else{
-   summary.textContent='PENDING — engineering validation is incomplete. No unsupported capability is being marked ready.';
+   summary.textContent='MalGuard completed the compatibility check, but this installation still needs attention before premium Sandbox analysis can run.';
  }
-
- if(selfCert&&selfCert.hostSpecific===true&&selfCert.failClosed===true){
-   summary.textContent += selfCert.currentHostCertified
-     ? ' Runtime self-certification: PASS on this host.'
-     : ' Runtime self-certification: required per host; current host has not certified Windows Sandbox.';
- }
+ const diagnostics=$('finalSandboxDiagnostics');
+ if(diagnostics)diagnostics.hidden=false;
  out('finalSandboxOut',report);
 }
 $('finalSandboxTest').onclick=async()=>{
  const button=$('finalSandboxTest');
  button.disabled=true;
- $('finalSandboxSummary').textContent='Running full product validation and this host\'s Sandbox self-certification check…';
- $('finalSandboxOut').textContent='Running…';
+ $('finalSandboxSummary').className='health-card health-checking';
+ $('finalSandboxSummary').textContent='Checking secure Sandbox compatibility on this PC…';
  try{
    const report=await api('/api/sandbox/readiness','POST',{});
    renderIsolationReadiness(report);
  }catch(e){
-   $('finalSandboxSummary').textContent='FAIL — validation request could not complete.';
-   out('finalSandboxOut',{ok:false,code:'ISOLATION_READINESS_UI_ERROR',message:e.message});
+   $('finalSandboxSummary').className='health-card health-setup';
+   $('finalSandboxSummary').textContent='Compatibility check could not finish. Premium Sandbox execution remains safely disabled until the check succeeds.';
+   const diagnostics=$('finalSandboxDiagnostics');if(diagnostics)diagnostics.hidden=false;
+   out('finalSandboxOut',{code:'ISOLATION_READINESS_UI_ERROR',message:e.message});
  }finally{
    button.disabled=false;
  }
@@ -130,4 +226,6 @@ $('saveSettings').onclick=async()=>{const watch=$('watchRoot').value.trim();cons
 $('refreshIncidents').onclick=async()=>out('incidentsOut',await api('/api/incidents'));
 loadSettings().catch(e=>out('settingsOut',{ok:false,error:e.message}));
 loadThreatStatus().catch(e=>out('threatOut',{ok:false,error:e.message}));
+updateModelUi();
+setScanSummary('Ready to scan.','neutral');
 status();
