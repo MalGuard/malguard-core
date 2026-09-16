@@ -39,7 +39,7 @@ try {
   await fsp.copyFile(externalLoader, path.join(gameRoot, 'dinput8.dll'));
   await fsp.writeFile(
     path.join(gameRoot, 'dinput8.ini'),
-    '[GlobalSets]\r\nLoadPlugins=1\r\nLoadFromScriptsOnly=0\r\nDontLoadFromDllMain=0\r\n',
+    '[GlobalSets]\r\nLoadPlugins=1\r\nLoadFromScriptsOnly=0\r\nLoadRecursively=1\r\nDontLoadFromDllMain=1\r\n',
     'utf8',
   );
   await fsp.copyFile(fixturePlugin, samplePath);
@@ -87,7 +87,7 @@ try {
     isolationTier: support.isolationTier || null,
     networkDenied: result.telemetry.networkPolicy === 'disabled-by-processcontainer',
     directPluginLoadByFixture: false,
-    loaderConfiguration: 'LoadPlugins=1; LoadFromScriptsOnly=0; DontLoadFromDllMain=0',
+    loaderConfiguration: 'LoadPlugins=1; LoadFromScriptsOnly=0; LoadRecursively=1; DontLoadFromDllMain=1',
     remainingExternalGate: 'This validates a real third-party ASI loader against the GTA-compatible simulator; it is not a claim that Rockstar GTA V itself was executed.',
   };
 
