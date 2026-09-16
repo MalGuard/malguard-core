@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: gta-external-asi-loader-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   external-asi-loader-processcontainer:
     name: Real ASI loader + GTA simulator + ProcessContainer
