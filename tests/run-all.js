@@ -9,6 +9,7 @@ const tests=[
  'scan-resilience.test.js',
  'workflow-supply-chain.test.js',
  'secure-update.test.js',
+ 'update-runtime-enforcement.test.js',
  'release-trust.test.js',
  'entitlement-gate.test.js',
  'entitlement-api.test.js',
