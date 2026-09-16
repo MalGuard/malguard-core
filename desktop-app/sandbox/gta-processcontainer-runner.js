@@ -224,8 +224,8 @@ class GtaProcessContainerRunner {
         readwritePaths: [session.runtimeRoot, session.outputDir],
       },
       network: {
-        egress: { default: 'deny' },
-        ingress: { default: 'deny', hostLoopback: 'deny' },
+        allowOutbound: false,
+        allowLocalNetwork: false,
       },
       ui: { allowWindows: true },
       timeoutMs: Math.max(60_000, (this.gameStartupSeconds + this.observeSeconds + 30) * 1000),
