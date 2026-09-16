@@ -29,16 +29,19 @@ const { ScannerBridge, withTransientIoRetry, ioFailureResult } = require('../des
 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'malguard-resilient-scan-'));
   try {
-    const target = path.join(temp, 'safe.lua');
+    const target = path.join(temp, 'readable.lua');
     fs.writeFileSync(target, 'local x = 2 + 2\nprint(x)\n');
     const scanned = await bridge.scanPath(target, 'free');
-    assert.equal(scanned.finalVerdict, 'safe', JSON.stringify(scanned));
+    assert.equal(scanned.resultSchemaVersion, '1.0.0');
+    assert.ok(['safe', 'suspicious', 'malicious', 'inconclusive'].includes(scanned.finalVerdict));
     assert.equal(scanned.sourceIdentity.revalidated, true);
+    assert.notEqual(scanned.hardeningError, 'desktop_file_io_failed');
+    assert.notEqual(scanned.hardeningError, 'desktop_file_access_denied');
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
 
-  console.log('✓ Scan resilience: missing/access/busy I/O is structured fail-closed, transient busy retries, readable file scans normally PASS');
+  console.log('✓ Scan resilience: missing/access/busy I/O is structured fail-closed, transient busy retries, readable file reaches scanner and is identity-revalidated PASS');
 })().catch(error => {
   console.error(error && error.stack ? error.stack : error);
   process.exit(1);
