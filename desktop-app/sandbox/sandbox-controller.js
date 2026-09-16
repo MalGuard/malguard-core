@@ -3,9 +3,24 @@
 const Base = require('./sandbox-controller-base.js');
 const { GtaProcessContainerRunner } = require('./gta-processcontainer-runner.js');
 
+function unavailableGtaRunner() {
+  return {
+    async configurationStatus() {
+      return { ok: false, code: 'GTA_CONTEXT_BACKEND_UNAVAILABLE' };
+    },
+    async analyze() {
+      return { ok: false, verdict: 'inconclusive', code: 'GTA_CONTEXT_BACKEND_UNAVAILABLE' };
+    },
+  };
+}
+
 class SandboxController extends Base.SandboxController {
   constructor(options = {}) {
-    super(options);
+    const baseOptions = { ...options };
+    if (!baseOptions.gtaContextRunner && baseOptions.windowsBackend && typeof baseOptions.windowsBackend.executablePath !== 'function') {
+      baseOptions.gtaContextRunner = unavailableGtaRunner();
+    }
+    super(baseOptions);
     this.processContainerRunner = options.processContainerRunner || new GtaProcessContainerRunner({
       gameRoot: process.env.MALGUARD_GTA_V_ROOT || '',
       gameExecutable: process.env.MALGUARD_GTA_V_EXE || 'GTA5.exe',
