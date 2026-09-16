@@ -105,9 +105,9 @@ if ([string]::IsNullOrWhiteSpace($ReportPath)) {
 }
 
 $report = [ordered]@{
-  schemaVersion = '1.0.0'
+  schemaVersion = '1.1.0'
   kind = 'malguard-windows-acceptance'
-  phase = 'sandbox-native-build-and-isolation'
+  phase = 'sandbox-native-build-isolation-and-harmless-execution'
   startedAt = (Get-Date).ToUniversalTime().ToString('o')
   completedAt = $null
   host = [ordered]@{
@@ -117,9 +117,10 @@ $report = [ordered]@{
   }
   safety = [ordered]@{
     untrustedSamplesExecuted = $false
+    harmlessSandboxExecutionProbe = $true
     serviceInstalled = $false
     systemConfigurationChanged = $false
-    note = 'This harness compiles native components and runs synthetic containment/isolation self-tests only.'
+    note = 'This harness compiles native components and runs synthetic containment/isolation checks plus one built-in harmless .cmd execution probe inside Windows Sandbox only.'
   }
   checks = @()
   blockers = @()
@@ -190,7 +191,7 @@ try {
       $report.checks += @(Get-ContainmentSubChecks -SandboxReport $sandbox)
       $check.pass = ($sandbox.pass -eq $true)
       $check.detail = $sandbox
-      if (-not $check.pass) { throw 'Sandbox native acceptance did not reach releaseReady=true' }
+      if (-not $check.pass) { throw 'Sandbox native acceptance did not reach releaseReady=true with real harmless execution proof' }
     } catch {
       if (Test-Path -LiteralPath $sandboxReportPath) {
         $sandbox = Get-Content -LiteralPath $sandboxReportPath -Raw | ConvertFrom-Json
