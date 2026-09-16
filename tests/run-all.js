@@ -40,6 +40,7 @@ const tests=[
  'access-gate.test.js',
  'malwarebazaar-client.test.js',
  'threat-intel-cache.test.js',
+ 'threat-intel-recent-feed.test.js',
  'credential-store.test.js',
  'threat-intel-integration.test.js',
  'desktop-app.test.js',
