@@ -6,16 +6,18 @@ const path = require('path');
 const { createHash } = require('crypto');
 const { fork } = require('child_process');
 const { WindowsSandboxBackend } = require('./windows-sandbox-backend.js');
+const { RealGtaContextRunner } = require('./gta-real-context-runner.js');
 
-const SANDBOX_VERSION = '0.6.0';
+const SANDBOX_VERSION = '0.7.0';
 const MAX_SAMPLE_BYTES = 64 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js']);
 
 class SandboxController {
-  constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null } = {}) {
+  constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null, gtaContextRunner = null } = {}) {
     this.timeoutMs = timeoutMs;
     this.memoryMb = memoryMb;
     this.windowsBackend = windowsBackend || new WindowsSandboxBackend();
+    this.gtaContextRunner = gtaContextRunner || new RealGtaContextRunner({ windowsBackend: this.windowsBackend });
     this._certification = {
       state: 'not_run',
       ok: false,
@@ -282,22 +284,42 @@ class SandboxController {
       };
     }
 
-    const result = await this.windowsBackend.analyze(preflight.path, preflight);
+    const gameConfiguration = await this.gtaContextRunner.configurationStatus();
+    if (!gameConfiguration.ok) {
+      return {
+        ok: false,
+        sandboxVersion: SANDBOX_VERSION,
+        verdict: 'inconclusive',
+        code: gameConfiguration.code || 'GTA_CONTEXT_NOT_CONFIGURED',
+        preflight,
+        backend: capabilities,
+        certification: this.certificationStatus(),
+        gameContext: gameConfiguration,
+        sandboxLaunched: false,
+        sampleExecutionStarted: false,
+        note: 'Behavioral detonation is fail-closed until a real GTA V installation is explicitly configured. Synthetic game fixtures cannot certify a real game-context verdict.',
+      };
+    }
+
+    const result = await this.gtaContextRunner.analyze(preflight.path, preflight);
     if (result && typeof result === 'object') {
       result.preflight = preflight;
       result.certification = this.certificationStatus();
+      result.gameContext = result.gameContext || gameConfiguration;
       const execution = result.telemetry && result.telemetry.execution;
       result.sampleExecutionStarted = !!(execution && execution.started === true);
-      result.sandboxLaunched = result.ok === true && result.sampleExecutionStarted === true;
-      if (result.ok === true && (!execution || execution.attempted !== true || execution.started !== true)) {
+      result.sandboxLaunched = result.ok === true && result.sampleExecutionStarted === true &&
+        result.gameContext && result.gameContext.realGame === true && result.gameContext.proven === true;
+      if (result.ok === true && (!execution || execution.attempted !== true || execution.started !== true || result.sandboxLaunched !== true)) {
         return {
           ok: false,
           sandboxVersion: SANDBOX_VERSION,
           verdict: 'inconclusive',
-          code: 'SANDBOX_SAMPLE_EXECUTION_NOT_PROVEN',
+          code: 'REAL_GTA_CONTEXT_EXECUTION_NOT_PROVEN',
           preflight,
           backend: capabilities,
           certification: this.certificationStatus(),
+          gameContext: result.gameContext || gameConfiguration,
           sandboxLaunched: false,
           sampleExecutionStarted: false,
         };
