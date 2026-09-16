@@ -1,21 +1,43 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { createHash } = require('crypto');
 const { fork } = require('child_process');
 const { WindowsSandboxBackend } = require('./windows-sandbox-backend.js');
 
-const SANDBOX_VERSION = '0.5.0';
+const SANDBOX_VERSION = '0.6.0';
 const MAX_SAMPLE_BYTES = 64 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js']);
 
 class SandboxController {
-  constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null, allowExperimentalDetonation = false } = {}) {
+  constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null } = {}) {
     this.timeoutMs = timeoutMs;
     this.memoryMb = memoryMb;
     this.windowsBackend = windowsBackend || new WindowsSandboxBackend();
-    this.allowExperimentalDetonation = allowExperimentalDetonation === true;
+    this._certification = {
+      state: 'not_run',
+      ok: false,
+      sandboxVersion: SANDBOX_VERSION,
+      certifiedAt: null,
+      blockers: ['sandbox_runtime_not_certified'],
+    };
+    this._certificationPromise = null;
+  }
+
+  certificationStatus() {
+    const current = this._certification || {};
+    return {
+      state: current.state || 'not_run',
+      ok: current.ok === true,
+      sandboxVersion: SANDBOX_VERSION,
+      certifiedAt: current.certifiedAt || null,
+      windowsSandboxReady: current.windowsSandboxReady === true,
+      executionCertified: current.executionCertified === true,
+      blockers: Array.isArray(current.blockers) ? [...current.blockers] : [],
+      executionProbe: current.executionProbe ? { ...current.executionProbe } : null,
+    };
   }
 
   /**
@@ -85,11 +107,50 @@ class SandboxController {
     }
   }
 
+  async _runHarmlessExecutionProbe() {
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'malguard-sandbox-execution-cert-'));
+    const samplePath = path.join(root, 'malguard-execution-probe.cmd');
+    try {
+      // Harmless fixture: proves that the guest harness actually launches a sample
+      // inside Windows Sandbox. It performs no network, persistence or host writes.
+      await fs.promises.writeFile(samplePath, '@echo off\r\nexit /b 0\r\n', { flag: 'wx', mode: 0o600 });
+      const preflight = await this.preflightSample(samplePath);
+      if (!preflight.ok) {
+        return { ok: false, code: preflight.code || 'SANDBOX_EXECUTION_PROBE_PREFLIGHT_FAILED' };
+      }
+      const result = await this.windowsBackend.analyze(preflight.path, preflight);
+      const execution = result && result.telemetry && result.telemetry.execution;
+      const ok = !!(result && result.ok === true && execution &&
+        execution.attempted === true && execution.started === true &&
+        execution.timedOut !== true && execution.error == null && execution.exitCode === 0);
+      if (!ok) {
+        return {
+          ok: false,
+          code: result && result.code ? result.code : 'SANDBOX_EXECUTION_PROBE_FAILED',
+          sandboxLaunched: !!(result && result.sandboxLaunched === true),
+          attempted: !!(execution && execution.attempted === true),
+          started: !!(execution && execution.started === true),
+          exitCode: execution ? execution.exitCode : null,
+        };
+      }
+      return {
+        ok: true,
+        code: 'SANDBOX_EXECUTION_CERTIFIED',
+        sandboxLaunched: result.sandboxLaunched === true,
+        attempted: true,
+        started: true,
+        exitCode: 0,
+        sampleSha256: result.sampleSha256 || preflight.sha256,
+      };
+    } finally {
+      await fs.promises.rm(root, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
   /**
-   * Local synthetic process-isolation probe plus the native/Windows Sandbox
-   * certification probes. Top-level `ok` is deliberately end-to-end: callers
-   * must never interpret a passing local process probe as a certified Windows
-   * Sandbox runtime.
+   * End-to-end process-local certification. A PASS now means all of the following
+   * happened in this process: local plumbing, native containment, Windows Sandbox
+   * isolation and a harmless sample was genuinely launched inside Windows Sandbox.
    */
   async selfTest() {
     const worker = path.join(__dirname, 'synthetic-probe-worker.js');
@@ -129,32 +190,61 @@ class SandboxController {
     const isolationSelfTest = typeof this.windowsBackend.runIsolationSelfTest === 'function'
       ? await this.windowsBackend.runIsolationSelfTest()
       : { ok: false, code: 'ISOLATION_SELF_TEST_UNAVAILABLE' };
-    // Re-read capabilities after the native probes. The backend acceptance gate is
-    // intentionally unlocked only by successful probes in this process.
     const windowsSandbox = await this.windowsBackend.capabilities();
     const localProbeOk = localProbe.ok === true;
     const windowsSandboxReady = nativeContainment.ok === true
       && isolationSelfTest.ok === true
       && windowsSandbox.releaseGrade === true;
-    const releaseReady = localProbeOk && windowsSandboxReady;
+    const executionProbe = windowsSandboxReady
+      ? await this._runHarmlessExecutionProbe()
+      : { ok: false, code: 'SANDBOX_EXECUTION_SELF_TEST_BLOCKED', sandboxLaunched: false, attempted: false, started: false, exitCode: null };
+    const executionCertified = executionProbe.ok === true
+      && executionProbe.sandboxLaunched === true
+      && executionProbe.attempted === true
+      && executionProbe.started === true
+      && executionProbe.exitCode === 0;
+    const releaseReady = localProbeOk && windowsSandboxReady && executionCertified;
     const blockers = [];
     if (!localProbeOk) blockers.push('local_process_probe_failed');
     if (!nativeContainment.ok) blockers.push(nativeContainment.code || 'native_containment_validation_pending');
     if (!isolationSelfTest.ok) blockers.push(isolationSelfTest.code || 'windows_sandbox_isolation_validation_pending');
     if (windowsSandbox.releaseGrade !== true) blockers.push('sandbox_release_gate_locked');
-    return {
+    if (!executionCertified) blockers.push(executionProbe.code || 'windows_sandbox_execution_validation_pending');
+
+    const result = {
       ok: releaseReady,
+      state: releaseReady ? 'certified' : 'failed',
       sandboxVersion: SANDBOX_VERSION,
+      certifiedAt: releaseReady ? new Date().toISOString() : null,
       localProbeOk,
       windowsSandboxReady,
+      executionCertified,
       localProbe,
       windowsSandbox,
       initialWindowsSandbox,
       nativeContainment,
       isolationSelfTest,
+      executionProbe,
       releaseReady,
       blockers: [...new Set(blockers)],
     };
+    this._certification = result;
+    return result;
+  }
+
+  async ensureRuntimeCertified({ force = false } = {}) {
+    if (!force && this._certification && this._certification.ok === true) return this._certification;
+    if (this._certificationPromise) return this._certificationPromise;
+    this._certification = {
+      state: 'running',
+      ok: false,
+      sandboxVersion: SANDBOX_VERSION,
+      certifiedAt: null,
+      blockers: [],
+    };
+    this._certificationPromise = this.selfTest()
+      .finally(() => { this._certificationPromise = null; });
+    return this._certificationPromise;
   }
 
   async analyzeUntrustedSample(samplePath) {
@@ -166,10 +256,30 @@ class SandboxController {
         verdict: 'inconclusive',
         code: preflight.code,
         preflight,
+        sandboxLaunched: false,
+        sampleExecutionStarted: false,
       };
     }
+
+    const certification = await this.ensureRuntimeCertified();
+    if (!certification || certification.ok !== true) {
+      const capabilities = await this.windowsBackend.capabilities();
+      return {
+        ok: false,
+        sandboxVersion: SANDBOX_VERSION,
+        verdict: 'inconclusive',
+        code: capabilities.available ? 'WINDOWS_SANDBOX_CERTIFICATION_FAILED' : 'WINDOWS_SANDBOX_UNAVAILABLE',
+        preflight,
+        backend: capabilities,
+        certification: this.certificationStatus(),
+        sandboxLaunched: false,
+        sampleExecutionStarted: false,
+        note: 'MalGuard refuses behavioral execution until this process proves native containment, Windows Sandbox isolation and real sample launch with a harmless fixture.',
+      };
+    }
+
     const capabilities = await this.windowsBackend.capabilities();
-    if (!this.allowExperimentalDetonation || capabilities.releaseGrade !== true) {
+    if (capabilities.releaseGrade !== true) {
       return {
         ok: false,
         sandboxVersion: SANDBOX_VERSION,
@@ -177,13 +287,32 @@ class SandboxController {
         code: capabilities.available ? 'HARDENED_SANDBOX_ACCEPTANCE_PENDING' : 'WINDOWS_SANDBOX_UNAVAILABLE',
         preflight,
         backend: capabilities,
-        note: 'Behavioral execution remains fail-closed until native CPU containment and Windows validation pass.',
+        certification: this.certificationStatus(),
+        sandboxLaunched: false,
+        sampleExecutionStarted: false,
       };
     }
-    // Experimental mode is intentionally not enabled in the release path. It is
-    // useful for Windows engineering validation of the isolated backend only.
+
     const result = await this.windowsBackend.analyze(preflight.path, preflight);
-    if (result && typeof result === 'object') result.preflight = preflight;
+    if (result && typeof result === 'object') {
+      result.preflight = preflight;
+      result.certification = this.certificationStatus();
+      const execution = result.telemetry && result.telemetry.execution;
+      result.sampleExecutionStarted = !!(execution && execution.started === true);
+      if (result.ok === true && (!execution || execution.attempted !== true || execution.started !== true)) {
+        return {
+          ok: false,
+          sandboxVersion: SANDBOX_VERSION,
+          verdict: 'inconclusive',
+          code: 'SANDBOX_SAMPLE_EXECUTION_NOT_PROVEN',
+          preflight,
+          backend: capabilities,
+          certification: this.certificationStatus(),
+          sandboxLaunched: result.sandboxLaunched === true,
+          sampleExecutionStarted: false,
+        };
+      }
+    }
     return result;
   }
 }
