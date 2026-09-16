@@ -30,11 +30,22 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Ensure Android SDK 35
+      - name: Bootstrap official Android SDK 35
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+          set -euo pipefail
+          SDK_ROOT="$RUNNER_TEMP/android-sdk"
+          mkdir -p "$SDK_ROOT/cmdline-tools"
+          curl -fsSL 'https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip' -o "$RUNNER_TEMP/android-commandline-tools.zip"
+          unzip -q "$RUNNER_TEMP/android-commandline-tools.zip" -d "$RUNNER_TEMP/android-commandline-tools"
+          mkdir -p "$SDK_ROOT/cmdline-tools/latest"
+          cp -R "$RUNNER_TEMP/android-commandline-tools/cmdline-tools/." "$SDK_ROOT/cmdline-tools/latest/"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
       - name: Build installable debug APK
         shell: bash
