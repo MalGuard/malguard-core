@@ -7,6 +7,38 @@ const { webcrypto, createHash } = require('crypto');
 const { performance } = require('perf_hooks');
 
 const ROOT = path.resolve(__dirname, '..');
+const TRANSIENT_IO_CODES = new Set(['EBUSY', 'ETXTBSY', 'EAGAIN']);
+
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+async function withTransientIoRetry(fn, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try { return await fn(); }
+    catch (error) {
+      lastError = error;
+      if (!error || !TRANSIENT_IO_CODES.has(error.code) || attempt >= attempts) throw error;
+      await sleep(35 * attempt);
+    }
+  }
+  throw lastError;
+}
+
+function ioFailureResult(error, mode, phase) {
+  const code = error && error.code;
+  let hardeningError = 'desktop_file_io_failed';
+  if (code === 'ENOENT') hardeningError = 'desktop_file_not_found';
+  else if (code === 'EACCES' || code === 'EPERM') hardeningError = 'desktop_file_access_denied';
+  else if (TRANSIENT_IO_CODES.has(code)) hardeningError = 'desktop_file_busy';
+  return {
+    resultSchemaVersion: '1.0.0',
+    finalVerdict: 'inconclusive',
+    hardeningError,
+    mode,
+    io: { phase, code: code || 'UNKNOWN_IO_ERROR', retryable: TRANSIENT_IO_CODES.has(code) },
+    note: 'MalGuard could not prove the file contents at this moment, so the scan remains fail-closed instead of crashing or claiming success.',
+  };
+}
 
 class FileLike {
   constructor(name, bytes) {
@@ -34,8 +66,6 @@ function makeLocalFetch() {
         async text() { return JSON.stringify(data); },
       };
     }
-    // The desktop bridge never silently sends file contents or hashes to the network.
-    // Reputation is reported unavailable unless a future explicit privacy setting enables it.
     return {
       ok: false,
       status: 503,
@@ -121,9 +151,6 @@ class ScannerBridge {
     }
     result.threatIntel = intel;
 
-    // MalwareBazaar is a confirmed-malware exchange. An exact SHA-256 match is therefore
-    // a strong additive signal that may raise a local verdict to MALICIOUS. A miss or
-    // network/auth failure is never treated as proof of safety and never downgrades local evidence.
     if (intel && intel.status === 'known_malicious') {
       result.finalVerdict = 'malicious';
       result.reputationOverride = 'malwarebazaar_exact_sha256';
@@ -147,7 +174,10 @@ class ScannerBridge {
 
   async scanPath(filePath, mode = 'pro') {
     const resolved = path.resolve(filePath);
-    const beforePathStat = await fs.promises.lstat(resolved);
+    let beforePathStat;
+    try { beforePathStat = await withTransientIoRetry(() => fs.promises.lstat(resolved)); }
+    catch (error) { return ioFailureResult(error, mode, 'lstat-before-open'); }
+
     if (beforePathStat.isSymbolicLink()) {
       const error = new Error('scan target may not be a symbolic link');
       error.code = 'SCAN_TARGET_SYMLINK';
@@ -165,13 +195,22 @@ class ScannerBridge {
     const flags = fs.constants.O_RDONLY | (Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0);
     let handle;
     try {
-      handle = await fs.promises.open(resolved, flags);
-      const beforeHandleStat = await handle.stat();
+      try { handle = await withTransientIoRetry(() => fs.promises.open(resolved, flags)); }
+      catch (error) { return ioFailureResult(error, mode, 'open'); }
+
+      let beforeHandleStat;
+      try { beforeHandleStat = await handle.stat(); }
+      catch (error) { return ioFailureResult(error, mode, 'fstat-before-read'); }
       if (!beforeHandleStat.isFile() || beforeHandleStat.size !== beforePathStat.size) {
         return { resultSchemaVersion: '1.0.0', finalVerdict: 'inconclusive', hardeningError: 'desktop_file_identity_changed_before_read', mode };
       }
-      const bytes = await handle.readFile();
-      const afterHandleStat = await handle.stat();
+
+      let bytes;
+      try { bytes = await handle.readFile(); }
+      catch (error) { return ioFailureResult(error, mode, 'read'); }
+      let afterHandleStat;
+      try { afterHandleStat = await handle.stat(); }
+      catch (error) { return ioFailureResult(error, mode, 'fstat-after-read'); }
       if (bytes.length !== beforeHandleStat.size || afterHandleStat.size !== beforeHandleStat.size || afterHandleStat.mtimeMs !== beforeHandleStat.mtimeMs) {
         return { resultSchemaVersion: '1.0.0', finalVerdict: 'inconclusive', hardeningError: 'desktop_file_changed_during_read', mode };
       }
@@ -180,13 +219,22 @@ class ScannerBridge {
       const result = await this.scanBuffer(path.basename(resolved), bytes, mode);
 
       let currentStat;
-      try { currentStat = await fs.promises.lstat(resolved); } catch (error) {
-        return { resultSchemaVersion: '1.0.0', finalVerdict: 'inconclusive', hardeningError: 'desktop_file_disappeared_after_scan', mode, scannerResult: result };
+      try { currentStat = await withTransientIoRetry(() => fs.promises.lstat(resolved)); }
+      catch (error) {
+        const io = ioFailureResult(error, mode, 'lstat-after-scan');
+        io.scannerResult = result;
+        return io;
       }
       if (!currentStat.isFile() || currentStat.isSymbolicLink() || currentStat.size > 64 * 1024 * 1024) {
         return { resultSchemaVersion: '1.0.0', finalVerdict: 'inconclusive', hardeningError: 'desktop_file_identity_changed_after_scan', mode, scannerResult: result };
       }
-      const currentBytes = await fs.promises.readFile(resolved);
+      let currentBytes;
+      try { currentBytes = await withTransientIoRetry(() => fs.promises.readFile(resolved)); }
+      catch (error) {
+        const io = ioFailureResult(error, mode, 'revalidate-read');
+        io.scannerResult = result;
+        return io;
+      }
       const currentIdentity = createHash('sha256').update(currentBytes).digest('hex');
       if (currentIdentity !== scannedIdentity) {
         return {
@@ -206,4 +254,4 @@ class ScannerBridge {
   }
 }
 
-module.exports = { ScannerBridge, FileLike };
+module.exports = { ScannerBridge, FileLike, withTransientIoRetry, ioFailureResult };
