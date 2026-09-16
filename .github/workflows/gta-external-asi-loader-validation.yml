@@ -1,0 +1,99 @@
+name: GTA External ASI Loader Validation
+
+on:
+  push:
+    branches:
+      - dev/gta-external-asi-loader-simulator
+  pull_request:
+    branches:
+      - dev/gta-plugin-sandbox-staging
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  external-asi-loader-processcontainer:
+    name: Real ASI loader + GTA simulator + ProcessContainer
+    runs-on: windows-11-vs2026-arm
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install pinned Microsoft MXC SDK
+        shell: pwsh
+        run: npm install --no-save --package-lock=false --ignore-scripts @microsoft/mxc-sdk@0.8.0
+
+      - name: Build ARM64 harmless containment fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S native/mxc-synthetic-child -B build/mxc-synthetic-child -A ARM64
+          cmake --build build/mxc-synthetic-child --config Release --parallel
+          $exe = Resolve-Path 'build/mxc-synthetic-child/Release/MalGuardMxcSyntheticChild.exe'
+          "MALGUARD_MXC_CHILD_EXE=$($exe.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Prove ProcessContainer boundary first
+        shell: pwsh
+        run: node .\tests\mxc-processcontainer-live-validation.mjs
+
+      - name: Build x64 native MalGuard harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S native/gta-processcontainer-harness -B build/gta-processcontainer-harness-x64 -A x64
+          cmake --build build/gta-processcontainer-harness-x64 --config Release --parallel
+          $harness = Resolve-Path 'build/gta-processcontainer-harness-x64/Release/MalGuardGtaContextHarness.exe'
+          "MALGUARD_GTA_PROCESSCONTAINER_HARNESS_EXE=$($harness.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build x64 GTA-compatible simulator fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S native/gta-validation-fixture -B build/gta-validation-fixture-x64 -A x64
+          cmake --build build/gta-validation-fixture-x64 --config Release --parallel
+          $game = Resolve-Path 'build/gta-validation-fixture-x64/Release/GTA5-ExternalASI.exe'
+          $plugin = Resolve-Path 'build/gta-validation-fixture-x64/Release/MalGuardHarmlessPlugin.dll'
+          "MALGUARD_GTA_VALIDATION_GAME_EXE=$($game.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MALGUARD_GTA_VALIDATION_PLUGIN_DLL=$($plugin.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Download and verify Ultimate ASI Loader v9.7.0 x64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $uri = 'https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v9.7.0/Ultimate-ASI-Loader_x64.zip'
+          $expectedArchiveSha256 = 'b8869c053e154b233033811a3a5796477671e311fcdb3ff37da71b11c96bc093'
+          $zip = Join-Path $env:RUNNER_TEMP 'Ultimate-ASI-Loader_x64-v9.7.0.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'Ultimate-ASI-Loader_x64-v9.7.0'
+          Invoke-WebRequest -Uri $uri -OutFile $zip
+          $actualArchiveSha256 = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualArchiveSha256 -ne $expectedArchiveSha256) {
+            throw "Ultimate ASI Loader archive hash mismatch: $actualArchiveSha256"
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $loader = Get-ChildItem -LiteralPath $extract -Filter 'dinput8.dll' -File -Recurse | Select-Object -First 1
+          if (-not $loader) { throw 'Verified Ultimate ASI Loader archive did not contain dinput8.dll' }
+          $loaderSha256 = (Get-FileHash -LiteralPath $loader.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "MALGUARD_GTA_EXTERNAL_ASI_LOADER_DLL=$($loader.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MALGUARD_GTA_EXTERNAL_ASI_LOADER_SHA256=$loaderSha256" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Verified Ultimate ASI Loader archive SHA-256: $actualArchiveSha256"
+          Write-Host "Extracted dinput8.dll SHA-256: $loaderSha256"
+
+      - name: Validate external ASI loader inside ProcessContainer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node .\tests\gta-external-asi-loader-validation.mjs
+          if ($LASTEXITCODE -ne 0) { throw "external ASI loader validation failed with exit code $LASTEXITCODE" }
+
+      - name: Re-run GTA ProcessContainer regression
+        shell: pwsh
+        run: node .\tests\gta-processcontainer-isolation.test.js
