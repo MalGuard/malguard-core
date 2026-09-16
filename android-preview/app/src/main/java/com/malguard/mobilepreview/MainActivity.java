@@ -7,11 +7,13 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public final class MainActivity extends Activity {
+    private WebView webView;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        WebView webView = new WebView(this);
+        webView = new WebView(this);
         setContentView(webView);
 
         WebSettings settings = webView.getSettings();
@@ -29,11 +31,10 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        WebView webView = findViewById(android.R.id.content).getRootView() instanceof WebView
-            ? (WebView) findViewById(android.R.id.content).getRootView()
-            : null;
         if (webView != null) {
+            webView.loadUrl("about:blank");
             webView.destroy();
+            webView = null;
         }
         super.onDestroy();
     }
