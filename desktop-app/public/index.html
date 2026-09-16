@@ -79,7 +79,7 @@
       </details>
 
       <h2>Secure Sandbox compatibility</h2>
-      <p class="muted">Plus and Pro execute suspicious files only inside an approved isolated Windows Sandbox. On first launch MalGuard runs a harmless execution probe inside the real Sandbox. If that proof fails, files stay protected and are never executed on the host as a fallback.</p>
+      <p class="muted">Plus and Pro execute suspicious files only inside an approved isolated Windows Sandbox. If this PC is not ready, MalGuard keeps the file protected instead of falling back to unsafe execution. On first launch MalGuard also runs a harmless execution probe inside the real Sandbox before enabling behavioral execution.</p>
       <button id="finalSandboxTest">Re-check real Sandbox execution</button>
       <p id="finalSandboxSummary" class="health-card health-checking">Real Sandbox execution has not been verified yet.</p>
       <details id="finalSandboxDiagnostics" class="diagnostics" hidden>
