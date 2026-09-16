@@ -86,8 +86,10 @@ class SandboxController {
   }
 
   /**
-   * Local synthetic process-isolation probe. This verifies the controller's
-   * timeout/memory/process plumbing without executing an untrusted sample.
+   * Local synthetic process-isolation probe plus the native/Windows Sandbox
+   * certification probes. Top-level `ok` is deliberately end-to-end: callers
+   * must never interpret a passing local process probe as a certified Windows
+   * Sandbox runtime.
    */
   async selfTest() {
     const worker = path.join(__dirname, 'synthetic-probe-worker.js');
@@ -130,15 +132,21 @@ class SandboxController {
     // Re-read capabilities after the native probes. The backend acceptance gate is
     // intentionally unlocked only by successful probes in this process.
     const windowsSandbox = await this.windowsBackend.capabilities();
-    const releaseReady = localProbe.ok && nativeContainment.ok === true && isolationSelfTest.ok === true && windowsSandbox.releaseGrade === true;
+    const localProbeOk = localProbe.ok === true;
+    const windowsSandboxReady = nativeContainment.ok === true
+      && isolationSelfTest.ok === true
+      && windowsSandbox.releaseGrade === true;
+    const releaseReady = localProbeOk && windowsSandboxReady;
     const blockers = [];
-    if (!localProbe.ok) blockers.push('local_process_probe_failed');
+    if (!localProbeOk) blockers.push('local_process_probe_failed');
     if (!nativeContainment.ok) blockers.push(nativeContainment.code || 'native_containment_validation_pending');
     if (!isolationSelfTest.ok) blockers.push(isolationSelfTest.code || 'windows_sandbox_isolation_validation_pending');
     if (windowsSandbox.releaseGrade !== true) blockers.push('sandbox_release_gate_locked');
     return {
-      ok: localProbe.ok,
+      ok: releaseReady,
       sandboxVersion: SANDBOX_VERSION,
+      localProbeOk,
+      windowsSandboxReady,
       localProbe,
       windowsSandbox,
       initialWindowsSandbox,
