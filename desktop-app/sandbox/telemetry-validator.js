@@ -70,6 +70,16 @@ function validateTelemetry(raw, expectedSessionId) {
   const execution = validateExecution(raw.execution);
   if (!execution) return { ok: false, code: 'SANDBOX_TELEMETRY_EXECUTION_INVALID' };
 
+  // Behavioral analysis is only valid when the sample itself was really launched
+  // inside Windows Sandbox. Opening the VM or running only the guest harness is
+  // not sufficient evidence of a completed sandbox analysis.
+  if (execution.attempted !== true) {
+    return { ok: false, code: 'SANDBOX_SAMPLE_EXECUTION_NOT_ATTEMPTED' };
+  }
+  if (execution.started !== true) {
+    return { ok: false, code: 'SANDBOX_SAMPLE_EXECUTION_NOT_STARTED' };
+  }
+
   if (!Array.isArray(raw.baselineProcesses) || raw.baselineProcesses.length > MAX_PROCESS_ROWS) {
     return { ok: false, code: 'SANDBOX_TELEMETRY_BASELINE_PROCESSES_INVALID' };
   }
