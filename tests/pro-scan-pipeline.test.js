@@ -8,6 +8,7 @@ const {
   sandboxExecutionProven,
   mergeSandboxVerdict,
   directSandboxVerdict,
+  fallbackVerdict,
 } = require('../desktop-app/pro-scan-pipeline.js');
 
 function waitFor(manager, id, timeoutMs = 2000) {
@@ -65,8 +66,11 @@ function executedResult(verdict, extra = {}) {
  assert.equal(directSandboxVerdict({verdict:'safe'}),'inconclusive');
  assert.equal(directSandboxVerdict(executedResult('safe',{releaseGrade:true})),'safe');
  assert.equal(directSandboxVerdict({ok:true,verdict:'malicious',sandboxLaunched:false,sampleExecutionStarted:false}),'inconclusive');
+ assert.equal(fallbackVerdict('malicious'),'malicious');
+ assert.equal(fallbackVerdict('suspicious'),'suspicious');
+ assert.equal(fallbackVerdict('safe'),'inconclusive','fallback must never turn missing Sandbox proof into SAFE');
+ assert.equal(fallbackVerdict('inconclusive'),'inconclusive');
 
- // Standard maps to the lightweight/free core and never uses Sandbox.
  let standardMode = null;
  let standardSandboxCalls = 0;
  const standardManager = new ModelScanPipelineManager({
@@ -80,7 +84,6 @@ function executedResult(verdict, extra = {}) {
  assert.equal(standardMode,'free');
  assert.equal(standardSandboxCalls,0);
 
- // Plus is the old deep Pro flow: deep scan first, Sandbox only when needed.
  let plusMode = null;
  let plusSandboxCalls = 0;
  const plusSafeManager = new ModelScanPipelineManager({
@@ -108,29 +111,48 @@ function executedResult(verdict, extra = {}) {
  assert.equal(plusSus.finalResult.sandboxCompleted,false);
  assert(plusSus.events.some(e=>e.phase==='sandbox_decision'&&e.status==='warning'));
 
- // New Pro goes directly to Sandbox. The normal scanner must not run at all.
+ // Pro tries Sandbox first. If real execution cannot be proven, it automatically falls back
+ // to the existing deep local engine stack instead of simply stopping on the Sandbox error.
  let proScannerCalls = 0;
  let proSandboxCalls = 0;
  const proManager = new ModelScanPipelineManager({
-   scanner:{scanPath:async()=>{proScannerCalls++;throw new Error('Pro must not run normal scanner')}},
+   scanner:{scanPath:async(_p,mode)=>{proScannerCalls++;assert.equal(mode,'pro');return {
+     finalVerdict:'safe',
+     contentSha256:'e'.repeat(64),
+     multiLayer:{score:0},
+     scriptAnalysis:{finalVerdict:'safe'},
+     threatIntel:{status:'hash_not_found',source:'live'},
+   }}},
    sandbox:sandboxMock({analyzeUntrustedSample:async()=>{proSandboxCalls++;return {ok:false,verdict:'inconclusive',code:'HARDENED_SANDBOX_ACCEPTANCE_PENDING',sandboxLaunched:false,sampleExecutionStarted:false}}}),
  });
  const pro=await waitFor(proManager,proManager.start('/tmp/sample.js','pro').id);
  assert.equal(pro.finalResult.model,'pro');
- assert.equal(pro.finalResult.verdict,'inconclusive');
+ assert.equal(pro.finalResult.verdict,'inconclusive','clean fallback cannot replace missing behavioral proof');
  assert.equal(pro.finalResult.sandboxRequested,true);
- assert.equal(pro.finalResult.sandboxStarted,false,'requesting Sandbox is not evidence that Windows Sandbox actually launched');
+ assert.equal(pro.finalResult.sandboxStarted,false);
  assert.equal(pro.finalResult.sampleExecutionStarted,false);
  assert.equal(pro.finalResult.sandboxCompleted,false);
- assert.equal(proScannerCalls,0);
+ assert.equal(pro.finalResult.fallbackUsed,true);
+ assert.equal(proScannerCalls,1);
  assert.equal(proSandboxCalls,1);
  assert(pro.events.some(e=>e.phase==='preflight'&&e.status==='completed'));
  assert(pro.events.some(e=>e.phase==='sandbox_analysis'&&e.status==='blocked'));
- assert(!pro.events.some(e=>e.phase==='static_scan'));
+ assert(pro.events.some(e=>e.phase==='fallback_analysis'&&e.status==='completed'));
 
- // Even an `ok:true` backend response is rejected unless it carries real execution proof.
+ // If fallback engines find suspicious or malicious evidence, keep that stronger verdict.
+ const proFallbackMaliciousManager = new ModelScanPipelineManager({
+   scanner:{scanPath:async()=>({finalVerdict:'malicious',contentSha256:'9'.repeat(64),threatIntel:{status:'known_malicious',source:'live'}})},
+   sandbox:sandboxMock(),
+ });
+ const proFallbackMal=await waitFor(proFallbackMaliciousManager,proFallbackMaliciousManager.start('/tmp/fallback-bad.js','pro').id);
+ assert.equal(proFallbackMal.finalResult.verdict,'malicious');
+ assert.equal(proFallbackMal.finalResult.fallbackUsed,true);
+ assert.equal(proFallbackMal.finalResult.sandboxCompleted,false);
+
+ // Even an `ok:true` backend response is rejected unless it carries real execution proof,
+ // and the fallback still cannot upgrade a clean result to SAFE.
  const fakeOkManager = new ModelScanPipelineManager({
-   scanner:{scanPath:async()=>{throw new Error('scanner must stay unused')}},
+   scanner:{scanPath:async()=>({finalVerdict:'safe',contentSha256:'8'.repeat(64),threatIntel:{status:'disabled'}})},
    sandbox:sandboxMock({analyzeUntrustedSample:async()=>({ok:true,verdict:'malicious',releaseGrade:true})}),
  });
  const fakeOk=await waitFor(fakeOkManager,fakeOkManager.start('/tmp/fake.js','pro').id);
@@ -138,9 +160,12 @@ function executedResult(verdict, extra = {}) {
  assert.equal(fakeOk.finalResult.sandboxStarted,false);
  assert.equal(fakeOk.finalResult.sampleExecutionStarted,false);
  assert.equal(fakeOk.finalResult.sandboxCompleted,false);
+ assert.equal(fakeOk.finalResult.fallbackUsed,true);
 
+ // When the Sandbox really runs, Pro stays direct and does not waste time on fallback engines.
+ let successfulProScannerCalls = 0;
  const proMaliciousManager = new ModelScanPipelineManager({
-   scanner:{scanPath:async()=>{throw new Error('scanner must stay unused')}},
+   scanner:{scanPath:async()=>{successfulProScannerCalls++;return {finalVerdict:'inconclusive'}}},
    sandbox:sandboxMock({analyzeUntrustedSample:async()=>executedResult('malicious',{releaseGrade:true,backend:{backend:'test-sandbox'}})}),
  });
  const proMal=await waitFor(proMaliciousManager,proMaliciousManager.start('/tmp/bad.js','pro').id);
@@ -148,8 +173,20 @@ function executedResult(verdict, extra = {}) {
  assert.equal(proMal.finalResult.sandboxStarted,true);
  assert.equal(proMal.finalResult.sampleExecutionStarted,true);
  assert.equal(proMal.finalResult.sandboxCompleted,true);
+ assert.equal(proMal.finalResult.fallbackUsed,false);
+ assert.equal(successfulProScannerCalls,0);
 
- // Legacy class/API semantics are preserved, but map to Plus.
+ // Failed preflight also gets a guarded deep fallback, while remaining fail-closed if clean.
+ let preflightFallbackCalls = 0;
+ const preflightFailManager = new ModelScanPipelineManager({
+   scanner:{scanPath:async()=>{preflightFallbackCalls++;return {finalVerdict:'suspicious',contentSha256:'7'.repeat(64)}}},
+   sandbox:sandboxMock({preflightSample:async()=>({ok:false,code:'SANDBOX_PREFLIGHT_FAILED'})}),
+ });
+ const preflightFail=await waitFor(preflightFailManager,preflightFailManager.start('/tmp/preflight.js','pro').id);
+ assert.equal(preflightFail.finalResult.verdict,'suspicious');
+ assert.equal(preflightFail.finalResult.fallbackUsed,true);
+ assert.equal(preflightFallbackCalls,1);
+
  const legacy = new ProScanPipelineManager({
    scanner:{scanPath:async()=>({finalVerdict:'safe',contentSha256:'d'.repeat(64),threatIntel:{status:'disabled'}})},
    sandbox:sandboxMock(),
@@ -157,5 +194,5 @@ function executedResult(verdict, extra = {}) {
  const legacyResult=await waitFor(legacy,legacy.start('/tmp/legacy.lua').id);
  assert.equal(legacyResult.model,'plus');
 
- console.log('✓ Model scan pipeline: truthful Sandbox launch/execution proof, Standard/Plus/Pro routing and fail-closed policy passed');
+ console.log('✓ Model scan pipeline: truthful Sandbox proof plus automatic fail-closed deep fallback passed');
 })().catch(e=>{console.error(e.stack||e);process.exit(1)});
