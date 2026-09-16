@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>MalGuard Mobile</title>
+  <style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#070b12;color:#eaf4ff}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#080d16,#05080d);min-height:100vh}main{max-width:980px;margin:auto;padding:18px 16px 36px}header{display:flex;align-items:center;justify-content:space-between;gap:16px}h1{margin:0;font-size:29px}header p{margin:6px 0 0;color:#8fa7bd}h2{margin-top:24px;font-size:20px}h3{font-size:16px}#status{padding:8px 12px;border:1px solid #23384a;border-radius:999px;background:#0d1722;font-size:12px;white-space:nowrap}nav{display:flex;gap:8px;margin:22px 0}.tab,button{border:1px solid #27445c;background:#0c1a27;color:#eaf4ff;border-radius:11px;padding:11px 14px;font-weight:700}.tab.active,button:active{background:#12314a}.panel{display:none;border:1px solid #172b3d;background:#09121c;border-radius:16px;padding:17px}.panel.active{display:block}.row{display:flex;gap:10px;flex-wrap:wrap}input,select{flex:1;min-width:100%;border:1px solid #27445c;background:#071019;color:#fff;border-radius:10px;padding:12px}pre{white-space:pre-wrap;overflow:auto;background:#050a10;border:1px solid #15283a;border-radius:12px;padding:14px;min-height:68px}.muted{color:#8fa7bd;line-height:1.55}.stack{display:grid;gap:10px}.model-picker{display:grid;gap:8px}.scan-result,.scan-summary,.health-card{border:1px solid #23384a;border-radius:14px;padding:15px;background:#08121c;margin:12px 0}.result-safe,.health-ready{border-color:#28624d;background:#091b17}.result-warning{border-color:#735c2d;background:#19150a}.result-neutral,.health-checking{border-color:#29445c;background:#08121c}.pipeline-list{display:grid;gap:8px;margin:12px 0}.pipeline-step{display:flex;gap:10px;align-items:flex-start;border:1px solid #1d3347;border-radius:10px;padding:10px;background:#071019}.pipeline-dot{display:grid;place-items:center;width:24px;height:24px;border:1px solid #36566e;border-radius:50%;font-weight:800;flex:none}.preview-banner{margin:0 0 16px;padding:12px 14px;border:1px solid #36566e;border-radius:12px;background:#0b1521;color:#b8d3e8;line-height:1.6}.toast{position:fixed;left:16px;right:16px;bottom:18px;max-width:680px;margin:auto;padding:12px 14px;border:1px solid #36566e;border-radius:12px;background:#0d1722;color:#eaf4ff;box-shadow:0 10px 35px #0008;display:none;z-index:50}.toast.show{display:block}.brand{direction:ltr;text-align:left}.badge{font-size:12px;color:#7ed6ff}details{margin-top:10px}summary{cursor:pointer;color:#9eb5c8;padding:8px 0}@media(min-width:650px){main{padding:28px}.model-picker{grid-template-columns:auto 180px 1fr;align-items:center}input{min-width:260px}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="preview-banner"><strong>MalGuard Mobile Preview</strong><br>این نسخه برای دیدن و لمس رابط MalGuard روی گوشی است. Sandbox و اسکن رفتاری واقعی فقط در نسخه Windows اجرا می‌شوند.</div>
+  <header>
+    <div class="brand"><h1>MalGuard</h1><p>Game-focused malware protection</p><span class="badge">Android installed preview</span></div>
+    <span id="status">Mobile Preview</span>
+  </header>
+  <nav>
+    <button class="tab active" data-tab="scanner">Scanner</button>
+    <button class="tab" data-tab="engine">Security Health</button>
+  </nav>
+
+  <section id="scanner" class="panel active">
+    <h2>Scan a file</h2>
+    <div class="model-picker">
+      <label for="scanModel">Protection level</label>
+      <select id="scanModel"><option value="standard">Standard</option><option value="plus">Plus</option><option value="pro">Pro</option></select>
+      <span id="modelHint" class="muted">Standard local protection.</span>
+    </div>
+    <div class="row" style="margin-top:12px"><input id="scanPath" placeholder="C:\Games\GTA V\mods\example.asi"><button id="scanBtn">Scan securely</button></div>
+    <div id="modelFlow" hidden>
+      <h3>Analysis flow</h3><div id="modelSteps" class="pipeline-list"></div><div id="modelFinal" class="scan-result result-neutral">Ready for secure analysis.</div>
+    </div>
+    <div id="scanOut" class="scan-summary result-neutral">Ready to scan.</div>
+
+    <h2>Threat Intelligence</h2>
+    <div class="stack"><input type="password" placeholder="abuse.ch Auth-Key"><div class="row"><button data-demo>Save Auth-Key</button><button data-demo>Remove Auth-Key</button><button id="threatStatus">Refresh status</button></div><p class="muted">در نسخه Windows فقط SHA-256 فایل برای reputation lookup ارسال می‌شود.</p></div>
+    <pre id="threatOut">Threat-intelligence status not checked.</pre>
+
+    <h2>Protection settings</h2>
+    <div class="stack"><input placeholder="Protected game root"><input placeholder="Quarantine root"><input placeholder="Managed-install staging root"><div class="row"><button data-demo>Save protection settings</button><button id="loadSettings">Reload settings</button></div></div>
+    <pre id="settingsOut">Settings not loaded.</pre>
+
+    <h2>Real-time Guard</h2>
+    <div class="row"><button id="startGuard">Start Guard</button><button id="stopGuard">Stop Guard</button><button data-demo>Enable Protected Folder</button><button data-demo>Disable Protected Folder</button><button id="gateStatus">Gate Status</button></div>
+    <pre id="guardOut">Guard status not checked.</pre><pre id="gateOut">Access gate status not checked.</pre>
+  </section>
+
+  <section id="engine" class="panel">
+    <h2>Security Health</h2>
+    <p class="muted">در نسخه دسکتاپ این بخش وضعیت موتور امنیتی، ProcessContainer و آمادگی Plus/Pro را بررسی می‌کند.</p>
+    <button id="selfTest">Run core security check</button>
+    <pre id="selfOut">Not run.</pre>
+    <h2>Secure Sandbox compatibility</h2>
+    <p class="muted">نسخه Android به Windows MXC ProcessContainer دسترسی ندارد. این APK فقط UI/companion preview است.</p>
+    <button id="sandboxTest">Re-check Sandbox</button>
+    <p id="sandboxOut" class="health-card health-checking">Windows sandbox is not available on Android.</p>
+  </section>
+</main>
+<div id="toast" class="toast"></div>
+<script>
+(() => {
+ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+ $$('.tab').forEach(btn=>btn.addEventListener('click',()=>{$$('.tab').forEach(x=>x.classList.toggle('active',x===btn));$$('.panel').forEach(p=>p.classList.toggle('active',p.id===btn.dataset.tab));}));
+ const hints={standard:'Standard local protection.',plus:'Plus: deeper step-by-step analysis, isolated execution when required.',pro:'Pro: minimal preflight followed by isolated behavioral analysis.'};
+ $('#scanModel').addEventListener('change',e=>$('#modelHint').textContent=hints[e.target.value]);
+ const toast=$('#toast'); let timer; const demo=m=>{toast.textContent=m;toast.classList.add('show');clearTimeout(timer);timer=setTimeout(()=>toast.classList.remove('show'),2400)};
+ $('#scanBtn').addEventListener('click',()=>{const mode=$('#scanModel').value;$('#modelFlow').hidden=false;$('#modelSteps').innerHTML='<div class="pipeline-step"><span class="pipeline-dot">1</span><div><strong>Preflight</strong><br><span class="muted">Preview only</span></div></div><div class="pipeline-step"><span class="pipeline-dot">2</span><div><strong>'+mode.toUpperCase()+' analysis</strong><br><span class="muted">Windows engine required</span></div></div>';$('#modelFinal').textContent='Android preview cannot execute Windows sandbox analysis.';$('#scanOut').textContent='Preview only: secure scanning requires MalGuard for Windows.';demo('اسکن واقعی در نسخه Windows انجام می‌شود.');});
+ const map={threatStatus:['#threatOut','Preview mode: threat-intelligence backend is not connected.'],loadSettings:['#settingsOut','Preview mode: Windows settings store is not connected.'],startGuard:['#guardOut','Preview mode: Real-time Guard requires Windows.'],stopGuard:['#guardOut','Preview mode: Real-time Guard requires Windows.'],gateStatus:['#gateOut','Preview mode: Protected Folder gate requires Windows.'],selfTest:['#selfOut','Preview mode: Windows security self-test is unavailable on Android.'],sandboxTest:['#sandboxOut','ProcessContainer validation runs on Windows, not Android.']};
+ Object.entries(map).forEach(([id,[sel,msg]])=>document.getElementById(id).addEventListener('click',()=>{$(sel).textContent=msg;demo(msg)}));
+ $$('[data-demo]').forEach(b=>b.addEventListener('click',()=>demo('این عملیات فقط در نسخه Windows فعال است.')));
+})();
+</script>
+</body></html>
