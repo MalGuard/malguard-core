@@ -48,10 +48,13 @@ if (manifest.entrypoint !== 'desktop-app/server.js') fail('unexpected entrypoint
 if (!fs.existsSync(path.join(OUT, manifest.entrypoint))) fail('entrypoint missing');
 if (!fs.existsSync(path.join(OUT, 'desktop-app/integrity/preload.js'))) fail('runtime integrity preload missing');
 if (!fs.existsSync(path.join(OUT, 'desktop-app/integrity/runtime-integrity.js'))) fail('runtime integrity verifier missing');
+if (!fs.existsSync(path.join(OUT, 'desktop-app/health/preload.js'))) fail('startup self-heal preload missing');
+if (!fs.existsSync(path.join(OUT, 'desktop-app/health/self-heal.js'))) fail('startup self-heal manager missing');
 
 const runtimePackage = JSON.parse(fs.readFileSync(path.join(OUT, 'package.json'), 'utf8'));
-if (!runtimePackage.scripts || runtimePackage.scripts.start !== 'node --require ./desktop-app/integrity/preload.js desktop-app/server.js') {
-  fail('packaged startup does not enforce the runtime integrity preload');
+const expectedStart = 'node --require ./desktop-app/integrity/preload.js --require ./desktop-app/health/preload.js desktop-app/server.js';
+if (!runtimePackage.scripts || runtimePackage.scripts.start !== expectedStart) {
+  fail('packaged startup does not enforce integrity and self-heal preloads');
 }
 
 const files = walk(OUT).sort();
@@ -90,4 +93,4 @@ for (const file of files.filter(f => /\.(?:js|json|md|txt|yml|yaml)$/i.test(f)))
   for (const pattern of forbiddenContent) if (pattern.test(text)) fail(`embedded credential-like content in ${file}`);
 }
 
-console.log(`✓ Release candidate gate: ${files.length} files, source provenance, manifest/checksums/runtime-self-integrity/secrets PASS`);
+console.log(`✓ Release candidate gate: ${files.length} files, source provenance, integrity, self-heal startup, manifest/checksums/secrets PASS`);

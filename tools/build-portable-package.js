@@ -125,7 +125,7 @@ const runtimePackage = {
   private: true,
   type: 'commonjs',
   engines: { node: '>=20' },
-  scripts: { start: 'node --require ./desktop-app/integrity/preload.js desktop-app/server.js' },
+  scripts: { start: 'node --require ./desktop-app/integrity/preload.js --require ./desktop-app/health/preload.js desktop-app/server.js' },
 };
 fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify(runtimePackage, null, 2) + '\n', 'utf8');
 

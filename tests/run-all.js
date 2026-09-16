@@ -5,6 +5,8 @@ const tests=[
  'build-validation.test.js',
  'packaging-foundation.test.js',
  'runtime-package-integrity.test.js',
+ 'self-heal.test.js',
+ 'scan-resilience.test.js',
  'workflow-supply-chain.test.js',
  'secure-update.test.js',
  'release-trust.test.js',
