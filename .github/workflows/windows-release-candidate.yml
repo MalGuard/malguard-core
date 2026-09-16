@@ -1,0 +1,117 @@
+name: MalGuard Windows Release Candidate
+
+on:
+  pull_request:
+    paths:
+      - 'desktop-app/sandbox/**'
+      - 'native/sandbox-containment-probe/**'
+      - 'tests/sandbox-*.test.js'
+      - 'tests/run-all.js'
+      - 'tools/build-portable-package.js'
+      - 'tools/verify-release-candidate.js'
+      - '.github/workflows/windows-release-candidate.yml'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-release-candidate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            cmake_arch: x64
+          - arch: arm64
+            cmake_arch: ARM64
+    runs-on: windows-2022
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Build native Sandbox containment probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $build = Join-Path $env:RUNNER_TEMP 'malguard-sandbox-containment-probe'
+          cmake -S native/sandbox-containment-probe -B $build -A '${{ matrix.cmake_arch }}'
+          if ($LASTEXITCODE -ne 0) { throw 'containment probe configure failed' }
+          cmake --build $build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'containment probe build failed' }
+          $probe = Get-ChildItem -LiteralPath $build -Filter 'MalGuardSandboxContainmentProbe.exe' -File -Recurse | Select-Object -First 1
+          if (-not $probe) { throw 'MalGuardSandboxContainmentProbe.exe was not produced' }
+          $target = Join-Path (Get-Location) 'desktop-app/sandbox/bin'
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          Copy-Item -LiteralPath $probe.FullName -Destination (Join-Path $target 'MalGuardSandboxContainmentProbe.exe') -Force
+
+      - name: Verify native probe is staged
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $probe = 'desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe'
+          if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw 'native containment probe missing from release staging' }
+          $hash = (Get-FileHash -LiteralPath $probe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "Native containment probe SHA-256: $hash"
+
+      - name: Run Sandbox hardening regressions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tests/sandbox-backend.test.js
+          node tests/sandbox-first-run-certification.test.js
+          node tests/sandbox-telemetry.test.js
+          node tests/workflow-supply-chain.test.js
+
+      - name: Build sealed Windows runtime package
+        shell: pwsh
+        env:
+          MALGUARD_SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/build-portable-package.js
+          node tools/verify-release-candidate.js
+
+      - name: Prove packaged Sandbox probe is integrity-covered
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
+          $root = Join-Path (Get-Location) "dist/malguard-desktop-$version"
+          $probe = Join-Path $root 'desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe'
+          if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw 'packaged containment probe missing' }
+          $sums = Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Raw
+          if ($sums -notmatch 'desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe\.exe') { throw 'packaged containment probe is not covered by SHA256SUMS.txt' }
+
+      - name: Archive Windows release candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
+          $name = "malguard-desktop-$version-windows-${{ matrix.arch }}.zip"
+          $archive = Join-Path (Get-Location) "dist/$name"
+          Compress-Archive -Path "dist/malguard-desktop-$version" -DestinationPath $archive -CompressionLevel Optimal -Force
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content -LiteralPath "$archive.sha256" -Encoding ascii
+
+      - name: Upload Windows release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: malguard-windows-${{ matrix.arch }}-release-candidate
+          path: |
+            dist/*-windows-${{ matrix.arch }}.zip
+            dist/*-windows-${{ matrix.arch }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
