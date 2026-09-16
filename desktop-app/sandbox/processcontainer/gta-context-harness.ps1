@@ -3,12 +3,14 @@ param(
   [Parameter(Mandatory=$true)][string]$GameExecutable,
   [Parameter(Mandatory=$true)][string]$OutputPath,
   [Parameter(Mandatory=$true)][string]$SessionId,
+  [ValidateSet('real-gta','synthetic-gta-compatible')][string]$ContextKind = 'real-gta',
   [int]$ObserveSeconds = 12,
   [int]$GameStartupSeconds = 20
 )
 
 $ErrorActionPreference = 'Stop'
 $started = Get-Date
+$isRealGta = ($ContextKind -eq 'real-gta')
 
 function Get-ProcessSnapshot {
   Get-Process -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, Path
@@ -52,7 +54,9 @@ $result = [ordered]@{
   recentFiles = @()
   gameContext = [ordered]@{
     enabled = $true
-    realGame = $true
+    contextKind = $ContextKind
+    realGame = $isRealGta
+    syntheticFixture = (-not $isRealGta)
     fixtureStarted = $false
     containment = 'processcontainer'
     requiresNestedVirtualization = $false
@@ -71,7 +75,7 @@ $result = [ordered]@{
 $gameProc = $null
 $sampleProc = $null
 try {
-  if (-not (Test-Path -LiteralPath $GameExecutable -PathType Leaf)) { throw 'runtime GTA executable missing' }
+  if (-not (Test-Path -LiteralPath $GameExecutable -PathType Leaf)) { throw 'runtime game executable missing' }
   if (-not (Test-Path -LiteralPath $SamplePath -PathType Leaf)) { throw 'staged sample missing' }
 
   $gameWorkingDirectory = Split-Path -Parent $GameExecutable
@@ -80,7 +84,7 @@ try {
     $gameProc = Start-Process -FilePath $GameExecutable -WorkingDirectory $gameWorkingDirectory -PassThru
   } catch {
     $result.gameContext.startupError = $_.Exception.Message
-    throw 'real GTA process failed to launch in ProcessContainer'
+    throw 'game-context process failed to launch in ProcessContainer'
   }
 
   $gameDeadline = (Get-Date).AddSeconds([Math]::Max(3,$GameStartupSeconds))
@@ -96,8 +100,8 @@ try {
   if (-not $gameAlive -or $gameProc.HasExited) {
     $code = $null
     try { $code = $gameProc.ExitCode } catch {}
-    $result.gameContext.startupError = "GTA exited before observation. ExitCode=$code"
-    throw 'real GTA context did not remain active'
+    $result.gameContext.startupError = "Game context exited before observation. ExitCode=$code"
+    throw 'game context did not remain active'
   }
 
   $result.gameContext.fixtureStarted = $true

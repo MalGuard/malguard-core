@@ -5,7 +5,9 @@ on:
     paths:
       - 'desktop-app/sandbox/**'
       - 'native/sandbox-containment-probe/**'
+      - 'native/gta-processcontainer-harness/**'
       - 'tests/sandbox-*.test.js'
+      - 'tests/gta-*.test.js'
       - 'tests/run-all.js'
       - 'tools/build-portable-package.js'
       - 'tools/verify-release-candidate.js'
@@ -57,14 +59,31 @@ jobs:
           New-Item -ItemType Directory -Path $target -Force | Out-Null
           Copy-Item -LiteralPath $probe.FullName -Destination (Join-Path $target 'MalGuardSandboxContainmentProbe.exe') -Force
 
-      - name: Verify native probe is staged
+      - name: Build native GTA ProcessContainer harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $build = Join-Path $env:RUNNER_TEMP 'malguard-gta-processcontainer-harness'
+          cmake -S native/gta-processcontainer-harness -B $build -A '${{ matrix.cmake_arch }}'
+          if ($LASTEXITCODE -ne 0) { throw 'GTA ProcessContainer harness configure failed' }
+          cmake --build $build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'GTA ProcessContainer harness build failed' }
+          $harness = Get-ChildItem -LiteralPath $build -Filter 'MalGuardGtaContextHarness.exe' -File -Recurse | Select-Object -First 1
+          if (-not $harness) { throw 'MalGuardGtaContextHarness.exe was not produced' }
+          $target = Join-Path (Get-Location) 'desktop-app/sandbox/bin'
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          Copy-Item -LiteralPath $harness.FullName -Destination (Join-Path $target 'MalGuardGtaContextHarness.exe') -Force
+
+      - name: Verify native binaries are staged
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $probe = 'desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe'
+          $harness = 'desktop-app/sandbox/bin/MalGuardGtaContextHarness.exe'
           if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw 'native containment probe missing from release staging' }
-          $hash = (Get-FileHash -LiteralPath $probe -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host "Native containment probe SHA-256: $hash"
+          if (-not (Test-Path -LiteralPath $harness -PathType Leaf)) { throw 'native GTA ProcessContainer harness missing from release staging' }
+          Write-Host "Native containment probe SHA-256: $((Get-FileHash -LiteralPath $probe -Algorithm SHA256).Hash.ToLowerInvariant())"
+          Write-Host "Native GTA harness SHA-256: $((Get-FileHash -LiteralPath $harness -Algorithm SHA256).Hash.ToLowerInvariant())"
 
       - name: Run Sandbox hardening regressions
         shell: pwsh
@@ -73,6 +92,7 @@ jobs:
           node tests/sandbox-backend.test.js
           node tests/sandbox-first-run-certification.test.js
           node tests/sandbox-telemetry.test.js
+          node tests/gta-processcontainer-isolation.test.js
           node tests/workflow-supply-chain.test.js
 
       - name: Build sealed Windows runtime package
@@ -84,16 +104,19 @@ jobs:
           node tools/build-portable-package.js
           node tools/verify-release-candidate.js
 
-      - name: Prove packaged Sandbox probe is integrity-covered
+      - name: Prove packaged native binaries are integrity-covered
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
           $root = Join-Path (Get-Location) "dist/malguard-desktop-$version"
           $probe = Join-Path $root 'desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe'
+          $harness = Join-Path $root 'desktop-app/sandbox/bin/MalGuardGtaContextHarness.exe'
           if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw 'packaged containment probe missing' }
+          if (-not (Test-Path -LiteralPath $harness -PathType Leaf)) { throw 'packaged GTA ProcessContainer harness missing' }
           $sums = Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Raw
           if ($sums -notmatch 'desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe\.exe') { throw 'packaged containment probe is not covered by SHA256SUMS.txt' }
+          if ($sums -notmatch 'desktop-app/sandbox/bin/MalGuardGtaContextHarness\.exe') { throw 'packaged GTA ProcessContainer harness is not covered by SHA256SUMS.txt' }
 
       - name: Archive Windows release candidate
         shell: pwsh

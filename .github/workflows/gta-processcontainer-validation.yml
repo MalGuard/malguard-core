@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - dev/gta-processcontainer-isolation
+      - dev/gta-final-validation-harness
   pull_request:
     branches:
       - dev/gta-plugin-sandbox-staging
@@ -35,9 +36,9 @@ jobs:
         run: npm test
 
   processcontainer-live-synthetic:
-    name: MXC ProcessContainer live synthetic acceptance
+    name: MXC + GTA plugin end-to-end acceptance
     runs-on: windows-11-vs2026-arm
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -53,7 +54,7 @@ jobs:
         shell: pwsh
         run: npm install --no-save --package-lock=false --ignore-scripts @microsoft/mxc-sdk@0.8.0
 
-      - name: Build static ARM64 harmless fixture
+      - name: Build static ARM64 containment fixture
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -69,6 +70,35 @@ jobs:
           node .\tests\mxc-processcontainer-live-validation.mjs
           if ($LASTEXITCODE -ne 0) {
             throw "MXC ProcessContainer live validation failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Build native GTA ProcessContainer harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S native/gta-processcontainer-harness -B build/gta-processcontainer-harness -A ARM64
+          cmake --build build/gta-processcontainer-harness --config Release --parallel
+          $harness = Resolve-Path 'build/gta-processcontainer-harness/Release/MalGuardGtaContextHarness.exe'
+          "MALGUARD_GTA_PROCESSCONTAINER_HARNESS_EXE=$($harness.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build harmless GTA-compatible plugin fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S native/gta-validation-fixture -B build/gta-validation-fixture -A ARM64
+          cmake --build build/gta-validation-fixture --config Release --parallel
+          $game = Resolve-Path 'build/gta-validation-fixture/Release/GTA5.exe'
+          $plugin = Resolve-Path 'build/gta-validation-fixture/Release/MalGuardHarmlessPlugin.dll'
+          "MALGUARD_GTA_VALIDATION_GAME_EXE=$($game.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MALGUARD_GTA_VALIDATION_PLUGIN_DLL=$($plugin.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Validate GTA plugin path end-to-end in ProcessContainer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node .\tests\gta-processcontainer-end-to-end-validation.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "GTA ProcessContainer end-to-end validation failed with exit code $LASTEXITCODE"
           }
 
       - name: Validate GTA routing regression on Windows

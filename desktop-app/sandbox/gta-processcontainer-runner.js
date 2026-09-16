@@ -8,8 +8,10 @@ const { createHash } = require('crypto');
 const { validateTelemetry, evaluateTelemetry, MAX_RESULT_BYTES } = require('./telemetry-validator.js');
 const { behaviorDiff, buildCausalityMap, comparativeVerdict } = require('./game-context-analysis.js');
 
-const PROCESSCONTAINER_GTA_VERSION = '0.1.0';
+const PROCESSCONTAINER_GTA_VERSION = '0.2.0';
+const NATIVE_HARNESS_NAME = 'MalGuardGtaContextHarness.exe';
 const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.asi', '.dll']);
+const CONTEXT_KINDS = new Set(['real-gta', 'synthetic-gta-compatible']);
 
 function quoteWindows(value) {
   return `"${String(value).replace(/"/g, '\\"')}"`;
@@ -85,7 +87,10 @@ class GtaProcessContainerRunner {
     sessionRoot = null,
     preserveSessions = false,
     sdkLoader = null,
+    harnessExecutable = process.env.MALGUARD_GTA_PROCESSCONTAINER_HARNESS_EXE || '',
+    contextKind = 'real-gta',
   } = {}) {
+    if (!CONTEXT_KINDS.has(contextKind)) throw new Error('invalid GTA ProcessContainer context kind');
     this.gameRoot = gameRoot ? path.resolve(gameRoot) : '';
     this.gameExecutable = String(gameExecutable || 'GTA5.exe');
     this.observeSeconds = Math.max(3, Math.min(60, Number(observeSeconds) || 12));
@@ -93,7 +98,8 @@ class GtaProcessContainerRunner {
     this.sessionRoot = path.resolve(sessionRoot || path.join(os.tmpdir(), 'malguard-gta-processcontainer'));
     this.preserveSessions = preserveSessions === true;
     this.sdkLoader = sdkLoader || (() => import('@microsoft/mxc-sdk'));
-    this.harnessSource = path.join(__dirname, 'processcontainer', 'gta-context-harness.ps1');
+    this.contextKind = contextKind;
+    this.harnessSource = path.resolve(harnessExecutable || path.join(__dirname, 'bin', NATIVE_HARNESS_NAME));
   }
 
   async configurationStatus() {
@@ -117,6 +123,7 @@ class GtaProcessContainerRunner {
       gameRoot: this.gameRoot,
       executableHostPath,
       gameExecutable: path.relative(this.gameRoot, executableHostPath),
+      contextKind: this.contextKind,
       containment: 'processcontainer',
       requiresNestedVirtualization: false,
       hostGameReadOnly: true,
@@ -163,6 +170,12 @@ class GtaProcessContainerRunner {
       error.code = 'GTA_PROCESSCONTAINER_SAMPLE_SIZE_INVALID';
       throw error;
     }
+    const harnessStat = await fs.promises.lstat(this.harnessSource).catch(() => null);
+    if (!harnessStat || !harnessStat.isFile() || harnessStat.isSymbolicLink()) {
+      const error = new Error('native GTA ProcessContainer harness is unavailable');
+      error.code = 'GTA_PROCESSCONTAINER_NATIVE_HARNESS_MISSING';
+      throw error;
+    }
     const sha256 = await sha256File(resolvedSample);
     if (expectedIdentity && expectedIdentity.sha256 && expectedIdentity.sha256 !== sha256) {
       const error = new Error('sample identity changed after preflight');
@@ -196,8 +209,14 @@ class GtaProcessContainerRunner {
       error.code = 'GTA_PROCESSCONTAINER_STAGING_INTEGRITY_FAILED';
       throw error;
     }
-    const stagedHarness = path.join(inputDir, 'gta-context-harness.ps1');
+
+    const stagedHarness = path.join(inputDir, NATIVE_HARNESS_NAME);
     await fs.promises.copyFile(this.harnessSource, stagedHarness, fs.constants.COPYFILE_EXCL);
+    if (await sha256File(stagedHarness) !== await sha256File(this.harnessSource)) {
+      const error = new Error('native harness staging hash mismatch');
+      error.code = 'GTA_PROCESSCONTAINER_HARNESS_INTEGRITY_FAILED';
+      throw error;
+    }
 
     return {
       sessionId,
@@ -224,8 +243,8 @@ class GtaProcessContainerRunner {
         readwritePaths: [session.runtimeRoot, session.outputDir],
       },
       network: {
-        egress: { default: 'deny' },
-        ingress: { default: 'deny', hostLoopback: 'deny' },
+        allowOutbound: false,
+        allowLocalNetwork: false,
       },
       ui: { allowWindows: true },
       timeoutMs: Math.max(60_000, (this.gameStartupSeconds + this.observeSeconds + 30) * 1000),
@@ -234,14 +253,14 @@ class GtaProcessContainerRunner {
 
   buildCommand(session) {
     return [
-      'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
-      '-File', quoteWindows(session.stagedHarness),
-      '-SamplePath', quoteWindows(session.stagedSample),
-      '-GameExecutable', quoteWindows(session.runtimeGameExe),
-      '-OutputPath', quoteWindows(session.resultPath),
-      '-SessionId', session.sessionId,
-      '-ObserveSeconds', String(this.observeSeconds),
-      '-GameStartupSeconds', String(this.gameStartupSeconds),
+      quoteWindows(session.stagedHarness),
+      quoteWindows(session.stagedSample),
+      quoteWindows(session.runtimeGameExe),
+      quoteWindows(session.resultPath),
+      quoteWindows(session.sessionId),
+      String(this.observeSeconds),
+      String(this.gameStartupSeconds),
+      this.contextKind,
     ].join(' ');
   }
 
@@ -253,12 +272,19 @@ class GtaProcessContainerRunner {
     let parsed;
     try { parsed = JSON.parse((await fs.promises.readFile(session.resultPath, 'utf8')).replace(/^\uFEFF/, '')); }
     catch (_) { return { ok: false, code: 'GTA_PROCESSCONTAINER_RESULT_JSON_INVALID' }; }
-    const validated = validateTelemetry(parsed, session.sessionId);
-    if (!validated.ok) return validated;
-    if (!parsed.gameContext || parsed.gameContext.realGame !== true || parsed.gameContext.fixtureStarted !== true || parsed.gameContext.containment !== 'processcontainer') {
+    const gameContext = parsed.gameContext;
+    if (!gameContext || gameContext.fixtureStarted !== true || gameContext.containment !== 'processcontainer' || gameContext.contextKind !== this.contextKind) {
       return { ok: false, code: 'GTA_PROCESSCONTAINER_CONTEXT_NOT_PROVEN' };
     }
-    validated.telemetry.gameContext = parsed.gameContext;
+    if (this.contextKind === 'real-gta' && gameContext.realGame !== true) {
+      return { ok: false, code: 'GTA_PROCESSCONTAINER_REAL_GAME_NOT_PROVEN' };
+    }
+    if (this.contextKind === 'synthetic-gta-compatible' && (gameContext.realGame !== false || gameContext.syntheticFixture !== true)) {
+      return { ok: false, code: 'GTA_PROCESSCONTAINER_SYNTHETIC_CONTEXT_INVALID' };
+    }
+    const validated = validateTelemetry(parsed, session.sessionId);
+    if (!validated.ok) return validated;
+    validated.telemetry.gameContext = gameContext;
     return validated;
   }
 
@@ -271,7 +297,7 @@ class GtaProcessContainerRunner {
     let session;
     try { session = await this._prepareSession(samplePath, expectedIdentity, config); }
     catch (error) {
-      return { ok: false, verdict: 'inconclusive', code: error.code || 'GTA_PROCESSCONTAINER_STAGING_FAILED', detail: error.message, backend: support, gameContext: config };
+      return { ok: false, verdict: 'inconclusive', code: error.code || 'GTA_PROCESSCONTAINER_STAGING_FAILED', detail: error.message, backend: { ...support, sdk: undefined }, gameContext: config };
     }
 
     try {
@@ -291,7 +317,7 @@ class GtaProcessContainerRunner {
       });
       const checked = await this._readResult(session);
       if (!checked.ok) {
-        return { ok: false, verdict: 'inconclusive', code: checked.code, backend: support, process: exit, sampleSha256: session.sampleSha256, gameContext: config };
+        return { ok: false, verdict: 'inconclusive', code: checked.code, backend: { ...support, sdk: undefined }, process: exit, sampleSha256: session.sampleSha256, gameContext: config };
       }
       const execution = checked.telemetry.execution || {};
       if (execution.attempted !== true || execution.started !== true) {
@@ -299,17 +325,18 @@ class GtaProcessContainerRunner {
           ok: false,
           verdict: 'inconclusive',
           code: session.sampleExtension === '.asi' || session.sampleExtension === '.dll' ? 'GTA_PLUGIN_LOAD_NOT_PROVEN' : 'GTA_CONTEXT_SAMPLE_EXECUTION_NOT_PROVEN',
-          backend: support,
+          backend: { ...support, sdk: undefined },
           process: exit,
           sampleSha256: session.sampleSha256,
           telemetry: checked.telemetry,
-          gameContext: { ...config, proven: true },
+          gameContext: { ...config, proven: true, realGame: this.contextKind === 'real-gta' },
         };
       }
       const assessment = evaluateTelemetry(checked.telemetry);
       const diff = behaviorDiff({ execution: {}, baselineProcesses: [], finalProcesses: [], recentFiles: [] }, checked.telemetry);
       const causality = buildCausalityMap({ neutralTelemetry: null, gameTelemetry: checked.telemetry, diff });
       const verdict = comparativeVerdict({ neutralAssessment: null, gameAssessment: assessment, diff });
+      const realGame = this.contextKind === 'real-gta';
       return {
         ok: true,
         verdict,
@@ -324,8 +351,10 @@ class GtaProcessContainerRunner {
         behaviorAssessment: assessment,
         gameContextDiff: diff,
         causality,
-        gameContext: { ...config, proven: true, realGame: true },
-        note: 'GTA ran from an ephemeral writable clone inside Microsoft MXC ProcessContainer. This removes the nested-virtualization dependency but is a weaker isolation boundary than a hypervisor VM.',
+        gameContext: { ...config, proven: true, realGame, syntheticFixture: !realGame },
+        note: realGame
+          ? 'GTA ran from an ephemeral writable clone inside Microsoft MXC ProcessContainer using the native MalGuard telemetry harness. ProcessContainer is a weaker isolation boundary than a hypervisor VM.'
+          : 'A harmless GTA-compatible fixture ran end-to-end inside Microsoft MXC ProcessContainer using the native MalGuard telemetry harness. This validates the containment, staging, plugin-load observation, and telemetry path but is not evidence that the actual GTA V binary was executed.',
       };
     } finally {
       if (!this.preserveSessions && session) await fs.promises.rm(session.root, { recursive: true, force: true }).catch(() => {});
@@ -333,4 +362,4 @@ class GtaProcessContainerRunner {
   }
 }
 
-module.exports = { GtaProcessContainerRunner, PROCESSCONTAINER_GTA_VERSION, SUPPORTED_EXTENSIONS, copyTreeNoLinks };
+module.exports = { GtaProcessContainerRunner, PROCESSCONTAINER_GTA_VERSION, NATIVE_HARNESS_NAME, SUPPORTED_EXTENSIONS, copyTreeNoLinks };

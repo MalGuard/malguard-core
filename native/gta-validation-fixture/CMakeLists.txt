@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.20)
+project(MalGuardGtaValidationFixture LANGUAGES CXX)
+
+add_executable(MalGuardGtaValidationHost GtaValidationHost.cpp)
+set_target_properties(MalGuardGtaValidationHost PROPERTIES OUTPUT_NAME "GTA5")
+target_compile_features(MalGuardGtaValidationHost PRIVATE cxx_std_17)
+target_compile_definitions(MalGuardGtaValidationHost PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+
+add_library(MalGuardHarmlessPlugin SHARED HarmlessPlugin.cpp)
+target_compile_features(MalGuardHarmlessPlugin PRIVATE cxx_std_17)
+target_compile_definitions(MalGuardHarmlessPlugin PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+
+if(MSVC)
+  set_property(TARGET MalGuardGtaValidationHost PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  set_property(TARGET MalGuardHarmlessPlugin PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  target_compile_options(MalGuardGtaValidationHost PRIVATE /W4 /WX /guard:cf /sdl)
+  target_compile_options(MalGuardHarmlessPlugin PRIVATE /W4 /WX /guard:cf /sdl)
+  target_link_options(MalGuardGtaValidationHost PRIVATE /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /guard:cf)
+  target_link_options(MalGuardHarmlessPlugin PRIVATE /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /guard:cf)
+endif()
