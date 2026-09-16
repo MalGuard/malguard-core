@@ -3,11 +3,13 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { spawnSync } = require('child_process');
 const { verifyRuntimePackageIntegrity } = require('../desktop-app/integrity/runtime-integrity.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const version = fs.readFileSync(path.join(ROOT, 'DESKTOP-VERSION'), 'utf8').trim();
 const OUT = path.join(ROOT, 'dist', `malguard-desktop-${version}`);
+const SOURCE_COMMIT_RE = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 function fail(message) { throw new Error(`RELEASE_GATE_FAILED: ${message}`); }
 function sha256(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
@@ -22,6 +24,16 @@ function walk(dir, base = dir, out = []) {
   return out;
 }
 
+function expectedSourceCommit() {
+  const envCommit = String(process.env.GITHUB_SHA || process.env.MALGUARD_SOURCE_COMMIT || '').trim().toLowerCase();
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', windowsHide: true });
+  const head = result.status === 0 ? result.stdout.trim().toLowerCase() : '';
+  const expected = envCommit || head;
+  if (!SOURCE_COMMIT_RE.test(expected)) fail('cannot establish trusted source commit');
+  if (head && envCommit && head !== envCommit) fail(`checkout/source commit mismatch: ${head} != ${envCommit}`);
+  return expected;
+}
+
 if (!fs.existsSync(OUT)) fail('portable package is missing');
 const manifestPath = path.join(OUT, 'PACKAGE-MANIFEST.json');
 const sumsPath = path.join(OUT, 'SHA256SUMS.txt');
@@ -30,6 +42,8 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 if (manifest.schemaVersion !== '1.0.0') fail('unsupported package manifest schema');
 if (manifest.product !== 'MalGuard Desktop') fail('unexpected product');
 if (manifest.desktopVersion !== version) fail('desktop version mismatch');
+if (!SOURCE_COMMIT_RE.test(String(manifest.sourceCommit || ''))) fail('invalid source commit provenance');
+if (manifest.sourceCommit !== expectedSourceCommit()) fail('package source commit does not match trusted checkout');
 if (manifest.entrypoint !== 'desktop-app/server.js') fail('unexpected entrypoint');
 if (!fs.existsSync(path.join(OUT, manifest.entrypoint))) fail('entrypoint missing');
 if (!fs.existsSync(path.join(OUT, 'desktop-app/integrity/preload.js'))) fail('runtime integrity preload missing');
@@ -76,4 +90,4 @@ for (const file of files.filter(f => /\.(?:js|json|md|txt|yml|yaml)$/i.test(f)))
   for (const pattern of forbiddenContent) if (pattern.test(text)) fail(`embedded credential-like content in ${file}`);
 }
 
-console.log(`✓ Release candidate gate: ${files.length} files, manifest/checksums/runtime-self-integrity/secrets PASS`);
+console.log(`✓ Release candidate gate: ${files.length} files, source provenance, manifest/checksums/runtime-self-integrity/secrets PASS`);
