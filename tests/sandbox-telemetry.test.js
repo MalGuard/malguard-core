@@ -40,6 +40,18 @@ function baseTelemetry(sessionId) {
   const valid = validateTelemetry(baseTelemetry(sessionId), sessionId);
   assert.equal(valid.ok, true);
   assert.equal(valid.telemetry.execution.timedOut, false);
+  assert.equal(valid.telemetry.execution.attempted, true);
+  assert.equal(valid.telemetry.execution.started, true);
+
+  const notAttempted = baseTelemetry(sessionId);
+  notAttempted.execution.attempted = false;
+  notAttempted.execution.started = false;
+  assert.equal(validateTelemetry(notAttempted, sessionId).code, 'SANDBOX_SAMPLE_EXECUTION_NOT_ATTEMPTED');
+
+  const notStarted = baseTelemetry(sessionId);
+  notStarted.execution.started = false;
+  notStarted.execution.error = 'synthetic launch failure';
+  assert.equal(validateTelemetry(notStarted, sessionId).code, 'SANDBOX_SAMPLE_EXECUTION_NOT_STARTED');
 
   const wrongSchema = baseTelemetry(sessionId);
   wrongSchema.schemaVersion = '0.0.0';
@@ -98,7 +110,7 @@ function baseTelemetry(sessionId) {
     await fs.promises.rm(tmp, { recursive: true, force: true });
   }
 
-  console.log('✓ Sandbox telemetry validation, quotas, identity binding and release safety gate PASS');
+  console.log('✓ Sandbox telemetry requires real sample start, validates quotas/identity and preserves release safety gate PASS');
 })().catch(error => {
   console.error(error.stack || error);
   process.exit(1);
