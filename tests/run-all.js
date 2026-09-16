@@ -35,6 +35,7 @@ const tests=[
  'sandbox-backend.test.js',
  'sandbox-first-run-certification.test.js',
  'game-context-analysis.test.js',
+ 'gta-plugin-sandbox-staging.test.js',
  'virtual-windows-validation-lab.test.js',
  'embedded-validation-lab.test.js',
  'isolation-readiness.test.js',
