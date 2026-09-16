@@ -1,0 +1,76 @@
+name: GTA ProcessContainer Validation
+
+on:
+  push:
+    branches:
+      - dev/gta-processcontainer-isolation
+  pull_request:
+    branches:
+      - dev/gta-plugin-sandbox-staging
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: Regression suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: GTA ProcessContainer regression
+        run: node tests/gta-processcontainer-isolation.test.js
+
+      - name: Full engineering regression suite
+        run: npm test
+
+  processcontainer-live-synthetic:
+    name: MXC ProcessContainer live synthetic acceptance
+    runs-on: windows-11-vs2026-arm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install pinned Microsoft MXC SDK
+        shell: pwsh
+        run: npm install --no-save --package-lock=false --ignore-scripts @microsoft/mxc-sdk@0.8.0
+
+      - name: Build static ARM64 harmless fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S native/mxc-synthetic-child -B build/mxc-synthetic-child -A ARM64
+          cmake --build build/mxc-synthetic-child --config Release --parallel
+          $exe = Resolve-Path 'build/mxc-synthetic-child/Release/MalGuardMxcSyntheticChild.exe'
+          "MALGUARD_MXC_CHILD_EXE=$($exe.Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Validate real ProcessContainer boundary with harmless fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node .\tests\mxc-processcontainer-live-validation.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "MXC ProcessContainer live validation failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Validate GTA routing regression on Windows
+        shell: pwsh
+        run: node .\tests\gta-processcontainer-isolation.test.js

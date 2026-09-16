@@ -3,14 +3,15 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { SUPPORTED_EXTENSIONS } = require('../desktop-app/sandbox/sandbox-controller.js');
 
 const root = path.resolve(__dirname, '..');
-const controller = fs.readFileSync(path.join(root, 'desktop-app', 'sandbox', 'sandbox-controller.js'), 'utf8');
 const runner = fs.readFileSync(path.join(root, 'desktop-app', 'sandbox', 'gta-real-context-runner.js'), 'utf8');
 const harness = fs.readFileSync(path.join(root, 'desktop-app', 'sandbox', 'windows-sandbox', 'gta-context-harness.ps1'), 'utf8');
 
-assert(controller.includes("'.asi'"), 'sandbox preflight must accept .asi samples');
-assert(controller.includes("'.dll'"), 'sandbox preflight must accept .dll samples');
+assert(SUPPORTED_EXTENSIONS instanceof Set, 'sandbox controller must export supported extension policy');
+assert(SUPPORTED_EXTENSIONS.has('.asi'), 'sandbox preflight must accept .asi samples');
+assert(SUPPORTED_EXTENSIONS.has('.dll'), 'sandbox preflight must accept .dll samples');
 assert(runner.includes("'.asi'"), 'GTA context runner must accept .asi samples');
 assert(runner.includes("'.dll'"), 'GTA context runner must accept .dll samples');
 assert(runner.includes('<SandboxFolder>C:\\\\MalGuardGameSource</SandboxFolder><ReadOnly>true</ReadOnly>'), 'host GTA mapping must remain read-only');

@@ -13,5 +13,8 @@
     "diagnose": "node tools/health-report.js",
     "verify:readiness": "node tools/verify-product-readiness.js",
     "package:portable": "node tools/build-portable-package.js"
+  },
+  "optionalDependencies": {
+    "@microsoft/mxc-sdk": "0.8.0"
   }
 }
