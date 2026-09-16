@@ -8,8 +8,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node --require ./desktop-app/integrity/preload.js desktop-app/server.js",
+    "start": "node --require ./desktop-app/integrity/preload.js --require ./desktop-app/health/preload.js desktop-app/server.js",
     "test": "node tests/run-all.js",
+    "diagnose": "node tools/health-report.js",
     "verify:readiness": "node tools/verify-product-readiness.js",
     "package:portable": "node tools/build-portable-package.js"
   }
