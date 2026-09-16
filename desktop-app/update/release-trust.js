@@ -1,0 +1,59 @@
+'use strict';
+
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const { canonicalize, verifyManifest, verifyPackageFile } = require('./secure-update.js');
+
+const SOURCE_COMMIT_RE = /^[a-f0-9]{40}$/;
+
+function fileSha256(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function buildReleaseManifest({ version, channel = 'stable', packagePath, sourceCommit }) {
+  if (typeof version !== 'string' || !version) throw new Error('release version is required');
+  if (typeof channel !== 'string' || !/^[a-z0-9-]{1,32}$/i.test(channel)) throw new Error('invalid release channel');
+  const commit = String(sourceCommit || '').toLowerCase();
+  if (!SOURCE_COMMIT_RE.test(commit)) throw new Error('release source commit must be a full 40-character SHA');
+  const resolved = path.resolve(packagePath || '');
+  const stat = fs.lstatSync(resolved);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0) throw new Error('release package must be a non-empty regular file');
+  return {
+    schemaVersion: '1.0.0',
+    version,
+    channel,
+    sourceCommit: commit,
+    package: {
+      name: path.basename(resolved),
+      sha256: fileSha256(resolved),
+      size: stat.size,
+    },
+  };
+}
+
+function signReleaseManifest(manifest, privateKeyPem) {
+  if (typeof privateKeyPem !== 'string' || !privateKeyPem.trim()) throw new Error('offline release signing private key is required');
+  const key = crypto.createPrivateKey(privateKeyPem);
+  if (key.asymmetricKeyType !== 'ed25519') throw new Error('release signing key must be Ed25519');
+  return crypto.sign(null, Buffer.from(canonicalize(manifest), 'utf8'), key).toString('base64');
+}
+
+function verifySignedRelease({ manifest, signature, publicKeyPem, packagePath, currentVersion }) {
+  if (!manifest || !SOURCE_COMMIT_RE.test(String(manifest.sourceCommit || '').toLowerCase())) throw new Error('release manifest source commit is invalid');
+  const resolved = path.resolve(packagePath || '');
+  const stat = fs.lstatSync(resolved);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0) throw new Error('release package must be a non-empty regular file');
+  if (!manifest.package || manifest.package.name !== path.basename(resolved)) throw new Error('release package name mismatch');
+  if (manifest.package.size !== stat.size) throw new Error('release package size mismatch');
+  verifyManifest({ manifest, signature, publicKeyPem, currentVersion });
+  verifyPackageFile(resolved, manifest.package.sha256);
+  return true;
+}
+
+module.exports = {
+  SOURCE_COMMIT_RE,
+  buildReleaseManifest,
+  signReleaseManifest,
+  verifySignedRelease,
+};

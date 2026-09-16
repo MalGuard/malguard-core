@@ -59,19 +59,21 @@ static bool LaunchGuardChild() {
   const std::wstring base = GetModuleDirectory();
   if (base.empty()) return false;
   const std::wstring node = base + L"\\runtime\\node.exe";
+  const std::wstring preload = base + L"\\app\\desktop-app\\integrity\\preload.js";
   const std::wstring server = base + L"\\app\\desktop-app\\server.js";
   const std::wstring workDir = base + L"\\app";
-  if (!FileExists(node) || !FileExists(server)) {
-    LogEvent(EVENTLOG_ERROR_TYPE, L"Bundled runtime or desktop server is missing.");
+  if (!FileExists(node) || !FileExists(preload) || !FileExists(server)) {
+    LogEvent(EVENTLOG_ERROR_TYPE, L"Bundled runtime, integrity preload, or desktop server is missing.");
     return false;
   }
 
-  std::wstring command = L"\"" + node + L"\" \"" + server + L"\"";
+  std::wstring command = L"\"" + node + L"\" --require \"" + preload + L"\" \"" + server + L"\"";
   std::vector<wchar_t> mutableCommand(command.begin(), command.end());
   mutableCommand.push_back(L'\0');
 
   // Add a small service-mode marker while preserving the current environment.
   SetEnvironmentVariableW(L"MALGUARD_SERVICE_MODE", L"1");
+  SetEnvironmentVariableW(L"MALGUARD_REQUIRE_SEALED_RUNTIME", L"1");
 
   STARTUPINFOW si{};
   si.cb = sizeof(si);

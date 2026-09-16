@@ -4,7 +4,10 @@ const path=require('path');
 const tests=[
  'build-validation.test.js',
  'packaging-foundation.test.js',
+ 'runtime-package-integrity.test.js',
+ 'workflow-supply-chain.test.js',
  'secure-update.test.js',
+ 'release-trust.test.js',
  'entitlement-gate.test.js',
  'entitlement-api.test.js',
  'error-reporter.test.js',

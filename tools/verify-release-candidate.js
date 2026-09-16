@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { verifyRuntimePackageIntegrity } = require('../desktop-app/integrity/runtime-integrity.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const version = fs.readFileSync(path.join(ROOT, 'DESKTOP-VERSION'), 'utf8').trim();
@@ -31,6 +32,13 @@ if (manifest.product !== 'MalGuard Desktop') fail('unexpected product');
 if (manifest.desktopVersion !== version) fail('desktop version mismatch');
 if (manifest.entrypoint !== 'desktop-app/server.js') fail('unexpected entrypoint');
 if (!fs.existsSync(path.join(OUT, manifest.entrypoint))) fail('entrypoint missing');
+if (!fs.existsSync(path.join(OUT, 'desktop-app/integrity/preload.js'))) fail('runtime integrity preload missing');
+if (!fs.existsSync(path.join(OUT, 'desktop-app/integrity/runtime-integrity.js'))) fail('runtime integrity verifier missing');
+
+const runtimePackage = JSON.parse(fs.readFileSync(path.join(OUT, 'package.json'), 'utf8'));
+if (!runtimePackage.scripts || runtimePackage.scripts.start !== 'node --require ./desktop-app/integrity/preload.js desktop-app/server.js') {
+  fail('packaged startup does not enforce the runtime integrity preload');
+}
 
 const files = walk(OUT).sort();
 if (files.length !== manifest.fileCount) fail(`file count mismatch: expected ${manifest.fileCount}, got ${files.length}`);
@@ -55,6 +63,9 @@ for (const file of integrityFiles) {
   if (sha256(path.join(OUT, file)) !== expected.get(file)) fail(`checksum mismatch: ${file}`);
 }
 
+const runtimeIntegrity = verifyRuntimePackageIntegrity(OUT, { requireSealed: true });
+if (!runtimeIntegrity.ok || !runtimeIntegrity.sealed) fail(`runtime self-integrity rejected release candidate: ${runtimeIntegrity.code || 'unknown'}`);
+
 const forbiddenContent = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/,
@@ -65,4 +76,4 @@ for (const file of files.filter(f => /\.(?:js|json|md|txt|yml|yaml)$/i.test(f)))
   for (const pattern of forbiddenContent) if (pattern.test(text)) fail(`embedded credential-like content in ${file}`);
 }
 
-console.log(`✓ Release candidate gate: ${files.length} files, manifest/checksums/secrets PASS`);
+console.log(`✓ Release candidate gate: ${files.length} files, manifest/checksums/runtime-self-integrity/secrets PASS`);
