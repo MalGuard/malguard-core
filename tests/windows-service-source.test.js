@@ -24,10 +24,13 @@ assert.match(source, /SERVICE_CONFIG_DELAYED_AUTO_START_INFO/);
 assert.match(source, /exits\.size\(\) >= 5/);
 assert.doesNotMatch(source, /ShellExecute/i);
 assert.doesNotMatch(source, /WinExec\s*\(/i);
+assert.match(source, /desktop-app\\\\integrity\\\\preload\.js/);
+assert.match(source, /--require/);
+assert.match(source, /MALGUARD_REQUIRE_SEALED_RUNTIME/);
 assert.match(cmake, /\/guard:cf/);
 assert.match(cmake, /\/DYNAMICBASE/);
 assert.match(cmake, /\/NXCOMPAT/);
 assert.match(server, /MALGUARD_SERVICE_MODE/);
 assert.match(server, /SERVICE_GUARD_START_FAILED/);
 
-console.log('✓ Windows Service source: SCM lifecycle, kill-on-close child containment, crash-loop budget and hardening flags PASS');
+console.log('✓ Windows Service source: SCM lifecycle, runtime integrity preload, containment, crash-loop budget and hardening flags PASS');
