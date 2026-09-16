@@ -33,7 +33,10 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
  // release readiness. Product readiness must never be used as an execution bypass.
  const sandbox = new SandboxController({timeoutMs:2000,memoryMb:32});
  const probe = await sandbox.selfTest();
- assert.equal(probe.ok,true);
+ assert.equal(probe.localProbeOk,true);
+ assert.equal(probe.ok,probe.releaseReady);
+ assert.equal(probe.ok,probe.localProbeOk && probe.windowsSandboxReady);
+ if(!probe.releaseReady) assert(probe.blockers.length>0);
  const denied = await sandbox.analyzeUntrustedSample();
  assert.equal(denied.ok,false);
  assert.equal(denied.code,'SANDBOX_SAMPLE_PATH_REQUIRED');
