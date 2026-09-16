@@ -60,10 +60,30 @@ const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller
   assert.equal(capabilitiesCalls, 2);
   assert.equal(result.initialWindowsSandbox.releaseGrade, false);
   assert.equal(result.windowsSandbox.releaseGrade, true);
+  assert.equal(result.localProbeOk, true);
+  assert.equal(result.windowsSandboxReady, true);
   assert.equal(result.releaseReady, true);
+  assert.equal(result.ok, true);
   assert.deepEqual(result.blockers, []);
 
-  console.log('✓ Windows acceptance harness: synthetic-only safety, native build plan and post-probe release gate PASS');
+  // A successful local process probe is not enough. Top-level `ok` must remain
+  // false until native containment, Windows Sandbox isolation and releaseGrade
+  // all prove that the real runtime is certified.
+  const pendingBackend = {
+    async capabilities() { return { backend: 'fake-windows', available: true, releaseGrade: false, blockers: ['pending'] }; },
+    async runContainmentSelfTest() { return { ok: true, details: { synthetic: true } }; },
+    async runIsolationSelfTest() { return { ok: false, code: 'WINDOWS_SANDBOX_ISOLATION_PENDING' }; },
+  };
+  const pendingController = new SandboxController({ windowsBackend: pendingBackend, timeoutMs: 2500, memoryMb: 32 });
+  const pending = await pendingController.selfTest();
+  assert.equal(pending.localProbeOk, true);
+  assert.equal(pending.windowsSandboxReady, false);
+  assert.equal(pending.releaseReady, false);
+  assert.equal(pending.ok, false);
+  assert.ok(pending.blockers.includes('WINDOWS_SANDBOX_ISOLATION_PENDING'));
+  assert.ok(pending.blockers.includes('sandbox_release_gate_locked'));
+
+  console.log('✓ Windows acceptance harness: synthetic-only safety, native build plan, post-probe release gate and truthful top-level status PASS');
 })().catch(error => {
   console.error(error.stack || error);
   process.exit(1);
