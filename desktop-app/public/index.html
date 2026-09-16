@@ -12,34 +12,38 @@
     <header>
       <div>
         <h1>MalGuard Desktop</h1>
-        <p>Scanner + Guard control surface</p>
+        <p>Game-focused malware protection</p>
       </div>
       <span id="status">Loading…</span>
     </header>
 
     <nav>
       <button class="tab active" data-tab="scanner">Scanner</button>
-      <button class="tab" data-tab="engine">Engine Test</button>
+      <button class="tab" data-tab="engine">Security Health</button>
     </nav>
 
     <section id="scanner" class="panel active">
-      <h2>Local file scan</h2>
+      <h2>Scan a file</h2>
       <div class="model-picker">
-        <label for="scanModel">Choose Model</label>
+        <label for="scanModel">Protection level</label>
         <select id="scanModel" aria-label="Choose MalGuard scan model">
           <option value="standard">Standard</option>
           <option value="plus">Plus</option>
           <option value="pro">Pro</option>
         </select>
-        <span id="modelHint" class="muted">Standard local scan.</span>
+        <span id="modelHint" class="muted">Standard local protection.</span>
       </div>
-      <div class="row"><input id="scanPath" placeholder="C:\Games\GTA V\mods\example.asi"><button id="scanBtn">Scan</button></div>
+      <div class="row"><input id="scanPath" placeholder="C:\Games\GTA V\mods\example.asi"><button id="scanBtn">Scan securely</button></div>
       <div id="modelFlow" hidden>
         <h3 id="modelFlowTitle">Analysis flow</h3>
         <div id="modelSteps" class="pipeline-list"></div>
-        <pre id="modelFinal">Waiting for scan.</pre>
+        <div id="modelFinal" class="scan-result result-neutral">Ready for secure analysis.</div>
+        <details id="modelDiagnostics" class="diagnostics" hidden>
+          <summary>Advanced diagnostics</summary>
+          <pre id="modelDiagnosticsOut">No diagnostic data yet.</pre>
+        </details>
       </div>
-      <pre id="scanOut">No scan yet.</pre>
+      <div id="scanOut" class="scan-summary result-neutral">Ready to scan.</div>
 
       <h2>Threat Intelligence</h2>
       <div class="stack">
@@ -66,15 +70,22 @@
     </section>
 
     <section id="engine" class="panel">
-      <h2>Security Self-Test</h2>
-      <button id="selfTest">Run Self-Test</button>
-      <pre id="selfOut">Not run.</pre>
+      <h2>Security Health</h2>
+      <p class="muted">Check the local protection engine and whether this PC is ready for Plus and Pro isolated behavioral analysis.</p>
+      <button id="selfTest">Run core security check</button>
+      <details class="diagnostics">
+        <summary>Core diagnostics</summary>
+        <pre id="selfOut">Not run.</pre>
+      </details>
 
-      <h2>100% Product Validation & Runtime Sandbox Self-Certification</h2>
-      <p class="muted">MalGuard separates product readiness from machine-specific capabilities. The release artifact can reach 100% engineering and product readiness using the Virtual Windows Validation Lab, embedded safety checks and validated MXC ProcessContainer evidence. Plus/Pro code ships fully validated, but behavioral execution remains fail-closed on each individual machine until that machine passes the real Windows Sandbox self-test. A missing WindowsSandbox.exe on the CI runner therefore does not make the product incomplete and never fabricates a Sandbox PASS.</p>
-      <button id="finalSandboxTest">Run Full Product Validation</button>
-      <p id="finalSandboxSummary" class="warning">Not run. Product readiness and this machine's runtime Sandbox capability are reported separately.</p>
-      <pre id="finalSandboxOut">No validation result yet.</pre>
+      <h2>Secure Sandbox compatibility</h2>
+      <p class="muted">Plus and Pro execute suspicious files only inside an approved isolated Windows Sandbox. If this PC is not ready, MalGuard keeps the file protected instead of falling back to unsafe execution.</p>
+      <button id="finalSandboxTest">Check Sandbox compatibility</button>
+      <p id="finalSandboxSummary" class="health-card health-checking">Sandbox compatibility has not been checked yet.</p>
+      <details id="finalSandboxDiagnostics" class="diagnostics" hidden>
+        <summary>Advanced diagnostics</summary>
+        <pre id="finalSandboxOut">No diagnostic data yet.</pre>
+      </details>
     </section>
   </main>
   <script src="/app.js"></script>
