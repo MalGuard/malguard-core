@@ -34,10 +34,14 @@ assert.ok(!fs.existsSync(path.join(out, '.env')), 'environment secret file must 
 assert.ok(!fs.existsSync(path.join(out, 'desktop-app', 'threat-intel', 'abusech-auth.dpapi')), 'DPAPI credential blob must not ship');
 
 const manifest = JSON.parse(fs.readFileSync(path.join(out, 'PACKAGE-MANIFEST.json'), 'utf8'));
-assert.equal(manifest.schemaVersion, '1.0.0');
+assert.equal(manifest.schemaVersion, '1.1.0');
 assert.equal(manifest.desktopVersion, version);
+assert.match(manifest.sourceCommit, /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
 assert.equal(manifest.entrypoint, 'desktop-app/server.js');
 assert.ok(Number.isInteger(manifest.fileCount) && manifest.fileCount > 10);
+
+const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', windowsHide: true });
+if (head.status === 0) assert.equal(manifest.sourceCommit, head.stdout.trim().toLowerCase(), 'package provenance must match checked-out commit');
 
 const sums = fs.readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8').trim().split(/\r?\n/);
 assert.ok(sums.some(line => line.endsWith('  PACKAGE-MANIFEST.json')), 'manifest must be integrity-covered');
@@ -61,4 +65,4 @@ const packagedFiles = [];
 assert.equal(packagedFiles.length, manifest.fileCount, 'manifest file count mismatch');
 
 fs.rmSync(out, { recursive: true, force: true });
-console.log(`✓ Packaging foundation: ${manifest.fileCount} runtime files, SHA-256 integrity manifest PASS`);
+console.log(`✓ Packaging foundation: ${manifest.fileCount} runtime files, source provenance and SHA-256 integrity manifest PASS`);
