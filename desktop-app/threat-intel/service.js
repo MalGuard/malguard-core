@@ -27,13 +27,14 @@ class ThreatIntelService {
     if (!force && now - this.lastRecentSyncAttemptAt < this.recentSyncIntervalMs) return this._recentSyncPromise;
     if (this._recentSyncPromise) return this._recentSyncPromise;
     this.lastRecentSyncAttemptAt = now;
-    this._recentSyncPromise = this.syncRecent({ selector: '100' })
+    this._recentSyncPromise = this.syncRecent({ selector: '100', _attemptAlreadyRecorded: true })
       .catch(() => ({ provider: 'malwarebazaar', status: 'unavailable', reason: 'recent_sync_exception', count: 0, metadataOnly: true }))
       .finally(() => { this._recentSyncPromise = null; });
     return this._recentSyncPromise;
   }
 
   async syncRecent(options = {}) {
+    if (options._attemptAlreadyRecorded !== true) this.lastRecentSyncAttemptAt = Date.now();
     const selector = options.selector === 'time' ? 'time' : '100';
     const live = await this.client.listRecent(selector);
     const completedAt = Date.now();
