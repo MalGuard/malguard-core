@@ -9,59 +9,70 @@ const { ThreatIntelCache } = require('../desktop-app/threat-intel/cache-store.js
 
 (async () => {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'malguard-ti-feed-'));
-  const cache = new ThreatIntelCache({ filePath: path.join(dir, 'cache.json') });
-  const hashA = '1'.repeat(64);
-  const hashB = '2'.repeat(64);
-  let recentCalls = 0;
-  let lookupCalls = 0;
+  try {
+    const cache = new ThreatIntelCache({ filePath: path.join(dir, 'cache.json') });
+    const hashA = '1'.repeat(64);
+    const hashB = '2'.repeat(64);
+    let recentCalls = 0;
+    let lookupCalls = 0;
 
-  const client = {
-    async listRecent(selector) {
-      recentCalls++;
-      assert.equal(selector, '100');
-      return {
-        provider: 'malwarebazaar',
-        status: 'ok',
-        selector,
-        metadataOnly: true,
-        samplesDownloaded: false,
-        entries: [
-          { provider: 'malwarebazaar', status: 'known_malicious', hash: hashA, signature: 'FeedA', fileType: 'dll', fileName: 'a.dll', fileSize: 10, tags: [] },
-          { provider: 'malwarebazaar', status: 'known_malicious', hash: hashB, signature: 'FeedB', fileType: 'exe', fileName: 'b.exe', fileSize: 20, tags: [] },
-        ],
-        count: 2,
-      };
-    },
-    async lookupSha256(hash) {
-      lookupCalls++;
-      return { provider: 'malwarebazaar', status: 'not_found', hash };
-    },
-  };
+    const client = {
+      async listRecent(selector) {
+        recentCalls++;
+        assert.equal(selector, '100');
+        return {
+          provider: 'malwarebazaar',
+          status: 'ok',
+          selector,
+          metadataOnly: true,
+          samplesDownloaded: false,
+          entries: [
+            { provider: 'malwarebazaar', status: 'known_malicious', hash: hashA, signature: 'FeedA', fileType: 'dll', fileName: 'a.dll', fileSize: 10, tags: [] },
+            { provider: 'malwarebazaar', status: 'known_malicious', hash: hashB, signature: 'FeedB', fileType: 'exe', fileName: 'b.exe', fileSize: 20, tags: [] },
+          ],
+          count: 2,
+        };
+      },
+      async lookupSha256(hash) {
+        lookupCalls++;
+        return { provider: 'malwarebazaar', status: 'not_found', hash };
+      },
+    };
 
-  const credentials = {
-    async status() { return { configured: true, source: 'unit-test' }; },
-    async getAuthKey() { return 'not-used-in-mock'; },
-  };
+    const credentials = {
+      async status() { return { configured: true, source: 'unit-test' }; },
+      async getAuthKey() { return 'not-used-in-mock'; },
+    };
 
-  const service = new ThreatIntelService({ client, cache, credentials, recentSyncIntervalMs: 60 * 1000 });
-  const synced = await service.syncRecent();
-  assert.equal(synced.status, 'ok');
-  assert.equal(synced.count, 2);
-  assert.equal(synced.metadataOnly, true);
-  assert.equal(synced.samplesDownloaded, false);
-  assert.equal(recentCalls, 1);
+    const service = new ThreatIntelService({ client, cache, credentials, recentSyncIntervalMs: 60 * 1000 });
+    const synced = await service.syncRecent();
+    assert.equal(synced.status, 'ok');
+    assert.equal(synced.count, 2);
+    assert.equal(synced.metadataOnly, true);
+    assert.equal(synced.samplesDownloaded, false);
+    assert.equal(recentCalls, 1);
 
-  const cached = await service.lookupSha256(hashA, { syncRecent: false });
-  assert.equal(cached.status, 'known_malicious');
-  assert.equal(cached.source, 'cache');
-  assert.equal(cached.signature, 'FeedA');
-  assert.equal(lookupCalls, 0, 'recent feed cache hit must avoid redundant per-hash lookup');
+    const cached = await service.lookupSha256(hashA, { syncRecent: false });
+    assert.equal(cached.status, 'known_malicious');
+    assert.equal(cached.source, 'cache');
+    assert.equal(cached.signature, 'FeedA');
+    assert.equal(lookupCalls, 0, 'recent feed cache hit must avoid redundant per-hash lookup');
 
-  const status = await service.status();
-  assert.equal(status.recentFeed.status, 'ok');
-  assert.equal(status.recentFeed.count, 2);
-  assert(status.cache.entries >= 2);
+    const status = await service.status();
+    assert.equal(status.recentFeed.status, 'ok');
+    assert.equal(status.recentFeed.count, 2);
+    assert(status.cache.entries >= 2);
 
-  await fs.promises.rm(dir, { recursive: true, force: true });
-  console.log('✓ Threat-intel recent metadata sync populates cache without downloading samples');
+    console.log('✓ Threat-intel recent metadata sync populates cache without downloading samples');
+  } finally {
+    // Atomic cache writes can briefly overlap cleanup on fast CI filesystems.
+    // Node's built-in recursive rm retry handles transient ENOTEMPTY/EBUSY
+    // without weakening any product behavior or swallowing persistent failures.
+    await fs.promises.rm(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    });
+  }
 })().catch(error => { console.error(error); process.exit(1); });

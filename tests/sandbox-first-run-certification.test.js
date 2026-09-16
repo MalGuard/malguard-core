@@ -62,9 +62,36 @@ class FakeReleaseGradeBackend {
   }
 }
 
+function fakeGameRunner(backend) {
+  return {
+    configurationStatus: async () => ({
+      ok: true,
+      code: 'GTA_CONTEXT_CONFIGURED',
+      realGame: true,
+      proven: true,
+    }),
+    analyze: async (samplePath, expectedIdentity) => {
+      const result = await backend.analyze(samplePath, expectedIdentity);
+      if (result && typeof result === 'object') {
+        result.gameContext = { realGame: true, proven: true };
+      }
+      return result;
+    },
+  };
+}
+
+const unavailableProcessContainer = {
+  supportStatus: async () => ({ ok: false, code: 'GTA_PROCESSCONTAINER_UNAVAILABLE', requiresNestedVirtualization: false }),
+  configurationStatus: async () => ({ ok: false, code: 'GTA_CONTEXT_NOT_CONFIGURED' }),
+};
+
 (async () => {
   const goodBackend = new FakeReleaseGradeBackend();
-  const controller = new SandboxController({ windowsBackend: goodBackend });
+  const controller = new SandboxController({
+    windowsBackend: goodBackend,
+    gtaContextRunner: fakeGameRunner(goodBackend),
+    processContainerRunner: unavailableProcessContainer,
+  });
   const certification = await controller.ensureRuntimeCertified();
   assert.equal(certification.ok, true, JSON.stringify(certification));
   assert.equal(certification.releaseReady, true);
@@ -90,7 +117,11 @@ class FakeReleaseGradeBackend {
   }
 
   const blockedBackend = new FakeReleaseGradeBackend({ startExecution: false });
-  const blockedController = new SandboxController({ windowsBackend: blockedBackend });
+  const blockedController = new SandboxController({
+    windowsBackend: blockedBackend,
+    gtaContextRunner: fakeGameRunner(blockedBackend),
+    processContainerRunner: unavailableProcessContainer,
+  });
   const blocked = await blockedController.ensureRuntimeCertified();
   assert.equal(blocked.ok, false, 'certification must fail when the harmless sample never starts');
   assert.equal(blocked.executionCertified, false);

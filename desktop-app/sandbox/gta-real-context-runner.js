@@ -9,8 +9,8 @@ const { createHash } = require('crypto');
 const { validateTelemetry, evaluateTelemetry, MAX_RESULT_BYTES } = require('./telemetry-validator.js');
 const { behaviorDiff, buildCausalityMap, comparativeVerdict } = require('./game-context-analysis.js');
 
-const GTA_CONTEXT_VERSION = '1.0.0';
-const ALLOWED_SAMPLE_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js']);
+const GTA_CONTEXT_VERSION = '1.1.0';
+const ALLOWED_SAMPLE_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.asi', '.dll']);
 
 function xmlEscape(value) {
   return String(value)
@@ -43,6 +43,7 @@ class RealGtaContextRunner {
     gameExecutable = process.env.MALGUARD_GTA_V_EXE || 'GTA5.exe',
     observeSeconds = 12,
     gameStartupSeconds = 20,
+    gamePrepareSeconds = 900,
     sessionRoot = null,
     preserveSessions = false,
   } = {}) {
@@ -54,6 +55,7 @@ class RealGtaContextRunner {
     this.gameExecutable = String(gameExecutable || 'GTA5.exe');
     this.observeSeconds = Math.max(3, Math.min(60, Number(observeSeconds) || 12));
     this.gameStartupSeconds = Math.max(3, Math.min(90, Number(gameStartupSeconds) || 20));
+    this.gamePrepareSeconds = Math.max(60, Math.min(1800, Number(gamePrepareSeconds) || 900));
     this.sessionRoot = path.resolve(sessionRoot || path.join(os.tmpdir(), 'malguard-gta-context'));
     this.preserveSessions = preserveSessions === true;
     this.harnessSource = path.join(__dirname, 'windows-sandbox', 'gta-context-harness.ps1');
@@ -82,24 +84,27 @@ class RealGtaContextRunner {
       gameRoot: this.gameRoot,
       executableHostPath,
       gameExecutable: path.relative(this.gameRoot, executableHostPath),
+      stagingMode: 'sandbox-local-full-copy',
+      hostGameReadOnly: true,
     };
   }
 
-  buildWsbConfig({ inputHost, outputHost, sessionId, gameRoot }) {
+  buildWsbConfig({ inputHost, outputHost, sessionId, gameRoot, gameExecutableRelative }) {
     const ext = path.extname(inputHost.samplePath).toLowerCase();
-    const guestGameExe = 'C:\\MalGuardGame\\' + this.gameExecutable.replace(/[\\/]+/g, '\\');
     const command = [
       'powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned',
       '-File C:\\MalGuardInput\\gta-context-harness.ps1',
       '-SamplePath C:\\MalGuardInput\\sample' + ext,
-      '-GameExecutable ' + `"${guestGameExe}"`,
+      '-GameSourceRoot "C:\\MalGuardGameSource"',
+      '-GameExecutableRelative ' + `"${String(gameExecutableRelative).replace(/"/g, '')}"`,
       '-OutputPath C:\\MalGuardOutput\\result.json',
       '-SessionId ' + sessionId,
       '-ObserveSeconds ' + this.observeSeconds,
       '-GameStartupSeconds ' + this.gameStartupSeconds,
+      '-GamePrepareSeconds ' + this.gamePrepareSeconds,
     ].join(' ');
 
-    return `<?xml version="1.0" encoding="utf-8"?>\n<Configuration>\n  <VGpu>Enable</VGpu>\n  <Networking>Disable</Networking>\n  <AudioInput>Disable</AudioInput>\n  <VideoInput>Disable</VideoInput>\n  <PrinterRedirection>Disable</PrinterRedirection>\n  <ClipboardRedirection>Disable</ClipboardRedirection>\n  <ProtectedClient>Enable</ProtectedClient>\n  <MemoryInMB>4096</MemoryInMB>\n  <MappedFolders>\n    <MappedFolder><HostFolder>${xmlEscape(inputHost.dir)}</HostFolder><SandboxFolder>C:\\MalGuardInput</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>\n    <MappedFolder><HostFolder>${xmlEscape(gameRoot)}</HostFolder><SandboxFolder>C:\\MalGuardGame</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>\n    <MappedFolder><HostFolder>${xmlEscape(outputHost)}</HostFolder><SandboxFolder>C:\\MalGuardOutput</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>\n  </MappedFolders>\n  <LogonCommand><Command>${xmlEscape(command)}</Command></LogonCommand>\n</Configuration>\n`;
+    return `<?xml version="1.0" encoding="utf-8"?>\n<Configuration>\n  <VGpu>Enable</VGpu>\n  <Networking>Disable</Networking>\n  <AudioInput>Disable</AudioInput>\n  <VideoInput>Disable</VideoInput>\n  <PrinterRedirection>Disable</PrinterRedirection>\n  <ClipboardRedirection>Disable</ClipboardRedirection>\n  <ProtectedClient>Enable</ProtectedClient>\n  <MemoryInMB>4096</MemoryInMB>\n  <MappedFolders>\n    <MappedFolder><HostFolder>${xmlEscape(inputHost.dir)}</HostFolder><SandboxFolder>C:\\MalGuardInput</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>\n    <MappedFolder><HostFolder>${xmlEscape(gameRoot)}</HostFolder><SandboxFolder>C:\\MalGuardGameSource</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>\n    <MappedFolder><HostFolder>${xmlEscape(outputHost)}</HostFolder><SandboxFolder>C:\\MalGuardOutput</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>\n  </MappedFolders>\n  <LogonCommand><Command>${xmlEscape(command)}</Command></LogonCommand>\n</Configuration>\n`;
   }
 
   async _prepareSession(samplePath, expectedIdentity, config) {
@@ -144,8 +149,9 @@ class RealGtaContextRunner {
       outputHost: outputDir,
       sessionId,
       gameRoot: config.gameRoot,
+      gameExecutableRelative: config.gameExecutable,
     }), { flag: 'wx', mode: 0o600 });
-    return { sessionId, root, inputDir, outputDir, wsbPath, sampleSha256: sha256 };
+    return { sessionId, root, inputDir, outputDir, wsbPath, sampleSha256: sha256, sampleExtension: ext };
   }
 
   async _readResult(resultPath, sessionId) {
@@ -159,7 +165,7 @@ class RealGtaContextRunner {
     catch (_) { return { ok: false, code: 'GTA_CONTEXT_RESULT_JSON_INVALID' }; }
     const validated = validateTelemetry(parsed, sessionId);
     if (!validated.ok) return validated;
-    if (!parsed.gameContext || parsed.gameContext.realGame !== true || parsed.gameContext.fixtureStarted !== true) {
+    if (!parsed.gameContext || parsed.gameContext.realGame !== true || parsed.gameContext.fixtureStarted !== true || parsed.gameContext.hostGameReadOnly !== true) {
       return { ok: false, code: 'REAL_GTA_CONTEXT_NOT_PROVEN' };
     }
     validated.telemetry.gameContext = parsed.gameContext;
@@ -214,6 +220,20 @@ class RealGtaContextRunner {
             if (checked.code === 'GTA_CONTEXT_RESULT_JSON_INVALID') return;
             return finish({ ok: false, verdict: 'inconclusive', code: checked.code, backend: caps, sampleSha256: session.sampleSha256, gameContext: config });
           }
+          const execution = checked.telemetry.execution || {};
+          if (execution.attempted !== true || execution.started !== true) {
+            return finish({
+              ok: false,
+              verdict: 'inconclusive',
+              code: session.sampleExtension === '.asi' || session.sampleExtension === '.dll'
+                ? 'GTA_PLUGIN_LOAD_NOT_PROVEN'
+                : 'GTA_CONTEXT_SAMPLE_EXECUTION_NOT_PROVEN',
+              backend: caps,
+              sampleSha256: session.sampleSha256,
+              telemetry: checked.telemetry,
+              gameContext: { ...config, proven: true, realGame: true },
+            });
+          }
           const assessment = evaluateTelemetry(checked.telemetry);
           const diff = behaviorDiff({ execution: {}, baselineProcesses: [], finalProcesses: [], recentFiles: [] }, checked.telemetry);
           const causality = buildCausalityMap({ neutralTelemetry: null, gameTelemetry: checked.telemetry, diff });
@@ -223,7 +243,7 @@ class RealGtaContextRunner {
             verdict,
             releaseGrade: true,
             sandboxLaunched: true,
-            sampleExecutionStarted: checked.telemetry.execution.started === true,
+            sampleExecutionStarted: true,
             backend: caps,
             sampleSha256: session.sampleSha256,
             telemetry: checked.telemetry,
@@ -231,7 +251,7 @@ class RealGtaContextRunner {
             gameContextDiff: diff,
             causality,
             gameContext: { ...config, proven: true, realGame: true },
-            note: 'Real GTA context was observed inside Windows Sandbox. Lack of suspicious behavior never proves SAFE by itself.',
+            note: 'Real GTA context was observed inside Windows Sandbox using a sandbox-local writable clone. The host GTA installation remained read-only. Lack of suspicious behavior never proves SAFE by itself.',
           });
         } catch (_) {}
       }, 250);
@@ -243,7 +263,7 @@ class RealGtaContextRunner {
         backend: caps,
         sampleSha256: session.sampleSha256,
         gameContext: config,
-      }), Math.max(45000, (this.gameStartupSeconds + this.observeSeconds + 15) * 1000));
+      }), Math.max(120000, (this.gamePrepareSeconds + this.gameStartupSeconds + this.observeSeconds + 30) * 1000));
       child.once('error', error => finish({
         ok: false,
         verdict: 'inconclusive',
