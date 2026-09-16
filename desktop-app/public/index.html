@@ -79,9 +79,9 @@
       </details>
 
       <h2>Secure Sandbox compatibility</h2>
-      <p class="muted">Plus and Pro execute suspicious files only inside an approved isolated Windows Sandbox. If this PC is not ready, MalGuard keeps the file protected instead of falling back to unsafe execution.</p>
-      <button id="finalSandboxTest">Check Sandbox compatibility</button>
-      <p id="finalSandboxSummary" class="health-card health-checking">Sandbox compatibility has not been checked yet.</p>
+      <p class="muted">Plus and Pro execute suspicious files only inside an approved isolated Windows Sandbox. If this PC is not ready, MalGuard keeps the file protected instead of falling back to unsafe execution. On first launch MalGuard also runs a harmless execution probe inside the real Sandbox before enabling behavioral execution.</p>
+      <button id="finalSandboxTest">Re-check real Sandbox execution</button>
+      <p id="finalSandboxSummary" class="health-card health-checking">Real Sandbox execution has not been verified yet.</p>
       <details id="finalSandboxDiagnostics" class="diagnostics" hidden>
         <summary>Advanced diagnostics</summary>
         <pre id="finalSandboxOut">No diagnostic data yet.</pre>
@@ -89,5 +89,6 @@
     </section>
   </main>
   <script src="/app.js"></script>
+  <script src="/sandbox-first-run.js"></script>
 </body>
 </html>

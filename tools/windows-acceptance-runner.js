@@ -33,18 +33,12 @@ async function writeJsonAtomic(target, value) {
     containmentProbePath: path.resolve(args.probe),
     preserveSessions: false,
   });
-  const controller = new SandboxController({
-    windowsBackend: backend,
-    // This acceptance runner NEVER detonates a sample. It exercises only the
-    // built-in synthetic controller probe plus the native/Windows Sandbox
-    // isolation self-tests.
-    allowExperimentalDetonation: false,
-  });
+  const controller = new SandboxController({ windowsBackend: backend });
 
   const startedAt = new Date().toISOString();
   const selfTest = await controller.selfTest();
   const report = {
-    schemaVersion: '1.0.0',
+    schemaVersion: '1.1.0',
     kind: 'malguard-windows-sandbox-acceptance',
     startedAt,
     completedAt: new Date().toISOString(),
@@ -57,11 +51,12 @@ async function writeJsonAtomic(target, value) {
     safety: {
       untrustedSamplesExecuted: false,
       arbitraryExecutableAccepted: false,
-      experimentalDetonationEnabled: false,
-      note: 'Synthetic containment/isolation probes only.',
+      harmlessSandboxExecutionProbe: true,
+      harmlessExecutionProbePassed: selfTest.executionCertified === true,
+      note: 'Synthetic containment/isolation checks plus one built-in harmless .cmd execution probe inside Windows Sandbox only.',
     },
     selfTest,
-    pass: selfTest.releaseReady === true,
+    pass: selfTest.releaseReady === true && selfTest.executionCertified === true,
   };
 
   if (args.report) await writeJsonAtomic(args.report, report);
@@ -69,7 +64,7 @@ async function writeJsonAtomic(target, value) {
   process.exit(report.pass ? 0 : 2);
 })().catch((error) => {
   const report = {
-    schemaVersion: '1.0.0',
+    schemaVersion: '1.1.0',
     kind: 'malguard-windows-sandbox-acceptance',
     pass: false,
     fatalError: error && error.message ? error.message : String(error),

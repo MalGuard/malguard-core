@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const path = require('path');
 
-const PIPELINE_VERSION = '1.1.0';
+const PIPELINE_VERSION = '1.2.0';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
@@ -24,8 +24,16 @@ function shouldSandbox(verdict) {
   return verdict === 'suspicious' || verdict === 'inconclusive';
 }
 
+function sandboxExecutionProven(sandboxResult) {
+  return !!(sandboxResult
+    && sandboxResult.ok === true
+    && sandboxResult.sandboxLaunched === true
+    && sandboxResult.sampleExecutionStarted === true);
+}
+
 function mergeSandboxVerdict(localVerdict, sandboxResult) {
   const local = normalizeVerdict(localVerdict);
+  if (!sandboxExecutionProven(sandboxResult)) return local;
   const sandboxVerdict = normalizeVerdict(sandboxResult && sandboxResult.verdict);
   if (local === 'malicious' || sandboxVerdict === 'malicious') return 'malicious';
   if (local === 'suspicious') return 'suspicious';
@@ -36,11 +44,12 @@ function mergeSandboxVerdict(localVerdict, sandboxResult) {
 }
 
 function directSandboxVerdict(sandboxResult) {
+  if (!sandboxExecutionProven(sandboxResult)) return 'inconclusive';
   const verdict = normalizeVerdict(sandboxResult && sandboxResult.verdict);
   if (verdict === 'malicious' || verdict === 'suspicious') return verdict;
   // A direct Pro sandbox has no normal static scan behind it. SAFE is accepted only
-  // from a backend that explicitly declares release-grade behavioral assurance.
-  if (verdict === 'safe' && sandboxResult && sandboxResult.releaseGrade === true) return 'safe';
+  // from a release-grade backend with proof that Windows Sandbox and the sample started.
+  if (verdict === 'safe' && sandboxResult.releaseGrade === true) return 'safe';
   return 'inconclusive';
 }
 
@@ -131,6 +140,8 @@ class ModelScanPipelineManager {
         verdict: 'inconclusive',
         completionState: 'failed_closed',
         sandboxRequested: session.model === 'pro',
+        sandboxStarted: false,
+        sampleExecutionStarted: false,
         error: session.error,
       };
     });
@@ -227,10 +238,20 @@ class ModelScanPipelineManager {
     this._emit(session, 'sandbox_analysis', 'running', 'Sending sample to isolated Sandbox backend');
     const sandboxResult = await this.sandbox.analyzeUntrustedSample(session.filePath);
     session.sandboxResult = clone(sandboxResult);
+    const sandboxStarted = !!(sandboxResult && sandboxResult.sandboxLaunched === true);
+    const sampleExecutionStarted = !!(sandboxResult && sandboxResult.sampleExecutionStarted === true);
+    const executionProven = sandboxExecutionProven(sandboxResult);
 
-    if (!sandboxResult || sandboxResult.ok !== true) {
-      this._emit(session, 'sandbox_analysis', 'blocked', 'Sandbox analysis could not complete; keeping fail-closed result', {
-        code: sandboxResult && sandboxResult.code ? sandboxResult.code : 'SANDBOX_UNAVAILABLE',
+    if (!executionProven) {
+      const code = sandboxResult && sandboxResult.code
+        ? sandboxResult.code
+        : sandboxResult && sandboxResult.ok === true
+          ? 'SANDBOX_EXECUTION_PROOF_MISSING'
+          : 'SANDBOX_UNAVAILABLE';
+      this._emit(session, 'sandbox_analysis', 'blocked', 'Sandbox analysis could not prove real isolated execution; keeping fail-closed result', {
+        code,
+        sandboxStarted,
+        sampleExecutionStarted,
       });
       const finalVerdict = localVerdict === 'suspicious' ? 'suspicious' : 'inconclusive';
       session.finalResult = {
@@ -238,6 +259,8 @@ class ModelScanPipelineManager {
         verdict: finalVerdict,
         completionState: 'sandbox_unavailable_fail_closed',
         sandboxRequested: true,
+        sandboxStarted,
+        sampleExecutionStarted,
         sandboxCompleted: false,
         localResult: clone(local),
         sandboxResult: clone(sandboxResult || { ok: false, verdict: 'inconclusive' }),
@@ -247,21 +270,27 @@ class ModelScanPipelineManager {
         verdict: finalVerdict,
         model: 'plus',
         sandboxRequired: true,
+        sandboxStarted,
+        sampleExecutionStarted,
         sandboxCompleted: false,
       });
       return;
     }
 
     const finalVerdict = mergeSandboxVerdict(localVerdict, sandboxResult);
-    this._emit(session, 'sandbox_analysis', 'completed', 'Sandbox behavior analysis completed', {
+    this._emit(session, 'sandbox_analysis', 'completed', 'Sandbox behavior analysis completed with real execution proof', {
       verdict: normalizeVerdict(sandboxResult.verdict),
       backend: sandboxResult.backend && sandboxResult.backend.backend ? sandboxResult.backend.backend : null,
+      sandboxStarted: true,
+      sampleExecutionStarted: true,
     });
     session.finalResult = {
       model: 'plus',
       verdict: finalVerdict,
       completionState: 'complete',
       sandboxRequested: true,
+      sandboxStarted: true,
+      sampleExecutionStarted: true,
       sandboxCompleted: true,
       localResult: clone(local),
       sandboxResult: clone(sandboxResult),
@@ -271,6 +300,8 @@ class ModelScanPipelineManager {
       verdict: finalVerdict,
       model: 'plus',
       sandboxRequired: true,
+      sandboxStarted: true,
+      sampleExecutionStarted: true,
       sandboxCompleted: true,
     });
   }
@@ -289,11 +320,13 @@ class ModelScanPipelineManager {
         completionState: 'preflight_failed_closed',
         sandboxRequested: true,
         sandboxStarted: false,
+        sampleExecutionStarted: false,
+        sandboxCompleted: false,
         preflight: clone(preflight || { ok: false, code: 'SANDBOX_PREFLIGHT_FAILED' }),
       };
       session.state = 'completed';
       this._emit(session, 'final_verdict', 'completed', 'Final verdict: INCONCLUSIVE', {
-        verdict: 'inconclusive', model: 'pro', sandboxCompleted: false,
+        verdict: 'inconclusive', model: 'pro', sandboxStarted: false, sampleExecutionStarted: false, sandboxCompleted: false,
       });
       return;
     }
@@ -306,33 +339,46 @@ class ModelScanPipelineManager {
     this._emit(session, 'sandbox_analysis', 'running', 'Sending sample directly to isolated Sandbox');
     const sandboxResult = await this.sandbox.analyzeUntrustedSample(session.filePath);
     session.sandboxResult = clone(sandboxResult);
+    const sandboxStarted = !!(sandboxResult && sandboxResult.sandboxLaunched === true);
+    const sampleExecutionStarted = !!(sandboxResult && sandboxResult.sampleExecutionStarted === true);
+    const executionProven = sandboxExecutionProven(sandboxResult);
 
-    if (!sandboxResult || sandboxResult.ok !== true) {
-      this._emit(session, 'sandbox_analysis', 'blocked', 'Direct Sandbox analysis could not complete; result remains fail-closed', {
-        code: sandboxResult && sandboxResult.code ? sandboxResult.code : 'SANDBOX_UNAVAILABLE',
+    if (!executionProven) {
+      const code = sandboxResult && sandboxResult.code
+        ? sandboxResult.code
+        : sandboxResult && sandboxResult.ok === true
+          ? 'SANDBOX_EXECUTION_PROOF_MISSING'
+          : 'SANDBOX_UNAVAILABLE';
+      this._emit(session, 'sandbox_analysis', 'blocked', 'Direct Sandbox analysis could not prove real isolated execution; result remains fail-closed', {
+        code,
+        sandboxStarted,
+        sampleExecutionStarted,
       });
       session.finalResult = {
         model: 'pro',
         verdict: 'inconclusive',
         completionState: 'sandbox_unavailable_fail_closed',
         sandboxRequested: true,
-        sandboxStarted: true,
+        sandboxStarted,
+        sampleExecutionStarted,
         sandboxCompleted: false,
         preflight: clone(preflight),
         sandboxResult: clone(sandboxResult || { ok: false, verdict: 'inconclusive' }),
       };
       session.state = 'completed';
       this._emit(session, 'final_verdict', 'completed', 'Final verdict: INCONCLUSIVE', {
-        verdict: 'inconclusive', model: 'pro', sandboxCompleted: false,
+        verdict: 'inconclusive', model: 'pro', sandboxStarted, sampleExecutionStarted, sandboxCompleted: false,
       });
       return;
     }
 
     const finalVerdict = directSandboxVerdict(sandboxResult);
-    this._emit(session, 'sandbox_analysis', 'completed', 'Direct Sandbox behavior analysis completed', {
+    this._emit(session, 'sandbox_analysis', 'completed', 'Direct Sandbox behavior analysis completed with real execution proof', {
       verdict: normalizeVerdict(sandboxResult.verdict),
       releaseGrade: sandboxResult.releaseGrade === true,
       backend: sandboxResult.backend && sandboxResult.backend.backend ? sandboxResult.backend.backend : null,
+      sandboxStarted: true,
+      sampleExecutionStarted: true,
     });
     session.finalResult = {
       model: 'pro',
@@ -340,13 +386,14 @@ class ModelScanPipelineManager {
       completionState: 'complete',
       sandboxRequested: true,
       sandboxStarted: true,
+      sampleExecutionStarted: true,
       sandboxCompleted: true,
       preflight: clone(preflight),
       sandboxResult: clone(sandboxResult),
     };
     session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()}`, {
-      verdict: finalVerdict, model: 'pro', sandboxCompleted: true,
+      verdict: finalVerdict, model: 'pro', sandboxStarted: true, sampleExecutionStarted: true, sandboxCompleted: true,
     });
   }
 }
@@ -366,6 +413,7 @@ module.exports = {
   normalizeModel,
   normalizeVerdict,
   shouldSandbox,
+  sandboxExecutionProven,
   mergeSandboxVerdict,
   directSandboxVerdict,
 };
