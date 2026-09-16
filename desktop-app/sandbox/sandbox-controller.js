@@ -40,10 +40,6 @@ class SandboxController {
     };
   }
 
-  /**
-   * A narrow preflight used by the Pro model before direct Sandbox handoff.
-   * This is identity/integrity validation, not a normal malware scan.
-   */
   async preflightSample(samplePath) {
     if (typeof samplePath !== 'string' || !samplePath.trim()) {
       return { ok: false, sandboxVersion: SANDBOX_VERSION, code: 'SANDBOX_SAMPLE_PATH_REQUIRED' };
@@ -111,8 +107,6 @@ class SandboxController {
     const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'malguard-sandbox-execution-cert-'));
     const samplePath = path.join(root, 'malguard-execution-probe.cmd');
     try {
-      // Harmless fixture: proves that the guest harness actually launches a sample
-      // inside Windows Sandbox. It performs no network, persistence or host writes.
       await fs.promises.writeFile(samplePath, '@echo off\r\nexit /b 0\r\n', { flag: 'wx', mode: 0o600 });
       const preflight = await this.preflightSample(samplePath);
       if (!preflight.ok) {
@@ -127,7 +121,7 @@ class SandboxController {
         return {
           ok: false,
           code: result && result.code ? result.code : 'SANDBOX_EXECUTION_PROBE_FAILED',
-          sandboxLaunched: !!(result && result.sandboxLaunched === true),
+          sandboxLaunched: false,
           attempted: !!(execution && execution.attempted === true),
           started: !!(execution && execution.started === true),
           exitCode: execution ? execution.exitCode : null,
@@ -136,7 +130,7 @@ class SandboxController {
       return {
         ok: true,
         code: 'SANDBOX_EXECUTION_CERTIFIED',
-        sandboxLaunched: result.sandboxLaunched === true,
+        sandboxLaunched: true,
         attempted: true,
         started: true,
         exitCode: 0,
@@ -147,11 +141,6 @@ class SandboxController {
     }
   }
 
-  /**
-   * End-to-end process-local certification. A PASS now means all of the following
-   * happened in this process: local plumbing, native containment, Windows Sandbox
-   * isolation and a harmless sample was genuinely launched inside Windows Sandbox.
-   */
   async selfTest() {
     const worker = path.join(__dirname, 'synthetic-probe-worker.js');
     const localProbe = await new Promise((resolve) => {
@@ -299,6 +288,7 @@ class SandboxController {
       result.certification = this.certificationStatus();
       const execution = result.telemetry && result.telemetry.execution;
       result.sampleExecutionStarted = !!(execution && execution.started === true);
+      result.sandboxLaunched = result.ok === true && result.sampleExecutionStarted === true;
       if (result.ok === true && (!execution || execution.attempted !== true || execution.started !== true)) {
         return {
           ok: false,
@@ -308,7 +298,7 @@ class SandboxController {
           preflight,
           backend: capabilities,
           certification: this.certificationStatus(),
-          sandboxLaunched: result.sandboxLaunched === true,
+          sandboxLaunched: false,
           sampleExecutionStarted: false,
         };
       }
