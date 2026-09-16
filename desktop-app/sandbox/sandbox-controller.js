@@ -8,9 +8,9 @@ const { fork } = require('child_process');
 const { WindowsSandboxBackend } = require('./windows-sandbox-backend.js');
 const { RealGtaContextRunner } = require('./gta-real-context-runner.js');
 
-const SANDBOX_VERSION = '0.7.0';
+const SANDBOX_VERSION = '0.8.0';
 const MAX_SAMPLE_BYTES = 64 * 1024 * 1024;
-const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js']);
+const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.asi', '.dll']);
 
 class SandboxController {
   constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null, gtaContextRunner = null } = {}) {
