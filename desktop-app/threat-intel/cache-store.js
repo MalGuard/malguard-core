@@ -70,6 +70,33 @@ class ThreatIntelCache {
     for (let i = 0; i < remove; i++) this.entries.delete(sorted[i].hash);
   }
 
+  _toEntry(result, now) {
+    if (!result || !SHA256_RE.test(String(result.hash || '').toLowerCase())) return null;
+    if (result.status !== 'known_malicious' && result.status !== 'not_found') return null;
+    const hash = result.hash.toLowerCase();
+    const ttl = result.status === 'known_malicious' ? this.foundTtlMs : this.notFoundTtlMs;
+    const safeMetadata = result.status === 'known_malicious' ? {
+      signature: typeof result.signature === 'string' ? result.signature : null,
+      firstSeen: typeof result.firstSeen === 'string' ? result.firstSeen : null,
+      lastSeen: typeof result.lastSeen === 'string' ? result.lastSeen : null,
+      fileType: typeof result.fileType === 'string' ? result.fileType : null,
+      fileName: typeof result.fileName === 'string' ? result.fileName : null,
+      fileSize: Number.isSafeInteger(result.fileSize) && result.fileSize >= 0 ? result.fileSize : null,
+      tags: Array.isArray(result.tags) ? result.tags.filter(x => typeof x === 'string').slice(0, 32) : [],
+      intelligence: result.intelligence && typeof result.intelligence === 'object' ? {
+        clamav: typeof result.intelligence.clamav === 'string' ? result.intelligence.clamav : null,
+      } : null,
+    } : null;
+    return {
+      hash,
+      provider: 'malwarebazaar',
+      status: result.status,
+      cachedAt: now,
+      expiresAt: now + ttl,
+      metadata: safeMetadata,
+    };
+  }
+
   async get(hash, now = Date.now()) {
     await this.load();
     const normalized = String(hash || '').toLowerCase();
@@ -85,30 +112,26 @@ class ThreatIntelCache {
 
   async put(result, now = Date.now()) {
     await this.load();
-    if (!result || !SHA256_RE.test(String(result.hash || '').toLowerCase())) return { ok: false, reason: 'invalid_hash' };
-    if (result.status !== 'known_malicious' && result.status !== 'not_found') return { ok: false, reason: 'non_cacheable_status' };
-    const hash = result.hash.toLowerCase();
-    const ttl = result.status === 'known_malicious' ? this.foundTtlMs : this.notFoundTtlMs;
-    const safeMetadata = result.status === 'known_malicious' ? {
-      signature: typeof result.signature === 'string' ? result.signature : null,
-      firstSeen: typeof result.firstSeen === 'string' ? result.firstSeen : null,
-      lastSeen: typeof result.lastSeen === 'string' ? result.lastSeen : null,
-      fileType: typeof result.fileType === 'string' ? result.fileType : null,
-      tags: Array.isArray(result.tags) ? result.tags.filter(x => typeof x === 'string').slice(0, 32) : [],
-      intelligence: result.intelligence && typeof result.intelligence === 'object' ? {
-        clamav: typeof result.intelligence.clamav === 'string' ? result.intelligence.clamav : null,
-      } : null,
-    } : null;
-    this.entries.set(hash, {
-      hash,
-      provider: 'malwarebazaar',
-      status: result.status,
-      cachedAt: now,
-      expiresAt: now + ttl,
-      metadata: safeMetadata,
-    });
+    const entry = this._toEntry(result, now);
+    if (!entry) return { ok: false, reason: 'non_cacheable_result' };
+    this.entries.set(entry.hash, entry);
     this._prune(now);
     return this.save();
+  }
+
+  async putMany(results, now = Date.now()) {
+    await this.load();
+    if (!Array.isArray(results) || results.length < 1) return { ok: true, entries: this.entries.size, added: 0 };
+    const pending = [];
+    for (const result of results) {
+      const entry = this._toEntry(result, now);
+      if (!entry) return { ok: false, reason: 'non_cacheable_batch_result', entries: this.entries.size, added: 0 };
+      pending.push(entry);
+    }
+    for (const entry of pending) this.entries.set(entry.hash, entry);
+    this._prune(now);
+    const saved = await this.save();
+    return { ...saved, added: pending.length };
   }
 
   async save() {
