@@ -54,9 +54,10 @@ const { validateTelemetry } = require('../desktop-app/sandbox/telemetry-validato
     assert.deepEqual(policy.filesystem.readonlyPaths, [fakeSession.inputDir]);
     assert(policy.filesystem.readwritePaths.includes(fakeSession.runtimeRoot));
     assert(policy.filesystem.readwritePaths.includes(fakeSession.outputDir));
-    assert.equal(policy.network.egress.default, 'deny');
-    assert.equal(policy.network.ingress.default, 'deny');
-    assert.equal(policy.network.ingress.hostLoopback, 'deny');
+    assert.equal(policy.network.allowOutbound, false);
+    assert.equal(policy.network.allowLocalNetwork, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(policy.network, 'egress'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(policy.network, 'ingress'), false);
 
     const telemetry = {
       schemaVersion: '1.1.0',
@@ -119,7 +120,7 @@ const { validateTelemetry } = require('../desktop-app/sandbox/telemetry-validato
     assert.equal(result.sandboxLaunched, true);
     assert.equal(result.sampleExecutionStarted, true);
 
-    console.log('✓ GTA ProcessContainer isolation: no nested virtualization dependency, deny-by-default network, ProcessContainer-first routing, and telemetry policy PASS');
+    console.log('✓ GTA ProcessContainer isolation: no nested virtualization dependency, live-validated MXC network deny policy, ProcessContainer-first routing, and telemetry policy PASS');
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }
