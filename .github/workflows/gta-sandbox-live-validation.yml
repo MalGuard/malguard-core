@@ -1,0 +1,115 @@
+name: MalGuard GTA Sandbox Live Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      gta_root:
+        description: 'Path to an existing legitimate GTA V installation on the self-hosted validation machine'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  gta-sandbox-live-validation:
+    runs-on: [self-hosted, windows, malguard-sandbox, gta-v]
+    timeout-minutes: 35
+    env:
+      MALGUARD_GTA_V_ROOT: ${{ inputs.gta_root || vars.MALGUARD_GTA_V_ROOT }}
+      MALGUARD_GTA_V_EXE: GTA5.exe
+
+    steps:
+      - name: Checkout exact validation commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Preserve repository bytes
+        shell: pwsh
+        run: |
+          git config --local core.autocrlf false
+          git -c core.autocrlf=false reset --hard HEAD
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Validate real GTA and Windows Sandbox host prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:MALGUARD_GTA_V_ROOT)) { throw 'MALGUARD_GTA_V_ROOT is not configured' }
+          $root = [IO.Path]::GetFullPath($env:MALGUARD_GTA_V_ROOT)
+          $game = Join-Path $root 'GTA5.exe'
+          $sandbox = Join-Path $env:SystemRoot 'System32\WindowsSandbox.exe'
+          if (-not (Test-Path -LiteralPath $game -PathType Leaf)) { throw 'GTA5.exe was not found in the configured GTA root' }
+          if (-not (Test-Path -LiteralPath $sandbox -PathType Leaf)) { throw 'WindowsSandbox.exe is unavailable' }
+          $feature = Get-WindowsOptionalFeature -Online -FeatureName 'Containers-DisposableClientVM' -ErrorAction Stop
+          if ($feature.State -ne 'Enabled') { throw "Windows Sandbox feature is not enabled: $($feature.State)" }
+
+          # The benign .asi acceptance fixture must be loaded by a pre-existing legitimate ASI loader.
+          # This workflow never downloads or installs GTA, ScriptHookV, an ASI loader, or any third-party binary.
+          $asiLoader = Join-Path $root 'dinput8.dll'
+          if (-not (Test-Path -LiteralPath $asiLoader -PathType Leaf)) { throw 'No pre-existing dinput8.dll ASI loader is present; live ASI module-load validation cannot be proven' }
+
+          $cl = Get-Command cl.exe -ErrorAction SilentlyContinue
+          if (-not $cl) { throw 'MSVC cl.exe is required to build the local benign acceptance fixture' }
+          Write-Host "Validation commit: $env:GITHUB_SHA"
+          Write-Host "GTA root configured: yes"
+          Write-Host "Windows Sandbox: enabled"
+          Write-Host "ASI loader present: yes"
+          Write-Host "Compiler: $($cl.Source)"
+
+      - name: Build local benign ASI fixture
+        id: fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outDir = Join-Path $env:RUNNER_TEMP 'malguard-gta-benign-fixture'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $dll = Join-Path $outDir 'malguard-benign-probe.dll'
+          $asi = Join-Path $outDir 'malguard-benign-probe.asi'
+          Push-Location $outDir
+          try {
+            & cl.exe /nologo /LD "$env:GITHUB_WORKSPACE\tests\fixtures\gta-benign-plugin.c" /link "/OUT:$dll"
+            if ($LASTEXITCODE -ne 0) { throw "benign fixture compile failed with exit code $LASTEXITCODE" }
+          } finally { Pop-Location }
+          Move-Item -LiteralPath $dll -Destination $asi -Force
+          if (-not (Test-Path -LiteralPath $asi -PathType Leaf)) { throw 'benign ASI fixture was not produced' }
+          "asi_path=$asi" >> $env:GITHUB_OUTPUT
+
+      - name: Run real GTA sandbox module-load acceptance
+        id: live
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $report = Join-Path $env:RUNNER_TEMP 'malguard-gta-sandbox-live-validation.json'
+          node .\tools\gta-live-validation.js '${{ steps.fixture.outputs.asi_path }}' $report
+          $code = $LASTEXITCODE
+          "report_path=$report" >> $env:GITHUB_OUTPUT
+          "exit_code=$code" >> $env:GITHUB_OUTPUT
+          if (Test-Path -LiteralPath $report) {
+            Write-Host '--- GTA sandbox live validation evidence ---'
+            Get-Content -LiteralPath $report -Raw
+          }
+          exit 0
+
+      - name: Upload GTA sandbox validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gta-sandbox-live-validation
+          path: ${{ steps.live.outputs.report_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce evidence-backed result
+        shell: pwsh
+        run: |
+          $code = [int]'${{ steps.live.outputs.exit_code }}'
+          if ($code -ne 0) {
+            throw "Real GTA sandbox module-load acceptance did not pass. Validation exit code: $code"
+          }
