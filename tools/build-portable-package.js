@@ -3,11 +3,13 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const desktopVersion = fs.readFileSync(path.join(ROOT, 'DESKTOP-VERSION'), 'utf8').trim();
 const OUT = path.join(DIST, `malguard-desktop-${desktopVersion}`);
+const SOURCE_COMMIT_RE = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 const ROOT_FILES = [
   'LICENSE',
@@ -34,6 +36,28 @@ const FORBIDDEN_BASENAMES = new Set([
   'abusech-auth.dpapi',
 ]);
 const FORBIDDEN_EXTENSIONS = new Set(['.pem', '.p12', '.pfx', '.key']);
+
+function git(args) {
+  const result = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8', windowsHide: true });
+  if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${(result.stderr || '').trim()}`);
+  return result.stdout.trim();
+}
+
+function resolveSourceCommit() {
+  const envCommit = String(process.env.MALGUARD_SOURCE_COMMIT || process.env.GITHUB_SHA || '').trim().toLowerCase();
+  let head = '';
+  try { head = git(['rev-parse', 'HEAD']).toLowerCase(); } catch (_) {
+    if (!envCommit) throw new Error('Cannot establish source commit provenance; provide MALGUARD_SOURCE_COMMIT from a trusted build environment');
+  }
+  const sourceCommit = envCommit || head;
+  if (!SOURCE_COMMIT_RE.test(sourceCommit)) throw new Error('Invalid source commit provenance');
+  if (head && sourceCommit !== head) throw new Error(`Source commit provenance mismatch: expected ${sourceCommit}, checked out ${head}`);
+  if (head) {
+    const dirtyTracked = git(['status', '--porcelain', '--untracked-files=no']);
+    if (dirtyTracked) throw new Error('Refusing to build release package from a dirty tracked source tree');
+  }
+  return sourceCommit;
+}
 
 function rejectSecretLikePath(relativePath) {
   const base = path.basename(relativePath).toLowerCase();
@@ -87,6 +111,8 @@ function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
+const sourceCommit = resolveSourceCommit();
+
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -105,9 +131,10 @@ fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify(runtimePackage, 
 
 const preManifestFiles = walkFiles(OUT).sort();
 const manifest = {
-  schemaVersion: '1.0.0',
+  schemaVersion: '1.1.0',
   product: 'MalGuard Desktop',
   desktopVersion,
+  sourceCommit,
   entrypoint: 'desktop-app/server.js',
   node: '>=20',
   fileCount: preManifestFiles.length + 2,
@@ -121,4 +148,5 @@ const sums = hashedFiles.map(file => `${sha256(path.join(OUT, file))}  ${file}`)
 fs.writeFileSync(path.join(OUT, 'SHA256SUMS.txt'), sums, 'utf8');
 
 console.log(`Portable package created: ${path.relative(ROOT, OUT)}`);
+console.log(`Source commit: ${sourceCommit}`);
 console.log(`Runtime files: ${manifest.fileCount}`);
