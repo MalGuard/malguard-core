@@ -51,7 +51,7 @@ jobs:
 
       - name: Install pinned Microsoft MXC SDK
         shell: pwsh
-        run: npm install --no-save --package-lock=false @microsoft/mxc-sdk@0.8.0
+        run: npm install --no-save --package-lock=false --ignore-scripts @microsoft/mxc-sdk@0.8.0
 
       - name: Build static ARM64 harmless fixture
         shell: pwsh
