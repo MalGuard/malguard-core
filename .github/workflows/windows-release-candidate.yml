@@ -35,7 +35,24 @@ jobs:
       - name: Checkout exact source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          fetch-depth: 2
           persist-credentials: false
+
+      - name: Enforce trusted main release source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          MALGUARD_PUSH_FORCED: ${{ github.event.forced }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:MALGUARD_PUSH_FORCED -eq 'true') {
+            throw 'Refusing to build a release artifact from a force-push to main.'
+          }
+          $parents = (git rev-list --parents -n 1 HEAD).Trim().Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+          if ($parents.Count -lt 3) {
+            throw 'Refusing to build a release artifact from a direct/single-parent main commit. A PR merge commit is required.'
+          }
+          Write-Host 'Trusted main source topology PASS: non-forced PR merge commit.'
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -74,6 +91,7 @@ jobs:
           node tests/sandbox-first-run-certification.test.js
           node tests/sandbox-telemetry.test.js
           node tests/workflow-supply-chain.test.js
+          node tests/public-release-policy.test.js
 
       - name: Build sealed Windows runtime package
         shell: pwsh
