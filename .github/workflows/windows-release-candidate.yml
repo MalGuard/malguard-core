@@ -4,11 +4,20 @@ on:
   pull_request:
     paths:
       - 'desktop-app/sandbox/**'
+      - 'desktop-app/update/**'
+      - 'desktop-app/integrity/**'
       - 'native/sandbox-containment-probe/**'
       - 'tests/sandbox-*.test.js'
+      - 'tests/secure-update.test.js'
+      - 'tests/release-trust.test.js'
+      - 'tests/runtime-package-integrity.test.js'
+      - 'tests/public-release-policy.test.js'
       - 'tests/run-all.js'
       - 'tools/build-portable-package.js'
       - 'tools/verify-release-candidate.js'
+      - 'tools/sign-release-candidate.js'
+      - 'tools/verify-signed-release.js'
+      - 'tools/verify-windows-authenticode.ps1'
       - '.github/workflows/windows-release-candidate.yml'
   push:
     branches:
@@ -83,13 +92,16 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $probe -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host "Native containment probe SHA-256: $hash"
 
-      - name: Run Sandbox hardening regressions
+      - name: Run Sandbox and release hardening regressions
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           node tests/sandbox-backend.test.js
           node tests/sandbox-first-run-certification.test.js
           node tests/sandbox-telemetry.test.js
+          node tests/secure-update.test.js
+          node tests/release-trust.test.js
+          node tests/runtime-package-integrity.test.js
           node tests/workflow-supply-chain.test.js
           node tests/public-release-policy.test.js
 
@@ -124,7 +136,37 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $name" | Set-Content -LiteralPath "$archive.sha256" -Encoding ascii
 
-      - name: Upload Windows release candidate
+      - name: Re-open and verify archived release candidate
+        shell: pwsh
+        env:
+          MALGUARD_SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
+          $name = "malguard-desktop-$version-windows-${{ matrix.arch }}.zip"
+          $archive = Join-Path (Get-Location) "dist/$name"
+          $sumPath = "$archive.sha256"
+          $expectedHash = ((Get-Content -LiteralPath $sumPath -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expectedHash -ne $actualHash) { throw 'archived release SHA-256 sidecar does not match the archive' }
+
+          $verifyRoot = Join-Path $env:RUNNER_TEMP "malguard-release-reopen-${{ matrix.arch }}"
+          Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $verifyRoot -Force | Out-Null
+          Expand-Archive -LiteralPath $archive -DestinationPath $verifyRoot -Force
+          $entries = @(Get-ChildItem -LiteralPath $verifyRoot -Force)
+          if ($entries.Count -ne 1 -or -not $entries[0].PSIsContainer) { throw 'release archive must contain exactly one package root directory' }
+          $packageRoot = $entries[0].FullName
+          $manifestPath = Join-Path $packageRoot 'PACKAGE-MANIFEST.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 're-opened release archive is missing PACKAGE-MANIFEST.json' }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          if ($manifest.sourceCommit -ne $env:MALGUARD_SOURCE_COMMIT) { throw 're-opened archive source commit does not match workflow SHA' }
+
+          node -e "const {verifyRuntimePackageIntegrity}=require('./desktop-app/integrity/runtime-integrity.js'); const r=verifyRuntimePackageIntegrity(process.argv[1],{requireSealed:true}); if(!r.ok||!r.sealed){console.error(r);process.exit(1)}; console.log('Re-opened archive runtime integrity PASS');" "$packageRoot"
+          if ($LASTEXITCODE -ne 0) { throw 're-opened release archive failed runtime integrity verification' }
+
+      - name: Upload trusted-main Windows release candidate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: malguard-windows-${{ matrix.arch }}-release-candidate
