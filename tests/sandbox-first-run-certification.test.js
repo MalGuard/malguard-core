@@ -68,7 +68,9 @@ class FakeReleaseGradeBackend {
   const certification = await controller.ensureRuntimeCertified();
   assert.equal(certification.ok, true, JSON.stringify(certification));
   assert.equal(certification.releaseReady, true);
+  assert.equal(certification.coreReady, true);
   assert.equal(certification.executionCertified, true);
+  assert.equal(certification.behavioralExecutionReady, true);
   assert.equal(certification.executionProbe.attempted, true);
   assert.equal(certification.executionProbe.started, true);
   assert.equal(certification.executionProbe.exitCode, 0);
@@ -83,7 +85,8 @@ class FakeReleaseGradeBackend {
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.sandboxLaunched, true);
     assert.equal(result.sampleExecutionStarted, true);
-    assert.equal(goodBackend.analyzeCalls.length, 2, 'customer scan must execute only after certification');
+    assert.equal(result.isolationProvider, 'windows-sandbox');
+    assert.equal(goodBackend.analyzeCalls.length, 2, 'customer scan must execute only after execution provider certification');
     assert.equal(path.resolve(goodBackend.analyzeCalls[1].samplePath), path.resolve(sample));
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true });
@@ -92,11 +95,28 @@ class FakeReleaseGradeBackend {
   const blockedBackend = new FakeReleaseGradeBackend({ startExecution: false });
   const blockedController = new SandboxController({ windowsBackend: blockedBackend });
   const blocked = await blockedController.ensureRuntimeCertified();
-  assert.equal(blocked.ok, false, 'certification must fail when the harmless sample never starts');
+  assert.equal(blocked.ok, true, 'portable isolation core must remain certifiable without Windows execution readiness');
+  assert.equal(blocked.coreReady, true);
+  assert.equal(blocked.releaseReady, true);
   assert.equal(blocked.executionCertified, false);
-  assert(blocked.blockers.some(value => /EXECUTION/i.test(value)), JSON.stringify(blocked.blockers));
+  assert.equal(blocked.behavioralExecutionReady, false);
+  assert(blocked.runtimeBlockers.some(value => /EXECUTION/i.test(value)), JSON.stringify(blocked.runtimeBlockers));
 
-  console.log('✓ Sandbox first-run certification: harmless sample execution is mandatory before customer detonation can run');
+  const blockedDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'malguard-provider-blocked-'));
+  try {
+    const sample = path.join(blockedDir, 'customer-sample.cmd');
+    await fs.promises.writeFile(sample, '@echo off\r\nexit /b 0\r\n');
+    const denied = await blockedController.analyzeUntrustedSample(sample);
+    assert.equal(denied.ok, false);
+    assert.equal(denied.verdict, 'inconclusive');
+    assert.equal(denied.code, 'WINDOWS_GUEST_EXECUTION_PROVIDER_UNAVAILABLE');
+    assert.equal(denied.sandboxLaunched, false);
+    assert.equal(denied.sampleExecutionStarted, false);
+  } finally {
+    await fs.promises.rm(blockedDir, { recursive: true, force: true });
+  }
+
+  console.log('✓ Sandbox certification: portable isolation core is independent while Windows detonation stays separately fail-closed');
 })().catch(error => {
   console.error(error.stack || error);
   process.exit(1);
