@@ -50,59 +50,68 @@ class FakeBackend {
 }
 
 (async () => {
-  const micro = new FakeBackend('microvm', { available: false });
+  // Normal Windows laptop: certified Windows Sandbox is the first choice.
+  const windows = new FakeBackend('windows-sandbox', { available: true, containment: true, isolation: true });
+  const micro = new FakeBackend('microvm', { available: true, containment: true, isolation: true });
   const portable = new FakeBackend('portable-vm', { available: true, containment: true, isolation: true });
-  const windows = new FakeBackend('windows-sandbox', { available: false });
-  const router = new IsolationBackendRouter({
+  const windowsFirst = new IsolationBackendRouter({
     microVmBackend: micro,
     portableVmBackend: portable,
     windowsSandboxBackend: windows,
-    prefer: 'microvm',
   });
+  const initial = await windowsFirst.capabilities();
+  assert.equal(initial.preferredBackend, 'windows-sandbox');
+  assert.deepEqual(initial.fallbackOrder, ['windows-sandbox', 'microvm', 'portable-vm']);
+  assert.equal(initial.requiresWindowsSandbox, false, 'Windows Sandbox must be optional, not a hard dependency');
+  assert.equal(initial.windowsSandboxOptional, true);
+  assert.equal((await windowsFirst.runContainmentSelfTest()).backend, 'windows-sandbox');
+  assert.equal((await windowsFirst.runIsolationSelfTest()).backend, 'windows-sandbox');
+  const winResult = await windowsFirst.analyze('synthetic.cmd');
+  assert.equal(winResult.ok, true);
+  assert.equal(winResult.backend, 'windows-sandbox');
+  assert.equal(micro.calls.length, 0, 'MalGuard VM should not be touched when Windows Sandbox is certified');
 
-  const before = await router.capabilities();
-  assert.equal(before.selectedBackend, 'portable-vm', 'portable VM must be selected when preferred MicroVM is unavailable');
-  assert.equal(before.alternatives.portableVm.requiresWindowsSandbox, false);
-  assert.equal(before.alternatives.portableVm.requiresVtxAmdV, false);
-  assert.equal(before.releaseGrade, false);
-
-  const containment = await router.runContainmentSelfTest();
-  assert.equal(containment.ok, true);
-  assert.equal(containment.backend, 'portable-vm');
-  const isolation = await router.runIsolationSelfTest();
-  assert.equal(isolation.ok, true);
-  assert.equal(isolation.backend, 'portable-vm');
-  const ready = await router.capabilities();
-  assert.equal(ready.selectedBackend, 'portable-vm');
-  assert.equal(ready.releaseGrade, true);
-  const result = await router.analyze('synthetic.cmd');
-  assert.equal(result.ok, true);
-  assert.equal(result.backend, 'portable-vm');
-
-  const brokenPortable = new FakeBackend('portable-vm', { available: true, containment: true, isolation: false });
-  const workingWindows = new FakeBackend('windows-sandbox', { available: true, containment: true, isolation: true });
-  const fallbackRouter = new IsolationBackendRouter({
+  // Windows Sandbox unavailable: fail over to the MalGuard-owned isolation stack.
+  const noWindows = new IsolationBackendRouter({
+    windowsSandboxBackend: new FakeBackend('windows-sandbox', { available: false }),
     microVmBackend: new FakeBackend('microvm', { available: false }),
-    portableVmBackend: brokenPortable,
-    windowsSandboxBackend: workingWindows,
-    prefer: 'portable-vm',
+    portableVmBackend: new FakeBackend('portable-vm', { available: true, containment: true, isolation: true }),
   });
-  assert.equal((await fallbackRouter.runContainmentSelfTest()).backend, 'portable-vm');
-  const fallbackIsolation = await fallbackRouter.runIsolationSelfTest();
-  assert.equal(fallbackIsolation.ok, true);
-  assert.equal(fallbackIsolation.backend, 'windows-sandbox', 'router must fail over instead of pretending a broken VM is certified');
+  const beforeFallback = await noWindows.capabilities();
+  assert.equal(beforeFallback.selectedBackend, 'portable-vm');
+  assert.equal(beforeFallback.alternatives.portableVm.requiresWindowsSandbox, false);
+  assert.equal(beforeFallback.alternatives.portableVm.requiresVtxAmdV, false);
+  assert.equal((await noWindows.runContainmentSelfTest()).backend, 'portable-vm');
+  assert.equal((await noWindows.runIsolationSelfTest()).backend, 'portable-vm');
+  const fallbackResult = await noWindows.analyze('synthetic.cmd');
+  assert.equal(fallbackResult.ok, true);
+  assert.equal(fallbackResult.backend, 'portable-vm');
 
+  // Windows Sandbox exists but cannot pass isolation: never pretend success; use a certified fallback.
+  const brokenWindows = new FakeBackend('windows-sandbox', { available: true, containment: true, isolation: false });
+  const workingMicro = new FakeBackend('microvm', { available: true, containment: true, isolation: true });
+  const safeFallback = new IsolationBackendRouter({
+    windowsSandboxBackend: brokenWindows,
+    microVmBackend: workingMicro,
+    portableVmBackend: new FakeBackend('portable-vm', { available: true }),
+  });
+  assert.equal((await safeFallback.runContainmentSelfTest()).backend, 'windows-sandbox');
+  const fallbackIsolation = await safeFallback.runIsolationSelfTest();
+  assert.equal(fallbackIsolation.ok, true);
+  assert.equal(fallbackIsolation.backend, 'microvm');
+
+  // No certified backend means no host execution, ever.
   const none = new IsolationBackendRouter({
+    windowsSandboxBackend: new FakeBackend('windows-sandbox', { available: false }),
     microVmBackend: new FakeBackend('microvm', { available: false }),
     portableVmBackend: new FakeBackend('portable-vm', { available: false }),
-    windowsSandboxBackend: new FakeBackend('windows-sandbox', { available: false }),
   });
   const denied = await none.analyze('synthetic.cmd');
   assert.equal(denied.ok, false);
   assert.equal(denied.verdict, 'inconclusive');
   assert.equal(denied.code, 'NO_RELEASE_GRADE_ISOLATION_BACKEND');
 
-  console.log('✓ Isolation backend router: portable VM preference, Windows fallback and fail-closed no-backend policy PASS');
+  console.log('✓ Isolation backend router: Windows Sandbox first, MalGuard VM fallback, and fail-closed no-backend policy PASS');
 })().catch(error => {
   console.error(error.stack || error);
   process.exit(1);
