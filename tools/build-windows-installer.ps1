@@ -8,8 +8,9 @@ $ErrorActionPreference = 'Stop'
 $package = (Resolve-Path -LiteralPath $PackageRoot).Path
 $output = [IO.Path]::GetFullPath($OutputPath)
 $launcherRelative = 'desktop-app\bin\MalGuard.exe'
+$nodeRelative = 'desktop-app\runtime\node.exe'
 
-foreach ($required in @($launcherRelative,'runtime\node.exe','PACKAGE-MANIFEST.json','SHA256SUMS.txt','desktop-app\integrity\preload.js','desktop-app\server.js')) {
+foreach ($required in @($launcherRelative,$nodeRelative,'PACKAGE-MANIFEST.json','SHA256SUMS.txt','desktop-app\integrity\preload.js','desktop-app\server.js')) {
   if (-not (Test-Path -LiteralPath (Join-Path $package $required) -PathType Leaf)) {
     throw "Installer package is incomplete: $required"
   }
@@ -32,14 +33,15 @@ $target = Join-Path $programs 'MalGuard'
 $stage = Join-Path $programs ('MalGuard.install.' + [guid]::NewGuid().ToString('N'))
 $backup = Join-Path $programs 'MalGuard.previous'
 $launcherRelative = 'desktop-app\bin\MalGuard.exe'
+$nodeRelative = 'desktop-app\runtime\node.exe'
 New-Item -ItemType Directory -Path $programs -Force | Out-Null
 try {
   Expand-Archive -LiteralPath $payload -DestinationPath $stage -Force
-  foreach ($required in @($launcherRelative,'runtime\node.exe','PACKAGE-MANIFEST.json','SHA256SUMS.txt','desktop-app\integrity\preload.js','desktop-app\server.js')) {
+  foreach ($required in @($launcherRelative,$nodeRelative,'PACKAGE-MANIFEST.json','SHA256SUMS.txt','desktop-app\integrity\preload.js','desktop-app\server.js')) {
     if (-not (Test-Path -LiteralPath (Join-Path $stage $required) -PathType Leaf)) { throw "Payload verification failed: $required" }
   }
 
-  $installedNode = Join-Path $target 'runtime\node.exe'
+  $installedNode = Join-Path $target $nodeRelative
   try {
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
       Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $installedNode, [StringComparison]::OrdinalIgnoreCase) } |
