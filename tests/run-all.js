@@ -36,6 +36,7 @@ const tests=[
  'runtime-containment.test.js',
  'sandbox-backend.test.js',
  'malguard-microvm-backend.test.js',
+ 'malguard-portable-vm-backend.test.js',
  'sandbox-first-run-certification.test.js',
  'virtual-windows-validation-lab.test.js',
  'embedded-validation-lab.test.js',
