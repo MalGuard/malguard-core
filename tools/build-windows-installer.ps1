@@ -7,8 +7,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $package = (Resolve-Path -LiteralPath $PackageRoot).Path
 $output = [IO.Path]::GetFullPath($OutputPath)
+$launcherRelative = 'desktop-app\bin\MalGuard.exe'
 
-foreach ($required in @('MalGuard.exe','runtime\node.exe','PACKAGE-MANIFEST.json','SHA256SUMS.txt','desktop-app\integrity\preload.js','desktop-app\server.js')) {
+foreach ($required in @($launcherRelative,'runtime\node.exe','PACKAGE-MANIFEST.json','SHA256SUMS.txt','desktop-app\integrity\preload.js','desktop-app\server.js')) {
   if (-not (Test-Path -LiteralPath (Join-Path $package $required) -PathType Leaf)) {
     throw "Installer package is incomplete: $required"
   }
@@ -30,10 +31,11 @@ $programs = Join-Path $env:LOCALAPPDATA 'Programs'
 $target = Join-Path $programs 'MalGuard'
 $stage = Join-Path $programs ('MalGuard.install.' + [guid]::NewGuid().ToString('N'))
 $backup = Join-Path $programs 'MalGuard.previous'
+$launcherRelative = 'desktop-app\bin\MalGuard.exe'
 New-Item -ItemType Directory -Path $programs -Force | Out-Null
 try {
   Expand-Archive -LiteralPath $payload -DestinationPath $stage -Force
-  foreach ($required in @('MalGuard.exe','runtime\node.exe','PACKAGE-MANIFEST.json','SHA256SUMS.txt','desktop-app\integrity\preload.js','desktop-app\server.js')) {
+  foreach ($required in @($launcherRelative,'runtime\node.exe','PACKAGE-MANIFEST.json','SHA256SUMS.txt','desktop-app\integrity\preload.js','desktop-app\server.js')) {
     if (-not (Test-Path -LiteralPath (Join-Path $stage $required) -PathType Leaf)) { throw "Payload verification failed: $required" }
   }
 
@@ -52,13 +54,13 @@ try {
   $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
   New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
   $shortcut = $shell.CreateShortcut((Join-Path $startMenu 'MalGuard.lnk'))
-  $shortcut.TargetPath = Join-Path $target 'MalGuard.exe'
+  $shortcut.TargetPath = Join-Path $target $launcherRelative
   $shortcut.WorkingDirectory = $target
   $shortcut.Description = 'MalGuard Security Scanner'
   $shortcut.Save()
 
   if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
-  Start-Process -FilePath (Join-Path $target 'MalGuard.exe') -WorkingDirectory $target
+  Start-Process -FilePath (Join-Path $target $launcherRelative) -WorkingDirectory $target
 } catch {
   if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
   if ((-not (Test-Path -LiteralPath $target)) -and (Test-Path -LiteralPath $backup)) {
