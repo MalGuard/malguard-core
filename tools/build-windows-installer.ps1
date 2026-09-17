@@ -121,9 +121,11 @@ SourceFiles0=$sourceEscaped
   Set-Content -LiteralPath $sed -Value $sedText -Encoding ASCII
 
   New-Item -ItemType Directory -Path (Split-Path -Parent $output) -Force | Out-Null
-  & $iexpress /N /Q /M $sed
-  if ($LASTEXITCODE -ne 0) { throw "IExpress failed with exit code $LASTEXITCODE" }
-  if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'IExpress did not produce the requested Setup executable.' }
+  $process = Start-Process -FilePath $iexpress -ArgumentList @('/N','/Q', $sed) -WorkingDirectory $work -Wait -PassThru -NoNewWindow
+  if (-not (Test-Path -LiteralPath $output -PathType Leaf)) {
+    throw "IExpress did not produce the requested Setup executable (exit $($process.ExitCode))."
+  }
+  if ($process.ExitCode -ne 0) { throw "IExpress produced a file but reported exit code $($process.ExitCode)" }
   $size = (Get-Item -LiteralPath $output).Length
   if ($size -lt 65536) { throw "Setup executable is unexpectedly small: $size bytes" }
   Write-Host "Windows installer created: $output ($size bytes)"
