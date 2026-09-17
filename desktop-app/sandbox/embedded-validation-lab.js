@@ -10,7 +10,7 @@ const { TELEMETRY_SCHEMA_VERSION, validateTelemetry, evaluateTelemetry } = requi
 const { loadMxcAttestation, evaluateIsolationReadiness } = require('./isolation-readiness.js');
 const { VirtualWindowsValidationLab } = require('./virtual-windows-validation-lab.js');
 
-const LAB_SCHEMA_VERSION = '1.3.0';
+const LAB_SCHEMA_VERSION = '1.4.0';
 
 function check(name, ok, details = null) {
   return { name, ok: ok === true, details };
@@ -92,25 +92,39 @@ class EmbeddedValidationLab {
         { code: wrongNetwork.code }
       ));
 
-      const xml = this.windowsBackend.buildWsbConfig({
-        inputHost: { dir: 'C:\\MalGuardSyntheticInput', samplePath: 'C:\\MalGuardSyntheticInput\\sample.exe' },
-        outputHost: 'C:\\MalGuardSyntheticOutput',
-        sessionId: '00000000-0000-4000-8000-000000000000',
-      });
-      const policyContract = [
-        '<Networking>Disable</Networking>',
-        '<ClipboardRedirection>Disable</ClipboardRedirection>',
-        '<VGpu>Disable</VGpu>',
-        '<ProtectedClient>Enable</ProtectedClient>',
-        '<ReadOnly>true</ReadOnly>',
-      ].every(token => xml.includes(token)) && !xml.includes('<Networking>Enable</Networking>');
+      // The product may use the multi-backend router. The Windows-specific policy
+      // contract is still validated against the router's real Windows backend.
+      const windowsPolicyBackend = this.windowsBackend && this.windowsBackend.windowsSandboxBackend
+        ? this.windowsBackend.windowsSandboxBackend
+        : this.windowsBackend;
+      let policyContract = false;
+      if (windowsPolicyBackend && typeof windowsPolicyBackend.buildWsbConfig === 'function') {
+        const xml = windowsPolicyBackend.buildWsbConfig({
+          inputHost: { dir: 'C:\\MalGuardSyntheticInput', samplePath: 'C:\\MalGuardSyntheticInput\\sample.exe' },
+          outputHost: 'C:\\MalGuardSyntheticOutput',
+          sessionId: '00000000-0000-4000-8000-000000000000',
+        });
+        policyContract = [
+          '<Networking>Disable</Networking>',
+          '<ClipboardRedirection>Disable</ClipboardRedirection>',
+          '<VGpu>Disable</VGpu>',
+          '<ProtectedClient>Enable</ProtectedClient>',
+          '<ReadOnly>true</ReadOnly>',
+        ].every(token => xml.includes(token)) && !xml.includes('<Networking>Enable</Networking>');
+      }
       checks.push(check('windows_sandbox_policy_contract', policyContract));
 
       const denied = await controller.analyzeUntrustedSample(samplePath);
       checks.push(check(
         'release_path_fails_closed_without_accepted_backend',
         denied && denied.ok === false && denied.verdict === 'inconclusive' &&
-          ['WINDOWS_SANDBOX_UNAVAILABLE', 'HARDENED_SANDBOX_ACCEPTANCE_PENDING'].includes(denied.code),
+          [
+            'WINDOWS_SANDBOX_UNAVAILABLE',
+            'HARDENED_SANDBOX_ACCEPTANCE_PENDING',
+            'NO_ISOLATION_BACKEND_AVAILABLE',
+            'ISOLATION_BACKEND_CERTIFICATION_FAILED',
+            'HARDENED_ISOLATION_ACCEPTANCE_PENDING',
+          ].includes(denied.code),
         denied ? { code: denied.code, verdict: denied.verdict } : null
       ));
 
@@ -188,6 +202,11 @@ class EmbeddedValidationLab {
           available: !!(controllerSelfTest.windowsSandbox && controllerSelfTest.windowsSandbox.available),
           releaseGrade: !!(controllerSelfTest.windowsSandbox && controllerSelfTest.windowsSandbox.releaseGrade),
           blockers: Array.isArray(controllerSelfTest.blockers) ? controllerSelfTest.blockers : [],
+        } : null,
+        isolationBackend: controllerSelfTest ? {
+          selectedBackend: controllerSelfTest.selectedBackend || null,
+          ready: controllerSelfTest.isolationBackendReady === true,
+          executionCertified: controllerSelfTest.executionCertified === true,
         } : null,
         status: readiness.status,
       };
