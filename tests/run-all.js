@@ -9,6 +9,7 @@ const tests=[
  'scan-resilience.test.js',
  'workflow-supply-chain.test.js',
  'public-release-policy.test.js',
+ 'windows-installer-source.test.js',
  'secure-update.test.js',
  'update-runtime-enforcement.test.js',
  'release-trust.test.js',
