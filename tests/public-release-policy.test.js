@@ -20,7 +20,7 @@ assert(/MALGUARD_SOURCE_COMMIT:\s*\$\{\{ github\.sha \}\}/.test(workflow), 'rele
 assert(/Re-open and verify archived release candidate/.test(workflow), 'release workflow must re-open and verify the final archive');
 assert(/verifyRuntimePackageIntegrity/.test(workflow), 're-opened archive must pass runtime integrity verification');
 assert(/sourceCommit -ne \$env:MALGUARD_SOURCE_COMMIT/.test(workflow), 're-opened archive must bind embedded provenance to the workflow SHA');
-assert(/name: Upload trusted-main Windows release candidate[\s\S]*if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/.test(workflow), 'distributable release artifacts must only be uploaded from trusted main pushes');
+assert(/name: Upload trusted-main Windows(?: installable)? release candidate[\s\S]*if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/.test(workflow), 'distributable release artifacts must only be uploaded from trusted main pushes');
 assert(!/MALGUARD_RELEASE_SIGNING_PRIVATE_KEY_PEM/.test(workflow), 'offline release private key must never enter GitHub Actions');
 
 assert(/GITHUB_ACTIONS === 'true'/.test(signingTool) && /OFFLINE_RELEASE_SIGNING_REQUIRED/.test(signingTool), 'release signer must refuse GitHub Actions execution');
