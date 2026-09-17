@@ -3,6 +3,7 @@ name: MalGuard Platform Clients
 on:
   push:
     branches:
+      - main
       - dev/mobile-macos-clients
     paths:
       - 'clients/platform/**'
@@ -103,13 +104,14 @@ jobs:
         run: |
           npx cap add ios
           npx cap sync ios
+          test -d ios/App/App.xcodeproj
 
       - name: Build unsigned iPhone Simulator app
         working-directory: clients/platform
         run: |
           set -euo pipefail
           xcodebuild \
-            -workspace ios/App/App.xcworkspace \
+            -project ios/App/App.xcodeproj \
             -scheme App \
             -sdk iphonesimulator \
             -configuration Debug \
