@@ -7,13 +7,17 @@ on:
       - 'desktop-app/update/**'
       - 'desktop-app/integrity/**'
       - 'native/sandbox-containment-probe/**'
+      - 'native/windows-launcher/**'
       - 'tests/sandbox-*.test.js'
       - 'tests/secure-update.test.js'
       - 'tests/release-trust.test.js'
       - 'tests/runtime-package-integrity.test.js'
       - 'tests/public-release-policy.test.js'
+      - 'tests/windows-installer-source.test.js'
       - 'tests/run-all.js'
       - 'tools/build-portable-package.js'
+      - 'tools/build-windows-installer.ps1'
+      - 'tools/windows-node-runtime-lock.json'
       - 'tools/verify-release-candidate.js'
       - 'tools/sign-release-candidate.js'
       - 'tools/verify-signed-release.js'
@@ -38,7 +42,7 @@ jobs:
           - arch: arm64
             cmake_arch: ARM64
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Checkout exact source
@@ -63,10 +67,53 @@ jobs:
           }
           Write-Host 'Trusted main source topology PASS: non-forced PR merge commit.'
 
-      - name: Setup Node.js
+      - name: Setup exact Node.js for build tools
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22'
+          node-version: '22.23.2'
+
+      - name: Stage pinned Node runtime for installed scanner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lock = Get-Content -LiteralPath 'tools/windows-node-runtime-lock.json' -Raw | ConvertFrom-Json
+          if ($lock.schemaVersion -ne '1.0.0' -or $lock.nodeVersion -ne '22.23.2') { throw 'unexpected Windows Node runtime lock' }
+          $entry = $lock.architectures.'${{ matrix.arch }}'
+          if (-not $entry) { throw 'missing Node runtime architecture lock' }
+          $uri = [Uri]($lock.source + $entry.archive)
+          if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'nodejs.org' -or $uri.AbsolutePath -notlike '/dist/v22.23.2/*') {
+            throw "untrusted Node runtime origin: $uri"
+          }
+          $archive = Join-Path $env:RUNNER_TEMP $entry.archive
+          Invoke-WebRequest -Uri $uri -OutFile $archive
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne ([string]$entry.sha256).ToLowerInvariant()) { throw 'Node runtime SHA-256 mismatch' }
+          $extract = Join-Path $env:RUNNER_TEMP "node-runtime-${{ matrix.arch }}"
+          Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $node = Get-ChildItem -LiteralPath $extract -Filter node.exe -File -Recurse | Select-Object -First 1
+          $license = Get-ChildItem -LiteralPath $extract -Filter LICENSE -File -Recurse | Select-Object -First 1
+          if (-not $node -or -not $license) { throw 'verified Node archive is incomplete' }
+          $target = Join-Path (Get-Location) 'desktop-app/runtime'
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          Copy-Item -LiteralPath $node.FullName -Destination (Join-Path $target 'node.exe') -Force
+          Copy-Item -LiteralPath $license.FullName -Destination (Join-Path $target 'NODE-LICENSE.txt') -Force
+          Write-Host "Pinned Node runtime staged: $($lock.nodeVersion) / ${{ matrix.arch }} / $actual"
+
+      - name: Build native MalGuard launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $build = Join-Path $env:RUNNER_TEMP 'malguard-windows-launcher'
+          cmake -S native/windows-launcher -B $build -A '${{ matrix.cmake_arch }}'
+          if ($LASTEXITCODE -ne 0) { throw 'launcher configure failed' }
+          cmake --build $build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'launcher build failed' }
+          $launcher = Get-ChildItem -LiteralPath $build -Filter 'MalGuard.exe' -File -Recurse | Select-Object -First 1
+          if (-not $launcher) { throw 'MalGuard.exe launcher was not produced' }
+          $target = Join-Path (Get-Location) 'desktop-app/bin'
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          Copy-Item -LiteralPath $launcher.FullName -Destination (Join-Path $target 'MalGuard.exe') -Force
 
       - name: Build native Sandbox containment probe
         shell: pwsh
@@ -83,14 +130,15 @@ jobs:
           New-Item -ItemType Directory -Path $target -Force | Out-Null
           Copy-Item -LiteralPath $probe.FullName -Destination (Join-Path $target 'MalGuardSandboxContainmentProbe.exe') -Force
 
-      - name: Verify native probe is staged
+      - name: Verify staged native/runtime components
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $probe = 'desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe'
-          if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw 'native containment probe missing from release staging' }
-          $hash = (Get-FileHash -LiteralPath $probe -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host "Native containment probe SHA-256: $hash"
+          foreach ($file in @('desktop-app/bin/MalGuard.exe','desktop-app/runtime/node.exe','desktop-app/runtime/NODE-LICENSE.txt','desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe')) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "release staging missing: $file" }
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host "$file SHA-256: $hash"
+          }
 
       - name: Run Sandbox and release hardening regressions
         shell: pwsh
@@ -104,6 +152,7 @@ jobs:
           node tests/runtime-package-integrity.test.js
           node tests/workflow-supply-chain.test.js
           node tests/public-release-policy.test.js
+          node tests/windows-installer-source.test.js
 
       - name: Build sealed Windows runtime package
         shell: pwsh
@@ -114,16 +163,19 @@ jobs:
           node tools/build-portable-package.js
           node tools/verify-release-candidate.js
 
-      - name: Prove packaged Sandbox probe is integrity-covered
+      - name: Prove installed runtime is integrity-covered
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
           $root = Join-Path (Get-Location) "dist/malguard-desktop-$version"
-          $probe = Join-Path $root 'desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe'
-          if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw 'packaged containment probe missing' }
           $sums = Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Raw
-          if ($sums -notmatch 'desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe\.exe') { throw 'packaged containment probe is not covered by SHA256SUMS.txt' }
+          foreach ($file in @('desktop-app/bin/MalGuard.exe','runtime/node.exe','runtime/NODE-LICENSE.txt','desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe')) {
+            $target = Join-Path $root ($file -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "packaged runtime missing: $file" }
+            $escaped = [regex]::Escape($file)
+            if ($sums -notmatch $escaped) { throw "packaged runtime is not integrity-covered: $file" }
+          }
 
       - name: Archive Windows release candidate
         shell: pwsh
@@ -165,7 +217,22 @@ jobs:
           node -e "const {verifyRuntimePackageIntegrity}=require('./desktop-app/integrity/runtime-integrity.js'); const r=verifyRuntimePackageIntegrity(process.argv[1],{requireSealed:true}); if(!r.ok||!r.sealed){console.error(r);process.exit(1)}; console.log('Re-opened archive runtime integrity PASS');" "$packageRoot"
           if ($LASTEXITCODE -ne 0) { throw 're-opened release archive failed runtime integrity verification' }
 
-      - name: Upload trusted-main Windows release candidate
+      - name: Build Windows Setup executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
+          $root = Join-Path (Get-Location) "dist/malguard-desktop-$version"
+          $setup = Join-Path (Get-Location) "dist/MalGuard-Setup-$version-windows-${{ matrix.arch }}.exe"
+          & pwsh -NoLogo -NoProfile -NonInteractive -File .\tools\build-windows-installer.ps1 -PackageRoot $root -Architecture '${{ matrix.arch }}' -OutputPath $setup
+          if ($LASTEXITCODE -ne 0) { throw "Windows installer builder failed with exit code $LASTEXITCODE" }
+          $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $([IO.Path]::GetFileName($setup))" | Set-Content -LiteralPath "$setup.sha256" -Encoding ascii
+          $signature = Get-AuthenticodeSignature -LiteralPath $setup
+          Write-Host "Installer Authenticode state: $($signature.Status)"
+          Write-Host 'NOTE: release-candidate Setup is installable, but public distribution remains blocked until the final installer is signed by the pinned MalGuard publisher certificate.'
+
+      - name: Upload trusted-main Windows installable release candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -173,5 +240,7 @@ jobs:
           path: |
             dist/*-windows-${{ matrix.arch }}.zip
             dist/*-windows-${{ matrix.arch }}.zip.sha256
+            dist/MalGuard-Setup-*-windows-${{ matrix.arch }}.exe
+            dist/MalGuard-Setup-*-windows-${{ matrix.arch }}.exe.sha256
           if-no-files-found: error
           retention-days: 7
