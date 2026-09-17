@@ -1,6 +1,6 @@
 {
   "name": "malguard-core",
-  "version": "0.6.1-dev",
+  "version": "0.6.1-beta.1",
   "private": true,
   "description": "MalGuard desktop security core and local control service",
   "type": "commonjs",
