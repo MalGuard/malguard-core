@@ -5,17 +5,19 @@ const os = require('os');
 const path = require('path');
 const { createHash } = require('crypto');
 const { fork } = require('child_process');
-const { WindowsSandboxBackend } = require('./windows-sandbox-backend.js');
+const { IsolationBackendRouter } = require('./isolation-backend-router.js');
 
-const SANDBOX_VERSION = '0.6.0';
+const SANDBOX_VERSION = '0.6.1';
 const MAX_SAMPLE_BYTES = 64 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js']);
 
 class SandboxController {
-  constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null, autoCertify = false } = {}) {
+  constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null, isolationBackend = null, autoCertify = false } = {}) {
     this.timeoutMs = timeoutMs;
     this.memoryMb = memoryMb;
-    this.windowsBackend = windowsBackend || new WindowsSandboxBackend();
+    // Keep windowsBackend as a compatibility alias for older call sites/tests.
+    // New default is the multi-backend router: MalGuard MicroVM -> portable VM -> Windows Sandbox.
+    this.windowsBackend = isolationBackend || windowsBackend || new IsolationBackendRouter();
     this._certification = {
       state: 'not_run',
       ok: false,
@@ -41,8 +43,10 @@ class SandboxController {
       ok: current.ok === true,
       sandboxVersion: SANDBOX_VERSION,
       certifiedAt: current.certifiedAt || null,
+      isolationBackendReady: current.isolationBackendReady === true || current.windowsSandboxReady === true,
       windowsSandboxReady: current.windowsSandboxReady === true,
       executionCertified: current.executionCertified === true,
+      selectedBackend: current.selectedBackend || null,
       blockers: Array.isArray(current.blockers) ? [...current.blockers] : [],
       executionProbe: current.executionProbe ? { ...current.executionProbe } : null,
       automatic: { ...this._automaticCertification },
@@ -70,8 +74,10 @@ class SandboxController {
             ok: false,
             sandboxVersion: SANDBOX_VERSION,
             certifiedAt: null,
+            isolationBackendReady: false,
             windowsSandboxReady: false,
             executionCertified: false,
+            selectedBackend: null,
             blockers: [code],
           };
           this._automaticCertification.completedAt = new Date().toISOString();
@@ -240,18 +246,21 @@ class SandboxController {
     const blockers = [];
     if (!localProbeOk) blockers.push('local_process_probe_failed');
     if (!nativeContainment.ok) blockers.push(nativeContainment.code || 'native_containment_validation_pending');
-    if (!isolationSelfTest.ok) blockers.push(isolationSelfTest.code || 'windows_sandbox_isolation_validation_pending');
+    if (!isolationSelfTest.ok) blockers.push(isolationSelfTest.code || 'isolation_backend_validation_pending');
     if (windowsSandbox.releaseGrade !== true) blockers.push('sandbox_release_gate_locked');
-    if (!executionCertified) blockers.push(executionProbe.code || 'windows_sandbox_execution_validation_pending');
+    if (!executionCertified) blockers.push(executionProbe.code || 'sandbox_execution_validation_pending');
 
+    const selectedBackend = windowsSandbox.selectedBackend || windowsSandbox.backend || null;
     const result = {
       ok: releaseReady,
       state: releaseReady ? 'certified' : 'failed',
       sandboxVersion: SANDBOX_VERSION,
       certifiedAt: releaseReady ? new Date().toISOString() : null,
       localProbeOk,
+      isolationBackendReady: windowsSandboxReady,
       windowsSandboxReady,
       executionCertified,
+      selectedBackend,
       localProbe,
       windowsSandbox,
       initialWindowsSandbox,
@@ -297,27 +306,33 @@ class SandboxController {
     const certification = await this.ensureRuntimeCertified();
     if (!certification || certification.ok !== true) {
       const capabilities = await this.windowsBackend.capabilities();
+      const routed = capabilities && capabilities.backend === 'malguard-isolation-router';
       return {
         ok: false,
         sandboxVersion: SANDBOX_VERSION,
         verdict: 'inconclusive',
-        code: capabilities.available ? 'WINDOWS_SANDBOX_CERTIFICATION_FAILED' : 'WINDOWS_SANDBOX_UNAVAILABLE',
+        code: routed
+          ? (capabilities.available ? 'ISOLATION_BACKEND_CERTIFICATION_FAILED' : 'NO_ISOLATION_BACKEND_AVAILABLE')
+          : (capabilities.available ? 'WINDOWS_SANDBOX_CERTIFICATION_FAILED' : 'WINDOWS_SANDBOX_UNAVAILABLE'),
         preflight,
         backend: capabilities,
         certification: this.certificationStatus(),
         sandboxLaunched: false,
         sampleExecutionStarted: false,
-        note: 'MalGuard refuses behavioral execution until this process proves native containment, Windows Sandbox isolation and real sample launch with a harmless fixture.',
+        note: 'MalGuard refuses behavioral execution until a selected isolation backend proves containment, guest isolation and a real harmless sample launch in this process.',
       };
     }
 
     const capabilities = await this.windowsBackend.capabilities();
     if (capabilities.releaseGrade !== true) {
+      const routed = capabilities && capabilities.backend === 'malguard-isolation-router';
       return {
         ok: false,
         sandboxVersion: SANDBOX_VERSION,
         verdict: 'inconclusive',
-        code: capabilities.available ? 'HARDENED_SANDBOX_ACCEPTANCE_PENDING' : 'WINDOWS_SANDBOX_UNAVAILABLE',
+        code: routed
+          ? (capabilities.available ? 'HARDENED_ISOLATION_ACCEPTANCE_PENDING' : 'NO_ISOLATION_BACKEND_AVAILABLE')
+          : (capabilities.available ? 'HARDENED_SANDBOX_ACCEPTANCE_PENDING' : 'WINDOWS_SANDBOX_UNAVAILABLE'),
         preflight,
         backend: capabilities,
         certification: this.certificationStatus(),
