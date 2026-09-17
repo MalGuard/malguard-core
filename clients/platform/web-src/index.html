@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: capacitor: https://localhost; script-src 'self'; worker-src 'self' blob:; style-src 'self'; img-src 'self' data:; connect-src 'self' https://urlhaus-api.abuse.ch; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>MalGuard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">MG</div>
+        <div>
+          <p class="eyebrow">MALGUARD</p>
+          <h1>Secure file analysis</h1>
+          <p class="subtitle">Local, privacy-preserving scanning for files you choose.</p>
+        </div>
+      </div>
+      <span id="platformBadge" class="platform-badge">Detecting platform…</span>
+    </header>
+
+    <section class="status-grid" aria-label="Platform capabilities">
+      <article class="status-card good">
+        <span class="status-dot"></span>
+        <div><strong>Local file scanner</strong><small>Available</small></div>
+      </article>
+      <article class="status-card limited">
+        <span class="status-dot"></span>
+        <div><strong>Whole-device protection</strong><small>Restricted by this OS</small></div>
+      </article>
+      <article class="status-card limited">
+        <span class="status-dot"></span>
+        <div><strong>Windows behavioral Sandbox</strong><small>Windows-only capability</small></div>
+      </article>
+    </section>
+
+    <section class="panel scanner-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">LOCAL ANALYSIS</p>
+          <h2>Scan a file</h2>
+        </div>
+        <button id="selfTestBtn" class="secondary-button" type="button">Engine check</button>
+      </div>
+
+      <label id="dropzone" class="dropzone" for="fileInput">
+        <input id="fileInput" type="file" accept=".asi,.dll,.exe,.cs,.lua,.zip,.7z,.rar,.rpf,.json,.xml,.ini,.meta" hidden>
+        <span class="drop-icon">+</span>
+        <strong>Choose a file</strong>
+        <small>or drop one here on desktop</small>
+      </label>
+
+      <div id="fileCard" class="file-card" hidden>
+        <div>
+          <strong id="fileName">No file selected</strong>
+          <small id="fileMeta"></small>
+        </div>
+        <button id="clearBtn" class="text-button" type="button">Remove</button>
+      </div>
+
+      <button id="scanBtn" class="primary-button" type="button" disabled>Scan securely</button>
+      <p class="privacy-note">The selected file stays on this device. The local scanner performs bounded static analysis in a Web Worker and does not execute the file.</p>
+    </section>
+
+    <section id="resultPanel" class="panel result-panel" hidden aria-live="polite">
+      <div class="result-head">
+        <div>
+          <p class="eyebrow">RESULT</p>
+          <h2 id="verdictTitle">Waiting</h2>
+        </div>
+        <span id="verdictBadge" class="verdict neutral">Waiting</span>
+      </div>
+      <p id="resultSummary" class="result-summary"></p>
+      <div class="result-grid">
+        <div><span>File</span><strong id="resultFile">—</strong></div>
+        <div><span>SHA-256</span><strong id="resultHash">—</strong></div>
+        <div><span>Execution context</span><strong id="resultContext">Web Worker</strong></div>
+      </div>
+      <details class="details-card">
+        <summary>Technical details</summary>
+        <pre id="resultJson"></pre>
+      </details>
+    </section>
+
+    <section class="panel info-panel">
+      <h2>What this version can do</h2>
+      <p>iPhone and Android cannot inspect every installed app or process like a desktop endpoint-security product. MalGuard therefore scans only files you explicitly choose. The macOS wrapper uses the same isolated local scanner in this first release. Unsupported protection features stay visibly disabled instead of pretending to work.</p>
+    </section>
+  </main>
+
+  <script src="malguard-contract.js"></script>
+  <script src="scan-worker-client.js"></script>
+  <script src="platform.js"></script>
+</body>
+</html>
