@@ -48,7 +48,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return 2;
     }
 
-    const std::wstring node = root + L"\\runtime\\node.exe";
+    const std::wstring node = root + L"\\desktop-app\\runtime\\node.exe";
     const std::wstring preload = root + L"\\desktop-app\\integrity\\preload.js";
     const std::wstring server = root + L"\\desktop-app\\server.js";
     if (!regularFileExists(node) || !regularFileExists(preload) || !regularFileExists(server)) {
