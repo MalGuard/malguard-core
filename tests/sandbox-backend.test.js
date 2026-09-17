@@ -31,7 +31,7 @@ const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller
   assert.match(xml, /C:\\host&amp;input/);
   assert.doesNotMatch(xml, /<Networking>Enable<\/Networking>/);
 
-  const controller = new SandboxController({ windowsBackend: backend, allowExperimentalDetonation: false });
+  const controller = new SandboxController({ windowsBackend: backend });
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'malguard-sandbox-test-'));
   try {
     const samplePath = path.join(tempDir, 'synthetic.exe');
@@ -44,13 +44,15 @@ const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller
     const denied = await controller.analyzeUntrustedSample(samplePath);
     assert.equal(denied.ok, false);
     assert.equal(denied.verdict, 'inconclusive');
-    assert(['WINDOWS_SANDBOX_UNAVAILABLE', 'HARDENED_SANDBOX_ACCEPTANCE_PENDING'].includes(denied.code));
+    assert.equal(denied.code, 'WINDOWS_GUEST_EXECUTION_PROVIDER_UNAVAILABLE');
     assert.equal(denied.preflight.sha256, preflight.sha256);
+    assert.equal(denied.sandboxLaunched, false);
+    assert.equal(denied.sampleExecutionStarted, false);
   } finally {
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   }
 
-  console.log('✓ Sandbox backend: Windows Sandbox isolation config and release-path fail-closed policy PASS');
+  console.log('✓ Sandbox backend: portable isolation core plus fail-closed Windows guest provider policy PASS');
 })().catch(error => {
   console.error(error.stack || error);
   process.exit(1);
