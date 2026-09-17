@@ -1,0 +1,168 @@
+name: MalGuard Platform Clients
+
+on:
+  push:
+    branches:
+      - dev/mobile-macos-clients
+    paths:
+      - 'clients/platform/**'
+      - 'malguard-contract.js'
+      - 'engine.js'
+      - 'multilayer.js'
+      - 'gta-mod-detector.js'
+      - 'archive-inspector.js'
+      - 'archive-entry-reader.js'
+      - 'script-analyzer.js'
+      - 'app.js'
+      - 'scan-worker-client.js'
+      - 'scan-worker.js'
+      - 'rules.json'
+      - '.github/workflows/platform-clients.yml'
+  pull_request:
+    paths:
+      - 'clients/platform/**'
+      - '.github/workflows/platform-clients.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Setup Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install pinned client dependencies
+        working-directory: clients/platform
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Build shared MalGuard scanner bundle
+        working-directory: clients/platform
+        run: npm run build:web
+
+      - name: Generate Android project
+        working-directory: clients/platform
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Build Android debug APK
+        working-directory: clients/platform/android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: malguard-android-apk
+          path: clients/platform/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  ios:
+    name: iPhone Simulator App
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install pinned client dependencies
+        working-directory: clients/platform
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Build shared MalGuard scanner bundle
+        working-directory: clients/platform
+        run: npm run build:web
+
+      - name: Generate iOS project
+        working-directory: clients/platform
+        run: |
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Build unsigned iPhone Simulator app
+        working-directory: clients/platform
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          test -d build/ios/Build/Products/Debug-iphonesimulator/App.app
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/ios/Build/Products/Debug-iphonesimulator/App.app \
+            build/MalGuard-iOS-Simulator.zip
+
+      - name: Upload iPhone Simulator app
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: malguard-ios-simulator
+          path: clients/platform/build/MalGuard-iOS-Simulator.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: macOS App
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install pinned client dependencies
+        working-directory: clients/platform
+        run: npm install --no-audit --no-fund
+
+      - name: Package Apple Silicon and Intel apps
+        working-directory: clients/platform
+        run: |
+          set -euo pipefail
+          npm run electron:package:arm64
+          npm run electron:package:x64
+          ditto -c -k --sequesterRsrc --keepParent dist/macos/MalGuard-darwin-arm64/MalGuard.app dist/MalGuard-macOS-arm64.zip
+          ditto -c -k --sequesterRsrc --keepParent dist/macos/MalGuard-darwin-x64/MalGuard.app dist/MalGuard-macOS-x64.zip
+
+      - name: Upload macOS apps
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: malguard-macos-apps
+          path: |
+            clients/platform/dist/MalGuard-macOS-arm64.zip
+            clients/platform/dist/MalGuard-macOS-x64.zip
+          if-no-files-found: error
+          retention-days: 7
