@@ -33,6 +33,7 @@ const tests=[
  'protection-coordinator.test.js',
  'runtime-game-process-guard.test.js',
  'runtime-containment.test.js',
+ 'isolation-engine.test.js',
  'sandbox-backend.test.js',
  'sandbox-first-run-certification.test.js',
  'virtual-windows-validation-lab.test.js',
