@@ -12,7 +12,7 @@ const MAX_SAMPLE_BYTES = 64 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js']);
 
 class SandboxController {
-  constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null } = {}) {
+  constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null, autoCertify = false } = {}) {
     this.timeoutMs = timeoutMs;
     this.memoryMb = memoryMb;
     this.windowsBackend = windowsBackend || new WindowsSandboxBackend();
@@ -24,6 +24,14 @@ class SandboxController {
       blockers: ['sandbox_runtime_not_certified'],
     };
     this._certificationPromise = null;
+    this._automaticCertification = {
+      enabled: autoCertify === true,
+      scheduled: false,
+      startedAt: null,
+      completedAt: null,
+    };
+    this._automaticCertificationPromise = null;
+    if (autoCertify === true) this.startAutomaticCertification();
   }
 
   certificationStatus() {
@@ -37,7 +45,43 @@ class SandboxController {
       executionCertified: current.executionCertified === true,
       blockers: Array.isArray(current.blockers) ? [...current.blockers] : [],
       executionProbe: current.executionProbe ? { ...current.executionProbe } : null,
+      automatic: { ...this._automaticCertification },
     };
+  }
+
+  startAutomaticCertification() {
+    this._automaticCertification.enabled = true;
+    if (this._certification && this._certification.ok === true) return Promise.resolve(this._certification);
+    if (this._automaticCertificationPromise) return this._automaticCertificationPromise;
+
+    this._automaticCertification.scheduled = true;
+    this._automaticCertificationPromise = new Promise((resolve) => {
+      setImmediate(async () => {
+        this._automaticCertification.scheduled = false;
+        this._automaticCertification.startedAt = new Date().toISOString();
+        try {
+          const result = await this.ensureRuntimeCertified();
+          this._automaticCertification.completedAt = new Date().toISOString();
+          resolve(result);
+        } catch (error) {
+          const code = error && typeof error.code === 'string' ? error.code : 'SANDBOX_AUTOMATIC_CERTIFICATION_FAILED';
+          this._certification = {
+            state: 'failed',
+            ok: false,
+            sandboxVersion: SANDBOX_VERSION,
+            certifiedAt: null,
+            windowsSandboxReady: false,
+            executionCertified: false,
+            blockers: [code],
+          };
+          this._automaticCertification.completedAt = new Date().toISOString();
+          resolve(this._certification);
+        } finally {
+          this._automaticCertificationPromise = null;
+        }
+      });
+    });
+    return this._automaticCertificationPromise;
   }
 
   async preflightSample(samplePath) {
