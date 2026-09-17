@@ -63,6 +63,14 @@ class FakeReleaseGradeBackend {
 }
 
 (async () => {
+  const automaticBackend = new FakeReleaseGradeBackend();
+  const automaticController = new SandboxController({ windowsBackend: automaticBackend, autoCertify: true });
+  const automatic = await automaticController.startAutomaticCertification();
+  assert.equal(automatic.ok, true, JSON.stringify(automatic));
+  assert.equal(automaticController.certificationStatus().automatic.enabled, true);
+  assert.equal(automaticController.certificationStatus().state, 'certified');
+  assert.equal(automaticBackend.analyzeCalls.length, 1, 'automatic startup certification must execute exactly one harmless fixture');
+
   const goodBackend = new FakeReleaseGradeBackend();
   const controller = new SandboxController({ windowsBackend: goodBackend });
   const certification = await controller.ensureRuntimeCertified();
@@ -90,13 +98,13 @@ class FakeReleaseGradeBackend {
   }
 
   const blockedBackend = new FakeReleaseGradeBackend({ startExecution: false });
-  const blockedController = new SandboxController({ windowsBackend: blockedBackend });
-  const blocked = await blockedController.ensureRuntimeCertified();
-  assert.equal(blocked.ok, false, 'certification must fail when the harmless sample never starts');
+  const blockedController = new SandboxController({ windowsBackend: blockedBackend, autoCertify: true });
+  const blocked = await blockedController.startAutomaticCertification();
+  assert.equal(blocked.ok, false, 'automatic certification must fail when the harmless sample never starts');
   assert.equal(blocked.executionCertified, false);
   assert(blocked.blockers.some(value => /EXECUTION/i.test(value)), JSON.stringify(blocked.blockers));
 
-  console.log('✓ Sandbox first-run certification: harmless sample execution is mandatory before customer detonation can run');
+  console.log('✓ Sandbox automatic certification: startup performs harmless real-execution proof before customer detonation can run');
 })().catch(error => {
   console.error(error.stack || error);
   process.exit(1);
