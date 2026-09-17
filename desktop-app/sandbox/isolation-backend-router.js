@@ -4,19 +4,22 @@ const { MalGuardMicroVMBackend } = require('./malguard-microvm-backend.js');
 const { MalGuardVmBackend } = require('./malguard-vm-backend.js');
 const { WindowsSandboxBackend } = require('./windows-sandbox-backend.js');
 
-const BACKENDS = Object.freeze(['microvm', 'portable-vm', 'windows-sandbox']);
+// Windows Sandbox is an optional first-choice backend when it is both available
+// and certified on the current host. MalGuard-owned VM backends are the fallback,
+// so Windows Sandbox is no longer a mandatory product dependency.
+const BACKENDS = Object.freeze(['windows-sandbox', 'microvm', 'portable-vm']);
 
 class IsolationBackendRouter {
   constructor({
     microVmBackend = null,
     portableVmBackend = null,
     windowsSandboxBackend = null,
-    prefer = 'microvm',
+    prefer = 'windows-sandbox',
   } = {}) {
     this.microVmBackend = microVmBackend || new MalGuardMicroVMBackend();
     this.portableVmBackend = portableVmBackend || new MalGuardVmBackend();
     this.windowsSandboxBackend = windowsSandboxBackend || new WindowsSandboxBackend();
-    this.prefer = BACKENDS.includes(prefer) ? prefer : 'microvm';
+    this.prefer = BACKENDS.includes(prefer) ? prefer : 'windows-sandbox';
     this._active = null;
   }
 
@@ -52,6 +55,9 @@ class IsolationBackendRouter {
       preferredBackend: this.prefer,
       releaseGrade: active.releaseGrade === true,
       hardened: active.releaseGrade === true,
+      requiresWindowsSandbox: false,
+      windowsSandboxOptional: true,
+      fallbackOrder: [...this._order()],
       alternatives: {
         microvm: {
           available: capsByName.microvm.available === true,
