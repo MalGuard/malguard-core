@@ -1,18 +1,33 @@
 'use strict';
 
 const { MalGuardMicroVMBackend } = require('./malguard-microvm-backend.js');
+const { MalGuardVmBackend } = require('./malguard-vm-backend.js');
 const { WindowsSandboxBackend } = require('./windows-sandbox-backend.js');
 
+const BACKENDS = Object.freeze(['microvm', 'portable-vm', 'windows-sandbox']);
+
 class IsolationBackendRouter {
-  constructor({ microVmBackend = null, windowsSandboxBackend = null, prefer = 'microvm' } = {}) {
+  constructor({
+    microVmBackend = null,
+    portableVmBackend = null,
+    windowsSandboxBackend = null,
+    prefer = 'microvm',
+  } = {}) {
     this.microVmBackend = microVmBackend || new MalGuardMicroVMBackend();
+    this.portableVmBackend = portableVmBackend || new MalGuardVmBackend();
     this.windowsSandboxBackend = windowsSandboxBackend || new WindowsSandboxBackend();
-    this.prefer = prefer === 'windows-sandbox' ? 'windows-sandbox' : 'microvm';
+    this.prefer = BACKENDS.includes(prefer) ? prefer : 'microvm';
     this._active = null;
   }
 
   _backend(name) {
-    return name === 'microvm' ? this.microVmBackend : this.windowsSandboxBackend;
+    if (name === 'microvm') return this.microVmBackend;
+    if (name === 'portable-vm') return this.portableVmBackend;
+    return this.windowsSandboxBackend;
+  }
+
+  _order() {
+    return [this.prefer, ...BACKENDS.filter(name => name !== this.prefer)];
   }
 
   async _caps(name) {
@@ -20,17 +35,16 @@ class IsolationBackendRouter {
   }
 
   async capabilities() {
-    const microvm = await this._caps('microvm');
-    const windows = await this._caps('windows-sandbox');
-    let selected = this._active;
+    const capsByName = {};
+    for (const name of BACKENDS) capsByName[name] = await this._caps(name);
+
+    let selected = this._active && BACKENDS.includes(this._active) ? this._active : null;
     if (!selected) {
-      if (this.prefer === 'microvm' && microvm.releaseGrade === true) selected = 'microvm';
-      else if (windows.releaseGrade === true) selected = 'windows-sandbox';
-      else if (this.prefer === 'microvm' && microvm.available === true) selected = 'microvm';
-      else if (windows.available === true) selected = 'windows-sandbox';
-      else selected = this.prefer === 'microvm' ? 'microvm' : 'windows-sandbox';
+      selected = this._order().find(name => capsByName[name].releaseGrade === true)
+        || this._order().find(name => capsByName[name].available === true)
+        || this.prefer;
     }
-    const active = selected === 'microvm' ? microvm : windows;
+    const active = capsByName[selected];
     return {
       ...active,
       backend: 'malguard-isolation-router',
@@ -39,16 +53,30 @@ class IsolationBackendRouter {
       releaseGrade: active.releaseGrade === true,
       hardened: active.releaseGrade === true,
       alternatives: {
-        microvm: { available: microvm.available === true, releaseGrade: microvm.releaseGrade === true, blockers: microvm.blockers || [] },
-        windowsSandbox: { available: windows.available === true, releaseGrade: windows.releaseGrade === true, blockers: windows.blockers || [] },
+        microvm: {
+          available: capsByName.microvm.available === true,
+          releaseGrade: capsByName.microvm.releaseGrade === true,
+          blockers: capsByName.microvm.blockers || [],
+        },
+        portableVm: {
+          available: capsByName['portable-vm'].available === true,
+          releaseGrade: capsByName['portable-vm'].releaseGrade === true,
+          requiresWindowsSandbox: capsByName['portable-vm'].requiresWindowsSandbox === true,
+          requiresVtxAmdV: capsByName['portable-vm'].requiresVtxAmdV,
+          blockers: capsByName['portable-vm'].blockers || [],
+        },
+        windowsSandbox: {
+          available: capsByName['windows-sandbox'].available === true,
+          releaseGrade: capsByName['windows-sandbox'].releaseGrade === true,
+          blockers: capsByName['windows-sandbox'].blockers || [],
+        },
       },
     };
   }
 
   async runContainmentSelfTest() {
-    const order = this.prefer === 'microvm' ? ['microvm', 'windows-sandbox'] : ['windows-sandbox', 'microvm'];
     const failures = [];
-    for (const name of order) {
+    for (const name of this._order()) {
       const backend = this._backend(name);
       const result = await backend.runContainmentSelfTest();
       if (result && result.ok === true) {
@@ -62,43 +90,30 @@ class IsolationBackendRouter {
   }
 
   async runIsolationSelfTest() {
-    if (!this._active) {
-      const containment = await this.runContainmentSelfTest();
-      if (!containment.ok) return containment;
-    }
-    const backend = this._backend(this._active);
-    const result = await backend.runIsolationSelfTest();
-    if (result && result.ok === true) return { ...result, backend: this._active };
+    const failures = [];
+    const candidates = this._active
+      ? [this._active, ...this._order().filter(name => name !== this._active)]
+      : this._order();
 
-    const failedBackend = this._active;
-    const fallback = failedBackend === 'microvm' ? 'windows-sandbox' : 'microvm';
-    const fallbackBackend = this._backend(fallback);
-    const fallbackContainment = await fallbackBackend.runContainmentSelfTest();
-    if (!fallbackContainment || fallbackContainment.ok !== true) {
-      this._active = null;
-      return {
-        ok: false,
-        code: 'NO_ISOLATION_BACKEND_ISOLATION_CERTIFIED',
-        failures: [
-          { backend: failedBackend, code: result && result.code ? result.code : 'ISOLATION_SELF_TEST_FAILED' },
-          { backend: fallback, code: fallbackContainment && fallbackContainment.code ? fallbackContainment.code : 'CONTAINMENT_SELF_TEST_FAILED' },
-        ],
-      };
+    for (const name of candidates) {
+      const backend = this._backend(name);
+      if (name !== this._active) {
+        const containment = await backend.runContainmentSelfTest();
+        if (!containment || containment.ok !== true) {
+          failures.push({ backend: name, code: containment && containment.code ? containment.code : 'CONTAINMENT_SELF_TEST_FAILED' });
+          continue;
+        }
+      }
+      const isolation = await backend.runIsolationSelfTest();
+      if (isolation && isolation.ok === true) {
+        this._active = name;
+        return { ...isolation, backend: name };
+      }
+      failures.push({ backend: name, code: isolation && isolation.code ? isolation.code : 'ISOLATION_SELF_TEST_FAILED' });
     }
-    const fallbackIsolation = await fallbackBackend.runIsolationSelfTest();
-    if (fallbackIsolation && fallbackIsolation.ok === true) {
-      this._active = fallback;
-      return { ...fallbackIsolation, backend: fallback };
-    }
+
     this._active = null;
-    return {
-      ok: false,
-      code: 'NO_ISOLATION_BACKEND_ISOLATION_CERTIFIED',
-      failures: [
-        { backend: failedBackend, code: result && result.code ? result.code : 'ISOLATION_SELF_TEST_FAILED' },
-        { backend: fallback, code: fallbackIsolation && fallbackIsolation.code ? fallbackIsolation.code : 'ISOLATION_SELF_TEST_FAILED' },
-      ],
-    };
+    return { ok: false, code: 'NO_ISOLATION_BACKEND_ISOLATION_CERTIFIED', failures };
   }
 
   async analyze(samplePath, expectedIdentity = null) {
@@ -113,4 +128,4 @@ class IsolationBackendRouter {
   }
 }
 
-module.exports = { IsolationBackendRouter };
+module.exports = { IsolationBackendRouter, BACKENDS };
