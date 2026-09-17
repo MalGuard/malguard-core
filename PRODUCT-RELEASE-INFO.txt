@@ -1,23 +1,22 @@
-MalGuard Product Release Candidate
-Product version: 0.9.0-rc.1
-Date: 2026-09-12
+MalGuard Public Beta
+Desktop version: 0.6.1-beta.1
+Core baseline: 0.9.0-rc.1
+Date: 2026-09-17
 
-Purpose:
-- Frozen scanner-core baseline for private GitHub product development.
-- Foundation for Desktop Guard, real-time protection, quarantine/restore,
-  runtime mod attribution, behavioral sandboxing, secure updates and signing.
+Release status:
+- PUBLIC BETA, not Stable/GA.
+- Intended for public testing and bug reporting.
+- Standard scanning and the installable sealed Windows scanner are included.
+- Plus/Pro Sandbox paths remain fail-closed unless the local Windows host successfully self-certifies Windows Sandbox isolation.
+- No claim is made that Windows Sandbox has been live-certified on every tester host.
 
-Local validation at packaging:
-- Full Engineering Hardening suite: PASS 13/13
-- Regression corpus: PASS 58/58
-- Random malformed fuzz: PASS 500 cases
-- Mutated ZIP fuzz: PASS 500 cases
-- PE adversarial fuzz: PASS 600 cases
-- Worker race/crash/timeout/abort hardening: PASS
-- Security mutation tests: PASS
-- Self-Test integrity: PASS
+Security posture:
+- Runtime package self-integrity is enforced for sealed builds.
+- Release/update trust uses signed metadata and package integrity verification.
+- CI workflows use pinned external actions and restricted credentials.
+- Untrusted samples must never execute directly on the host when Sandbox acceptance is unavailable.
 
-Acceptance status:
-- Scanner core is release-candidate quality for the defined engineering scope.
-- Public/commercial release is NOT yet declared.
-- Real browser acceptance and future product modules remain tracked work.
+Public Beta acceptance policy:
+- A failed or unavailable isolation capability must produce a blocked/inconclusive result, never a false SAFE verdict.
+- Security defects reported by beta testers are treated as release blockers for Stable.
+- Stable release remains gated on real Windows Sandbox host acceptance evidence and regression validation.
