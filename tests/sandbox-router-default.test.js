@@ -6,6 +6,8 @@ const { IsolationBackendRouter } = require('../desktop-app/sandbox/isolation-bac
 
 const controller = new SandboxController({ autoCertify: false });
 assert(controller.windowsBackend instanceof IsolationBackendRouter, 'SandboxController must default to the multi-backend isolation router');
+assert.equal(controller.windowsBackend.prefer, 'windows-sandbox', 'certified Windows Sandbox must be preferred when available');
+assert.deepEqual(controller.windowsBackend._order(), ['windows-sandbox', 'microvm', 'portable-vm']);
 const initial = controller.certificationStatus();
 assert.equal(initial.ok, false);
 assert.equal(initial.state, 'not_run');
@@ -20,4 +22,4 @@ const injected = {
 const compatible = new SandboxController({ windowsBackend: injected, autoCertify: false });
 assert.strictEqual(compatible.windowsBackend, injected, 'legacy backend injection must remain supported');
 
-console.log('✓ SandboxController default: multi-backend isolation router active; legacy backend injection preserved PASS');
+console.log('✓ SandboxController default: Windows Sandbox first, MalGuard VM fallback router active, legacy injection preserved PASS');
