@@ -1,0 +1,28 @@
+{
+  "name": "malguard-platform-clients",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MalGuard iOS, Android and macOS client wrappers around the hardened browser scanner",
+  "main": "electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "build:web": "node scripts/build-web.js",
+    "cap:add:android": "npx cap add android",
+    "cap:add:ios": "npx cap add ios",
+    "cap:sync:android": "npm run build:web && npx cap sync android",
+    "cap:sync:ios": "npm run build:web && npx cap sync ios",
+    "electron:start": "npm run build:web && electron .",
+    "electron:package:arm64": "npm run build:web && electron-packager . MalGuard --platform=darwin --arch=arm64 --out=dist/macos --overwrite --asar --prune=true",
+    "electron:package:x64": "npm run build:web && electron-packager . MalGuard --platform=darwin --arch=x64 --out=dist/macos --overwrite --asar --prune=true"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/cli": "8.5.2",
+    "@capacitor/ios": "8.5.2",
+    "@electron/packager": "20.3.0",
+    "electron": "44.3.0"
+  }
+}
