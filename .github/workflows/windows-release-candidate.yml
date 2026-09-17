@@ -170,7 +170,7 @@ jobs:
           $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
           $root = Join-Path (Get-Location) "dist/malguard-desktop-$version"
           $sums = Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Raw
-          foreach ($file in @('desktop-app/bin/MalGuard.exe','runtime/node.exe','runtime/NODE-LICENSE.txt','desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe')) {
+          foreach ($file in @('desktop-app/bin/MalGuard.exe','desktop-app/runtime/node.exe','desktop-app/runtime/NODE-LICENSE.txt','desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe')) {
             $target = Join-Path $root ($file -replace '/', '\')
             if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "packaged runtime missing: $file" }
             $escaped = [regex]::Escape($file)
