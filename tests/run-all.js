@@ -8,6 +8,7 @@ const tests=[
  'self-heal.test.js',
  'scan-resilience.test.js',
  'workflow-supply-chain.test.js',
+ 'platform-clients-source.test.js',
  'public-release-policy.test.js',
  'windows-installer-source.test.js',
  'secure-update.test.js',
