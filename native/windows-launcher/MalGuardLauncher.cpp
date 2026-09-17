@@ -18,15 +18,33 @@ bool regularFileExists(const std::wstring& path) {
     return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY) && !(attrs & FILE_ATTRIBUTE_REPARSE_POINT);
 }
 
+std::wstring parentDirectory(const std::wstring& value) {
+    const size_t slash = value.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) return L"";
+    return value.substr(0, slash);
+}
+
+std::wstring findPackageRoot(std::wstring candidate) {
+    for (int depth = 0; depth < 4 && !candidate.empty(); ++depth) {
+        if (regularFileExists(candidate + L"\\PACKAGE-MANIFEST.json") &&
+            regularFileExists(candidate + L"\\SHA256SUMS.txt") &&
+            regularFileExists(candidate + L"\\desktop-app\\server.js")) {
+            return candidate;
+        }
+        candidate = parentDirectory(candidate);
+    }
+    return L"";
+}
+
 void showError(const wchar_t* message) {
     MessageBoxW(nullptr, message, L"MalGuard", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
 }
 }
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    const std::wstring root = moduleDirectory();
+    const std::wstring root = findPackageRoot(moduleDirectory());
     if (root.empty()) {
-        showError(L"MalGuard could not resolve its installation directory.");
+        showError(L"MalGuard could not resolve its sealed installation directory.");
         return 2;
     }
 
