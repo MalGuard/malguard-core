@@ -37,4 +37,17 @@ assert(/LOCALAPPDATA/.test(installer), 'installer must use a user-local install 
 assert(/MalGuard\.previous/.test(installer), 'installer must retain rollback staging during replacement');
 assert(/NODE-LICENSE\.txt/.test(workflow), 'bundled Node license must ship with runtime');
 
-console.log('✓ Windows installable scanner source: pinned runtime, sealed launcher, atomic user install and public-signing gate PASS');
+assert(/expectedPayloadSha256/.test(installer) && /Installer payload archive integrity mismatch/.test(installer), 'installer must bind the embedded payload archive to its build-time SHA-256');
+assert(/function Assert-SealedPayload/.test(installer), 'installer must verify the extracted sealed payload before replacement');
+assert(/Payload SHA-256 mismatch/.test(installer), 'installer must hash-check every integrity-covered payload file');
+assert(/Payload checksum coverage mismatch/.test(installer), 'installer must reject incomplete checksum coverage');
+assert(/Unexpected payload file/.test(installer), 'installer must reject extra files injected into the extracted payload');
+assert(/Payload contains reparse-point/.test(installer), 'installer must reject reparse-point entries in the extracted payload');
+assert(/sourceCommit/.test(installer) && /Payload source provenance is invalid/.test(installer), 'installer must require embedded source provenance');
+assert(/Assert-SealedPayload \$stage/.test(installer), 'payload verification must run before the installed target is replaced');
+
+const verifyIndex = installer.indexOf('Assert-SealedPayload $stage');
+const replaceIndex = installer.indexOf('Move-Item -LiteralPath $stage -Destination $target');
+assert(verifyIndex >= 0 && replaceIndex > verifyIndex, 'installer must verify the payload before atomic replacement');
+
+console.log('✓ Windows installable scanner source: pinned runtime, sealed launcher, pre-install payload verification, atomic rollback and public-signing gate PASS');
