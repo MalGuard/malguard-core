@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const path = require('path');
 
-const PIPELINE_VERSION = '1.2.0';
+const PIPELINE_VERSION = '1.3.0';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
@@ -38,7 +38,6 @@ function mergeSandboxVerdict(localVerdict, sandboxResult) {
   if (local === 'malicious' || sandboxVerdict === 'malicious') return 'malicious';
   if (local === 'suspicious') return 'suspicious';
   if (sandboxVerdict === 'suspicious') return 'suspicious';
-  // Sandbox telemetry is advisory and must never upgrade an uncertain local result to SAFE.
   if (local === 'inconclusive') return 'inconclusive';
   return local;
 }
@@ -47,9 +46,14 @@ function directSandboxVerdict(sandboxResult) {
   if (!sandboxExecutionProven(sandboxResult)) return 'inconclusive';
   const verdict = normalizeVerdict(sandboxResult && sandboxResult.verdict);
   if (verdict === 'malicious' || verdict === 'suspicious') return verdict;
-  // A direct Pro sandbox has no normal static scan behind it. SAFE is accepted only
-  // from a release-grade backend with proof that Windows Sandbox and the sample started.
   if (verdict === 'safe' && sandboxResult.releaseGrade === true) return 'safe';
+  return 'inconclusive';
+}
+
+function fallbackVerdict(localVerdict) {
+  const verdict = normalizeVerdict(localVerdict);
+  if (verdict === 'malicious' || verdict === 'suspicious') return verdict;
+  // Missing behavioral execution proof means a clean fallback scan may not upgrade to SAFE.
   return 'inconclusive';
 }
 
@@ -121,6 +125,7 @@ class ModelScanPipelineManager {
       localResult: null,
       preflight: null,
       sandboxResult: null,
+      fallbackResult: null,
       finalResult: null,
       error: null,
     };
@@ -186,7 +191,6 @@ class ModelScanPipelineManager {
   async _runPlus(session) {
     this._emit(session, 'prepare', 'running', 'Validating file and preparing Plus deep scanner');
     this._emit(session, 'static_scan', 'running', 'Running local deep static analysis');
-    // Internal core mode remains "pro" for backward compatibility. Product model is Plus.
     const local = await this.scanner.scanPath(session.filePath, 'pro');
     session.localResult = clone(local);
     const localVerdict = normalizeVerdict(local && local.finalVerdict);
@@ -306,27 +310,70 @@ class ModelScanPipelineManager {
     });
   }
 
+  async _runFallbackDeepScan(session, reasonCode) {
+    this._emit(session, 'fallback_analysis', 'running', 'Sandbox unavailable; running fail-closed deep fallback analysis', { reasonCode });
+    try {
+      const local = await this.scanner.scanPath(session.filePath, 'pro');
+      session.localResult = clone(local);
+      const localVerdict = normalizeVerdict(local && local.finalVerdict);
+      const verdict = fallbackVerdict(localVerdict);
+      const engines = {
+        deepStatic: true,
+        multiLayer: !!(local && local.multiLayer),
+        archive: !!(local && local.archiveInspection),
+        script: !!(local && local.scriptAnalysis),
+        threatIntel: !!(local && local.threatIntel),
+      };
+      session.fallbackResult = {
+        ok: true,
+        reasonCode,
+        localVerdict,
+        verdict,
+        engines,
+        localResult: clone(local),
+      };
+      this._emit(session, 'fallback_analysis', 'completed', 'Deep fallback analysis completed', {
+        localVerdict,
+        verdict,
+        engines,
+      });
+      return session.fallbackResult;
+    } catch (error) {
+      const failure = {
+        ok: false,
+        reasonCode,
+        verdict: 'inconclusive',
+        error: { code: error.code || 'FALLBACK_ANALYSIS_FAILED', message: error.message || 'fallback analysis failed' },
+      };
+      session.fallbackResult = failure;
+      this._emit(session, 'fallback_analysis', 'failed', 'Deep fallback analysis also failed closed', failure.error);
+      return failure;
+    }
+  }
+
   async _runPro(session) {
     this._emit(session, 'preflight', 'running', 'Validating sample before direct Sandbox handoff');
     const preflight = await this.sandbox.preflightSample(session.filePath);
     session.preflight = clone(preflight);
     if (!preflight || preflight.ok !== true) {
-      this._emit(session, 'preflight', 'blocked', 'Pro Sandbox preflight failed closed', {
-        code: preflight && preflight.code ? preflight.code : 'SANDBOX_PREFLIGHT_FAILED',
-      });
+      const code = preflight && preflight.code ? preflight.code : 'SANDBOX_PREFLIGHT_FAILED';
+      this._emit(session, 'preflight', 'blocked', 'Pro Sandbox preflight failed closed', { code });
+      const fallback = await this._runFallbackDeepScan(session, code);
       session.finalResult = {
         model: 'pro',
-        verdict: 'inconclusive',
-        completionState: 'preflight_failed_closed',
+        verdict: fallback.verdict,
+        completionState: 'preflight_failed_fallback_complete',
         sandboxRequested: true,
         sandboxStarted: false,
         sampleExecutionStarted: false,
         sandboxCompleted: false,
-        preflight: clone(preflight || { ok: false, code: 'SANDBOX_PREFLIGHT_FAILED' }),
+        fallbackUsed: true,
+        preflight: clone(preflight || { ok: false, code }),
+        fallbackResult: clone(fallback),
       };
       session.state = 'completed';
-      this._emit(session, 'final_verdict', 'completed', 'Final verdict: INCONCLUSIVE', {
-        verdict: 'inconclusive', model: 'pro', sandboxStarted: false, sampleExecutionStarted: false, sandboxCompleted: false,
+      this._emit(session, 'final_verdict', 'completed', `Final verdict: ${fallback.verdict.toUpperCase()}`, {
+        verdict: fallback.verdict, model: 'pro', sandboxStarted: false, sampleExecutionStarted: false, sandboxCompleted: false, fallbackUsed: true,
       });
       return;
     }
@@ -349,25 +396,28 @@ class ModelScanPipelineManager {
         : sandboxResult && sandboxResult.ok === true
           ? 'SANDBOX_EXECUTION_PROOF_MISSING'
           : 'SANDBOX_UNAVAILABLE';
-      this._emit(session, 'sandbox_analysis', 'blocked', 'Direct Sandbox analysis could not prove real isolated execution; result remains fail-closed', {
+      this._emit(session, 'sandbox_analysis', 'blocked', 'Direct Sandbox analysis could not prove real isolated execution; starting deep fallback analysis', {
         code,
         sandboxStarted,
         sampleExecutionStarted,
       });
+      const fallback = await this._runFallbackDeepScan(session, code);
       session.finalResult = {
         model: 'pro',
-        verdict: 'inconclusive',
-        completionState: 'sandbox_unavailable_fail_closed',
+        verdict: fallback.verdict,
+        completionState: 'sandbox_unavailable_fallback_complete',
         sandboxRequested: true,
         sandboxStarted,
         sampleExecutionStarted,
         sandboxCompleted: false,
+        fallbackUsed: true,
         preflight: clone(preflight),
         sandboxResult: clone(sandboxResult || { ok: false, verdict: 'inconclusive' }),
+        fallbackResult: clone(fallback),
       };
       session.state = 'completed';
-      this._emit(session, 'final_verdict', 'completed', 'Final verdict: INCONCLUSIVE', {
-        verdict: 'inconclusive', model: 'pro', sandboxStarted, sampleExecutionStarted, sandboxCompleted: false,
+      this._emit(session, 'final_verdict', 'completed', `Final verdict: ${fallback.verdict.toUpperCase()}`, {
+        verdict: fallback.verdict, model: 'pro', sandboxStarted, sampleExecutionStarted, sandboxCompleted: false, fallbackUsed: true,
       });
       return;
     }
@@ -388,17 +438,17 @@ class ModelScanPipelineManager {
       sandboxStarted: true,
       sampleExecutionStarted: true,
       sandboxCompleted: true,
+      fallbackUsed: false,
       preflight: clone(preflight),
       sandboxResult: clone(sandboxResult),
     };
     session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()}`, {
-      verdict: finalVerdict, model: 'pro', sandboxStarted: true, sampleExecutionStarted: true, sandboxCompleted: true,
+      verdict: finalVerdict, model: 'pro', sandboxStarted: true, sampleExecutionStarted: true, sandboxCompleted: true, fallbackUsed: false,
     });
   }
 }
 
-// Compatibility wrapper: the old "Pro scan" is now the product's Plus model.
 class ProScanPipelineManager extends ModelScanPipelineManager {
   start(filePath) {
     return super.start(filePath, 'plus');
@@ -416,4 +466,5 @@ module.exports = {
   sandboxExecutionProven,
   mergeSandboxVerdict,
   directSandboxVerdict,
+  fallbackVerdict,
 };
