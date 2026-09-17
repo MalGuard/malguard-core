@@ -24,22 +24,83 @@ New-Item -ItemType Directory -Path $work -Force | Out-Null
 try {
   $payload = Join-Path $work 'payload.zip'
   Compress-Archive -Path (Join-Path $package '*') -DestinationPath $payload -CompressionLevel Optimal -Force
+  $payloadSha256 = (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
 
   $installer = @'
 $ErrorActionPreference = 'Stop'
 $payload = Join-Path $PSScriptRoot 'payload.zip'
+$expectedPayloadSha256 = '__MALGUARD_PAYLOAD_SHA256__'
 $programs = Join-Path $env:LOCALAPPDATA 'Programs'
 $target = Join-Path $programs 'MalGuard'
 $stage = Join-Path $programs ('MalGuard.install.' + [guid]::NewGuid().ToString('N'))
 $backup = Join-Path $programs 'MalGuard.previous'
 $launcherRelative = 'desktop-app\bin\MalGuard.exe'
 $nodeRelative = 'desktop-app\runtime\node.exe'
+
+function Assert-SealedPayload([string]$Root) {
+  $manifestPath = Join-Path $Root 'PACKAGE-MANIFEST.json'
+  $sumsPath = Join-Path $Root 'SHA256SUMS.txt'
+  if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or -not (Test-Path -LiteralPath $sumsPath -PathType Leaf)) {
+    throw 'Payload seal is incomplete.'
+  }
+
+  $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+  if ($manifest.schemaVersion -ne '1.0.0' -or $manifest.product -ne 'MalGuard Desktop' -or $manifest.entrypoint -ne 'desktop-app/server.js') {
+    throw 'Payload manifest identity is invalid.'
+  }
+  if ([string]$manifest.sourceCommit -notmatch '^(?:[a-f0-9]{40}|[a-f0-9]{64})$') {
+    throw 'Payload source provenance is invalid.'
+  }
+  $fileCount = [int]$manifest.fileCount
+  if ($fileCount -lt 3) { throw 'Payload manifest file count is invalid.' }
+
+  $expected = @{}
+  foreach ($line in @(Get-Content -LiteralPath $sumsPath)) {
+    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    if ($line -notmatch '^([a-f0-9]{64})  (.+)$') { throw "Malformed payload checksum entry: $line" }
+    $relative = [string]$Matches[2]
+    if ($relative -eq 'SHA256SUMS.txt' -or $relative -match '\\' -or $relative.StartsWith('/') -or $relative -match '^[A-Za-z]:' -or $relative -match '(^|/)\.\.(/|$)') {
+      throw "Unsafe payload checksum path: $relative"
+    }
+    if ($expected.ContainsKey($relative)) { throw "Duplicate payload checksum entry: $relative" }
+    $expected[$relative] = ([string]$Matches[1]).ToLowerInvariant()
+  }
+  if (-not $expected.ContainsKey('PACKAGE-MANIFEST.json')) { throw 'Payload manifest is not integrity-covered.' }
+
+  foreach ($dir in @(Get-ChildItem -LiteralPath $Root -Directory -Recurse -Force)) {
+    if (($dir.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      throw "Payload contains reparse-point directory: $($dir.FullName)"
+    }
+  }
+
+  $files = @(Get-ChildItem -LiteralPath $Root -File -Recurse -Force)
+  if ($files.Count -ne $fileCount) { throw "Payload file count mismatch: expected $fileCount, got $($files.Count)" }
+  if ($expected.Count -ne ($files.Count - 1)) { throw 'Payload checksum coverage mismatch.' }
+
+  foreach ($item in $files) {
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      throw "Payload contains reparse-point file: $($item.FullName)"
+    }
+    $relative = ($item.FullName.Substring($Root.Length) -replace '^[\\/]+','') -replace '\\','/'
+    if ($relative -eq 'SHA256SUMS.txt') { continue }
+    if (-not $expected.ContainsKey($relative)) { throw "Unexpected payload file: $relative" }
+    $actual = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expected[$relative]) { throw "Payload SHA-256 mismatch: $relative" }
+  }
+}
+
+$actualPayloadSha256 = (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualPayloadSha256 -ne $expectedPayloadSha256) {
+  throw 'Installer payload archive integrity mismatch.'
+}
+
 New-Item -ItemType Directory -Path $programs -Force | Out-Null
 try {
   Expand-Archive -LiteralPath $payload -DestinationPath $stage -Force
   foreach ($required in @($launcherRelative,$nodeRelative,'PACKAGE-MANIFEST.json','SHA256SUMS.txt','desktop-app\integrity\preload.js','desktop-app\server.js')) {
     if (-not (Test-Path -LiteralPath (Join-Path $stage $required) -PathType Leaf)) { throw "Payload verification failed: $required" }
   }
+  Assert-SealedPayload $stage
 
   $installedNode = Join-Path $target $nodeRelative
   try {
@@ -61,16 +122,18 @@ try {
   $shortcut.Description = 'MalGuard Security Scanner'
   $shortcut.Save()
 
-  if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
   Start-Process -FilePath (Join-Path $target $launcherRelative) -WorkingDirectory $target
+  if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
 } catch {
   if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
-  if ((-not (Test-Path -LiteralPath $target)) -and (Test-Path -LiteralPath $backup)) {
+  if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue }
+  if (Test-Path -LiteralPath $backup) {
     Move-Item -LiteralPath $backup -Destination $target -ErrorAction SilentlyContinue
   }
   throw
 }
 '@
+  $installer = $installer.Replace('__MALGUARD_PAYLOAD_SHA256__', $payloadSha256)
   $installPath = Join-Path $work 'install.ps1'
   Set-Content -LiteralPath $installPath -Value $installer -Encoding UTF8
 
