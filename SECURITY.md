@@ -1,30 +1,32 @@
 # MalGuard Security Policy
 
-## Current release stage
+## Scope
 
-MalGuard 0.9.0-rc.1 is an engineering release candidate. It is not yet positioned as a replacement for a full endpoint antivirus or EDR product.
+MalGuard is a defensive security project. It is designed to reduce risk when inspecting supported game-related files and packages, not to provide a guarantee that any file is harmless.
 
 ## Security principles
 
-1. Fail closed rather than silently report SAFE when required coverage is unavailable.
-2. Never execute uploaded or scanned content as part of static analysis.
-3. Treat untrusted archive metadata, sizes and offsets as attacker-controlled.
-4. Bound CPU, memory, archive expansion and scan time where supported.
-5. Isolate browser scanning in a Dedicated Worker and recover from crash/timeout/abort.
-6. Keep verdict schemas/version contracts explicit and reject incompatible results.
-7. Test security controls with adversarial, fuzz and mutation testing rather than happy-path tests alone.
+1. Fail closed when required analysis, integrity, provenance, or isolation evidence is unavailable.
+2. Never weaken a security control merely to make a test or release pass.
+3. Never download or execute real malware in development, tests, or CI. Use harmless synthetic fixtures only.
+4. Treat untrusted files, archives, metadata, offsets, paths, and update metadata as attacker-controlled.
+5. Bound resource use where supported and reject malformed or ambiguous inputs safely.
+6. Keep update, release, and runtime integrity verification cryptographically bound to expected provenance.
+7. Keep release-signing private keys out of GitHub Actions and source control.
+8. Require reviewed changes and CI validation before merging security-sensitive changes.
 
-## Known limitations in 0.9.0-rc.1
+## Isolation
 
-- No production desktop real-time game guard yet.
-- No production behavioral sandbox yet.
-- No Authenticode trust-chain validation.
-- No complete PE checksum/authenticity validation.
-- No deep extraction of 7z, RAR or RPF.
-- No recursive deep nested-archive extraction.
-- Script analysis is static/heuristic rather than full compiler/AST/emulation coverage.
-- Test corpus is useful but much smaller than commercial AV telemetry corpora.
+MalGuard includes its own isolation-routing foundations, including MicroVM and portable VM backends. Windows Sandbox may be used as an optional backend on compatible hosts, but it is not a requirement for the MalGuard VM path.
 
-## Reporting security issues
+No backend may be treated as release-grade merely because a simulated or contract test passed. Host/backend-specific execution evidence must be truthful, and missing evidence must remain fail closed.
 
-Do not publish suspected vulnerabilities before they are reviewed. During private development, file them in the private project repository with reproduction information, affected component/version and expected fail-closed behavior.
+## Release integrity
+
+Release candidates are bound to source provenance and package integrity. Public Windows distribution must follow the project's code-signing policy and must not substitute an unsigned or unverified build for a signed release.
+
+## Reporting vulnerabilities
+
+Please report suspected vulnerabilities privately to the maintainers before public disclosure. Include the affected commit/version, reproduction steps using harmless fixtures, expected behavior, and observed behavior. Do not attach real malware.
+
+After the repository is public, use GitHub's private vulnerability reporting feature when it is available for this repository.
