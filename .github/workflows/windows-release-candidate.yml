@@ -85,7 +85,8 @@ jobs:
             throw "untrusted Node runtime origin: $uri"
           }
           $archive = Join-Path $env:RUNNER_TEMP $entry.archive
-          Invoke-WebRequest -Uri $uri -OutFile $archive
+          $response = Invoke-WebRequest -Uri $uri -OutFile $archive -MaximumRedirection 0 -PassThru
+          if ([int]$response.StatusCode -ne 200) { throw "Node runtime download returned HTTP $($response.StatusCode)" }
           $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne ([string]$entry.sha256).ToLowerInvariant()) { throw 'Node runtime SHA-256 mismatch' }
           $extract = Join-Path $env:RUNNER_TEMP "node-runtime-${{ matrix.arch }}"
