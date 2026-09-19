@@ -81,7 +81,7 @@ jobs:
           $entry = $lock.architectures.'${{ matrix.arch }}'
           if (-not $entry) { throw 'missing Node runtime architecture lock' }
           $uri = [Uri]($lock.source + $entry.archive)
-          if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'nodejs.org' -or $uri.AbsolutePath -notlike '/dist/v22.23.2/*') {
+          if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'nodejs.org' -or $uri.Port -ne 443 -or $uri.UserInfo -or $uri.AbsolutePath -notlike '/dist/v22.23.2/*') {
             throw "untrusted Node runtime origin: $uri"
           }
           $archive = Join-Path $env:RUNNER_TEMP $entry.archive
