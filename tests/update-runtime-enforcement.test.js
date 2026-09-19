@@ -83,8 +83,22 @@ try {
   });
   assert.throws(
     () => manager.verifyManifest(badHost.manifest, badHost.signature, now),
-    /host is not trusted/,
-    'signed metadata must still be pinned to trusted distribution hosts'
+    /origin is not trusted/,
+    'signed metadata must still be pinned to trusted distribution origins'
+  );
+
+  const unexpectedPort = signedManifest({
+    releaseSequence: 43,
+    version: '1.2.5',
+    package: {
+      ...candidate.manifest.package,
+      url: `https://updates.example.invalid:4443/releases/${path.basename(packagePath)}`,
+    },
+  });
+  assert.throws(
+    () => manager.verifyManifest(unexpectedPort.manifest, unexpectedPort.signature, now),
+    /origin is not trusted/,
+    'a trusted hostname on an unexpected port must not bypass exact-origin policy'
   );
 
   fs.writeFileSync(statePath, '{broken json', 'utf8');
@@ -108,4 +122,4 @@ try {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-console.log('✓ Update runtime enforcement: signed manifest, host pinning, anti-replay state, verified staging and tamper rejection PASS');
+console.log('✓ Update runtime enforcement: signed manifest, exact-origin pinning, anti-replay state, verified staging and tamper rejection PASS');
