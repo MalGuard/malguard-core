@@ -1,46 +1,51 @@
-# MalGuard 0.9.0 Release Candidate
+# MalGuard
 
-MalGuard is a security-focused game-mod scanner currently centered on GTA mod packages and script content. This repository snapshot is the hardened scanner core that will become the foundation for MalGuard's desktop real-time game protection product.
+MalGuard is an open-source defensive security project focused on safer game-mod analysis, local scanning, and fail-closed isolation. GTA Guard is the first product focus.
 
-## Current security core
+## Security model
 
-- Static file and package inspection
-- ZIP/archive structure validation
-- Lua and C# script analysis
-- GTA mod/package routing and attribution data
-- Extension / magic consistency checks
-- Fail-closed verdict handling (`SAFE`, `SUSPICIOUS`, `MALICIOUS`, `INCONCLUSIVE`)
-- Free / Pro execution paths with fail-closed degradation
-- Dedicated Web Worker scanning and concurrency protection
-- Abort, timeout, crash and protocol/schema handling
-- Built-in component Self-Test
-- Regression corpus, malformed input fuzzing, PE adversarial fuzzing and mutation tests
+- Static file, archive, script, and PE-oriented inspection
+- Extension/magic consistency checks and bounded malformed-input handling
+- Fail-closed verdicts: `SAFE`, `SUSPICIOUS`, `MALICIOUS`, and `INCONCLUSIVE`
+- Dedicated Worker isolation for browser-side scanning paths
+- MalGuard isolation routing with MicroVM / portable VM foundations
+- Optional Windows Sandbox backend where available; it is not required for the MalGuard VM path
+- Runtime package integrity and sealed-package verification
+- Signed update and anti-replay enforcement
+- Supply-chain regression checks and pinned CI actions
 
-## Validation baseline
+MalGuard does **not** claim that a clean result proves a file is harmless. Isolation backends and host capabilities are certified independently and fail closed when required evidence is unavailable.
 
-The 0.9.0-rc.1 baseline passes the complete local Engineering Hardening suite:
+## Safe development rule
 
-- 13/13 test programs
-- 58/58 regression corpus cases
-- 0/22 benign-to-malicious false positives in the benchmark
-- 0/23 risk-labelled inputs escaping as SAFE
-- 500 random malformed cases + 500 mutated ZIP cases
-- 600 randomized PE-shaped adversarial cases
-- Worker race/crash/timeout/abort hardening checks
-- Security mutation tests and Self-Test integrity checks
+Do not add, download, or execute real malware in this repository or its CI. Tests must use harmless synthetic fixtures only.
 
-Run locally with:
+## Validation
+
+Run the engineering hardening suite locally with:
 
 ```bash
 node tests/run-all.js
 ```
 
-## Product status
+Additional release and platform-specific validation runs in GitHub Actions.
 
-This is a release candidate for the scanner core, not yet the finished commercial MalGuard product. The next product phases are documented in `docs/PRODUCT-ROADMAP.md`.
+## Open source
 
-The remaining major product work includes a desktop guard, real-time mod interception, quarantine/restore, runtime mod attribution, behavioral sandboxing, secure updates, signing, licensing and production telemetry.
+MalGuard is licensed under the [MIT License](LICENSE).
 
-## Security position
+Contributions are welcome through reviewed pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-A clean result is not a guarantee that a file is harmless. MalGuard is designed to fail closed when required analysis cannot be completed confidently. Known limitations are tracked in `SECURITY.md` and the audit notes.
+## Security reporting
+
+See [SECURITY.md](SECURITY.md). Do not publish suspected vulnerabilities before maintainers have had a reasonable opportunity to investigate and fix them.
+
+## Privacy
+
+See [PRIVACY.md](PRIVACY.md).
+
+## Code signing policy
+
+See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md).
+
+The project is preparing an application for free open-source code signing. Until a signing provider accepts the project and a release passes the required signing/verification gates, unsigned release candidates must not be presented as fully signed public Windows releases.
