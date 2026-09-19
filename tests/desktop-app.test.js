@@ -5,7 +5,8 @@ const path = require('path');
 const http = require('http');
 const { ScannerBridge } = require('../desktop-app/scanner-bridge.js');
 const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller.js');
-const { startServer } = require('../desktop-app/server.js');
+const { WindowsSandboxBackend } = require('../desktop-app/sandbox/windows-sandbox-backend.js');
+const { startServer, sandbox: productSandbox } = require('../desktop-app/server.js');
 
 function requestJson({ port, method = 'GET', path: requestPath }) {
  return new Promise((resolve,reject)=>{
@@ -23,6 +24,9 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
 }
 
 (async()=>{
+ assert(productSandbox.windowsBackend instanceof WindowsSandboxBackend,
+   'production Sandbox execution must be pinned to WindowsSandboxBackend, not a fallback router');
+
  const scanner = new ScannerBridge();
  let r = await scanner.scanPath(path.join(__dirname,'corpus','benign-config-read.lua'),'pro');
  assert.equal(r.finalVerdict,'safe');
