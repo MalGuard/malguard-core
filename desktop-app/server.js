@@ -11,6 +11,7 @@ const { ManagedInstallGuard } = require('../desktop-guard/windows-agent/managed-
 const { ProtectionCoordinator } = require('../desktop-guard/windows-agent/protection-coordinator.js');
 const { RuntimeGameProcessGuard } = require('../desktop-guard/windows-agent/runtime-process-guard.js');
 const { SandboxController } = require('./sandbox/sandbox-controller.js');
+const { WindowsSandboxBackend } = require('./sandbox/windows-sandbox-backend.js');
 const { EmbeddedValidationLab } = require('./sandbox/embedded-validation-lab.js');
 const { IncidentStore } = require('../desktop-guard/windows-agent/incident-store.js');
 const { SettingsStore } = require('./settings-store.js');
@@ -27,7 +28,10 @@ const PORT = Number(process.env.MALGUARD_PORT || 18777);
 const HOST = '127.0.0.1';
 const threatIntel = new ThreatIntelService();
 const scanner = new ScannerBridge({ threatIntel });
-const sandbox = new SandboxController({ autoCertify: true });
+const sandbox = new SandboxController({
+  windowsBackend: new WindowsSandboxBackend(),
+  autoCertify: true,
+});
 const validationLab = new EmbeddedValidationLab({ windowsBackend: sandbox.windowsBackend });
 const modelPipeline = new ModelScanPipelineManager({ scanner, sandbox });
 const entitlementGate = new EntitlementGate();
