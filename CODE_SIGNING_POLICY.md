@@ -2,7 +2,9 @@
 
 ## Current status
 
-MalGuard is preparing to apply for free open-source code signing. The project must not claim that a release is signed by SignPath Foundation until the application has been accepted and the actual artifact has passed signature verification.
+MalGuard has submitted an application for free open-source code signing through SignPath Foundation. The application is pending review.
+
+The project must not claim that a release is signed by SignPath Foundation until the application has been accepted and the actual artifact has passed signature verification.
 
 Target OSS signing provider, pending acceptance: SignPath.io / SignPath Foundation.
 
@@ -15,12 +17,22 @@ After acceptance, release and download pages will include the required attributi
 - CI actions and build dependencies remain pinned and fail closed according to repository policy.
 - Artifacts are re-opened and integrity-verified after packaging.
 - Source commit/provenance binding must match the expected release source.
+- The current Windows workflow creates unsigned engineering release candidates only. Public distribution remains blocked until the resulting installer passes the Authenticode verification gate.
+
+## SignPath integration boundary
+
+SignPath configuration identifiers and access tokens are not guessed or pre-created by this repository.
+
+After SignPath Foundation accepts the project, integration must use the organization/project/policy/artifact identifiers supplied by SignPath. Any SignPath API access token must be stored only as an Actions secret or provider-managed credential and must never be committed, printed, copied into release artifacts, or exposed in logs.
+
+The SignPath GitHub Action, if enabled after acceptance, must be pinned to an immutable full commit SHA and its output must pass the repository's Authenticode verification before it can become a public release.
 
 ## Key handling
 
 - MalGuard release-signing private keys must never be committed to the repository.
 - Offline release-signing private keys must never be placed in GitHub Actions.
 - Any external signing provider must protect its signing key outside this repository.
+- SignPath-managed Authenticode signing does not replace MalGuard's independent offline Ed25519 release-metadata trust boundary.
 
 ## Approval
 
