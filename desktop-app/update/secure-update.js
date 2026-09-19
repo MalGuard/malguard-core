@@ -115,16 +115,37 @@ function parseTimestamp(value, label) {
   return ms;
 }
 
+function normalizeTrustedDownloadOrigin(value) {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error('trusted update download origin is invalid');
+
+  let parsed;
+  try {
+    parsed = raw.includes('://') ? new URL(raw) : new URL(`https://${raw}`);
+  } catch (_) {
+    throw new Error('trusted update download origin is invalid');
+  }
+
+  if (parsed.protocol !== 'https:') throw new Error('trusted update download origin must use HTTPS');
+  if (parsed.username || parsed.password) throw new Error('trusted update download origin must not contain credentials');
+  if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    throw new Error('trusted update download origin must not contain a path, query or fragment');
+  }
+  return parsed.origin.toLowerCase();
+}
+
 function verifyPinnedHttpsUrl(rawUrl, packageName, allowedDownloadHosts) {
   if (!Array.isArray(allowedDownloadHosts) || allowedDownloadHosts.length === 0) {
-    throw new Error('trusted update download host allowlist is required');
+    throw new Error('trusted update download origin allowlist is required');
   }
   let parsed;
   try { parsed = new URL(rawUrl); } catch (_) { throw new Error('invalid update package URL'); }
   if (parsed.protocol !== 'https:') throw new Error('update package URL must use HTTPS');
   if (parsed.username || parsed.password) throw new Error('update package URL must not contain credentials');
-  const allowed = new Set(allowedDownloadHosts.map(host => String(host).toLowerCase()));
-  if (!allowed.has(parsed.hostname.toLowerCase())) throw new Error('update package host is not trusted');
+
+  const allowedOrigins = new Set(allowedDownloadHosts.map(normalizeTrustedDownloadOrigin));
+  if (!allowedOrigins.has(parsed.origin.toLowerCase())) throw new Error('update package origin is not trusted');
+
   let leaf;
   try { leaf = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || ''); }
   catch (_) { throw new Error('invalid update package URL path'); }
@@ -236,6 +257,8 @@ module.exports = {
   canonicalize,
   compareVersions,
   publicKeyFingerprint,
+  normalizeTrustedDownloadOrigin,
+  verifyPinnedHttpsUrl,
   verifyManifest,
   verifyOnlineUpdateManifest,
   verifyPackageFile,
