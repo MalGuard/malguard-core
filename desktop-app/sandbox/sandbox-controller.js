@@ -348,15 +348,30 @@ class SandboxController {
       const execution = result.telemetry && result.telemetry.execution;
       result.sampleExecutionStarted = !!(execution && execution.started === true);
       result.sandboxLaunched = result.ok === true && result.sampleExecutionStarted === true;
-      if (result.ok === true && (!execution || execution.attempted !== true || execution.started !== true)) {
+      if (result.ok === true && (!execution || execution.attempted !== true)) {
         return {
           ok: false,
           sandboxVersion: SANDBOX_VERSION,
           verdict: 'inconclusive',
-          code: 'SANDBOX_SAMPLE_EXECUTION_NOT_PROVEN',
+          code: 'SANDBOX_SAMPLE_EXECUTION_NOT_ATTEMPTED',
           preflight,
           backend: capabilities,
           certification: this.certificationStatus(),
+          telemetry: result.telemetry || null,
+          sandboxLaunched: false,
+          sampleExecutionStarted: false,
+        };
+      }
+      if (result.ok === true && execution.started !== true) {
+        return {
+          ok: false,
+          sandboxVersion: SANDBOX_VERSION,
+          verdict: 'inconclusive',
+          code: 'SANDBOX_SAMPLE_EXECUTION_NOT_STARTED',
+          preflight,
+          backend: capabilities,
+          certification: this.certificationStatus(),
+          telemetry: result.telemetry || null,
           sandboxLaunched: false,
           sampleExecutionStarted: false,
         };
