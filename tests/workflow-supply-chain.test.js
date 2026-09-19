@@ -24,6 +24,10 @@ for (const file of files) {
   assert(/^permissions:\s*\r?\n\s{2}contents:\s*read\s*$/m.test(text), `${file}: workflow must declare top-level read-only contents permission`);
   assert(!/^\s+(?:actions|checks|deployments|id-token|issues|packages|pages|pull-requests|repository-projects|security-events|statuses):\s*write\s*$/m.test(text), `${file}: workflow must not grant write-scoped token permissions`);
   assert(!/MALGUARD_RELEASE_SIGNING_PRIVATE_KEY_PEM/.test(text), `${file}: offline release signing private keys must never be referenced by GitHub Actions`);
+  for (const line of lines.filter(value => value.includes('SignPath/github-action-submit-signing-request'))) {
+    const ref = line.split('@')[1]?.split(/\\s|#/)[0] || '';
+    assert(/^[A-Fa-f0-9]{40}$/.test(ref), `${file}: SignPath signing action must be pinned to a full commit SHA`);
+  }
   for (const line of lines.filter(value => /sign-release-candidate\.js/.test(value))) {
     assert(/^\s*-\s*['"]tools\/sign-release-candidate\.js['"]\s*$/.test(line),
       `${file}: offline release signing tool may only appear as a path trigger, never as an executable workflow command`);
@@ -67,4 +71,4 @@ for (const file of files) {
 
 assert(externalUses >= 3, 'expected external actions to be checked');
 assert(checkoutUses >= 1, 'expected checkout actions to be checked');
-console.log(`✓ Workflow supply-chain policy: ${files.length} workflows, ${externalUses} external actions pinned by full SHA, checkout credentials disabled, token permissions read-only, lifecycle scripts blocked, offline signing isolated, runtime redirects refused`);
+console.log(`✓ Workflow supply-chain policy: ${files.length} workflows, ${externalUses} external actions pinned by full SHA, checkout credentials disabled, token permissions read-only, lifecycle scripts blocked, offline signing isolated, SignPath action pinning enforced, runtime redirects refused`);
