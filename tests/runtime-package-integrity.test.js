@@ -7,6 +7,11 @@ const os = require('os');
 const path = require('path');
 const { verifyRuntimePackageIntegrity } = require('../desktop-app/integrity/runtime-integrity.js');
 
+const integritySource = fs.readFileSync(path.join(__dirname, '..', 'desktop-app', 'integrity', 'runtime-integrity.js'), 'utf8');
+assert(/O_NOFOLLOW/.test(integritySource), 'runtime hashing must request no-follow file opens when the platform supports them');
+assert(/fstatSync/.test(integritySource) && /sameFileIdentity/.test(integritySource), 'runtime hashing must bind verification to one opened file identity');
+assert(/RUNTIME_INTEGRITY_FILE_CHANGED/.test(integritySource), 'runtime hashing must fail closed when file identity changes');
+
 function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
@@ -62,8 +67,21 @@ try {
 
   fs.rmSync(path.join(root, 'SHA256SUMS.txt'));
   assert.equal(verifyRuntimePackageIntegrity(root).code, 'RUNTIME_INTEGRITY_SEAL_INCOMPLETE');
+
+  if (process.platform !== 'win32') {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(root, { recursive: true });
+    writeSealedFixture(root);
+    const serverPath = path.join(root, 'desktop-app', 'server.js');
+    const outside = path.join(os.tmpdir(), `malguard-integrity-outside-${process.pid}.js`);
+    fs.writeFileSync(outside, "console.log('fixture');\n");
+    fs.rmSync(serverPath);
+    fs.symlinkSync(outside, serverPath);
+    assert.equal(verifyRuntimePackageIntegrity(root).code, 'RUNTIME_INTEGRITY_SYMLINK');
+    fs.rmSync(outside, { force: true });
+  }
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-console.log('✓ Runtime package integrity: sealed package verification, tamper detection, extra-file rejection and fail-closed seal handling PASS');
+console.log('✓ Runtime package integrity: sealed package verification, tamper detection, extra-file/symlink rejection, race-aware hashing and fail-closed seal handling PASS');
