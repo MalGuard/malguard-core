@@ -94,6 +94,13 @@ function verifyOnline(manifest, signature = sign(manifest), overrides = {}) {
 
 const online = onlineManifest();
 assert.equal(verifyOnline(online), true);
+
+const explicitlyAllowedPort = onlineManifest({
+  package: { url: 'https://updates.malguard.example:4443/malguard-desktop-1.0.1.zip' },
+});
+assert.equal(verifyOnline(explicitlyAllowedPort, sign(explicitlyAllowedPort), {
+  allowedDownloadHosts: ['https://updates.malguard.example:4443'],
+}), true, 'a non-default HTTPS port must require an explicitly pinned origin');
 assert.throws(() => verifyOnline(online, sign(online), { highestSeenVersion: '1.0.1' }), /replay or rollback/);
 assert.throws(() => verifyOnline(online, sign(online), { minimumReleaseSequence: 101 }), /release sequence/);
 
@@ -117,7 +124,8 @@ for (const [changed, pattern] of [
   [onlineManifest({ expiresAt: '2026-09-16T09:59:00.000Z' }), /expired/],
   [onlineManifest({ issuedAt: '2026-09-16T10:10:00.000Z' }), /from the future/],
   [onlineManifest({ package: { url: 'http://updates.malguard.example/malguard-desktop-1.0.1.zip' } }), /must use HTTPS/],
-  [onlineManifest({ package: { url: 'https://evil.example/malguard-desktop-1.0.1.zip' } }), /host is not trusted/],
+  [onlineManifest({ package: { url: 'https://evil.example/malguard-desktop-1.0.1.zip' } }), /origin is not trusted/],
+  [onlineManifest({ package: { url: 'https://updates.malguard.example:4443/malguard-desktop-1.0.1.zip' } }), /origin is not trusted/],
   [onlineManifest({ package: { url: 'https://updates.malguard.example/other.zip' } }), /URL\/name mismatch/],
 ]) {
   assert.throws(() => verifyOnline(changed, sign(changed)), pattern);
@@ -131,13 +139,19 @@ assert.throws(() => verifyOnlineUpdateManifest({
   currentVersion: '1.0.0',
   minimumReleaseSequence: 100,
   now,
-}), /host allowlist is required/);
+}), /origin allowlist is required/);
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'malguard-update-'));
 const fixture = path.join(dir, 'package.bin');
 fs.writeFileSync(fixture, packageBytes);
 assert.equal(verifyPackageFile(fixture, sha256, { expectedSize: packageBytes.length }), true);
 assert.equal(verifyOnlineUpdatePackage({ filePath: fixture, manifest: online }), true);
+assert.throws(() => verifyPackageFile(dir, sha256), /regular non-symlink file/);
+if (process.platform !== 'win32') {
+  const symlinkPath = path.join(dir, 'package-link.bin');
+  fs.symlinkSync(fixture, symlinkPath);
+  assert.throws(() => verifyPackageFile(symlinkPath, sha256), /regular non-symlink file/);
+}
 assert.throws(() => verifyPackageFile(fixture, ''), /invalid expected package sha256/);
 assert.throws(() => verifyPackageFile(fixture, 'not-a-sha256'), /invalid expected package sha256/);
 assert.throws(() => verifyPackageFile(fixture, sha256, { expectedSize: packageBytes.length + 1 }), /size mismatch/);

@@ -28,6 +28,14 @@ function assertRegularFile(filePath, code) {
   return stat;
 }
 
+function ensureTrustedDirectory(dirPath, code, label) {
+  fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 });
+  const stat = fs.lstatSync(dirPath);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    fail(`${label} must be a real non-symlink directory`, code);
+  }
+}
+
 class TrustedUpdateManager {
   constructor({
     currentVersion,
@@ -87,7 +95,7 @@ class TrustedUpdateManager {
   }
 
   persistState(state) {
-    fs.mkdirSync(path.dirname(this.statePath), { recursive: true, mode: 0o700 });
+    ensureTrustedDirectory(path.dirname(this.statePath), 'UPDATE_STATE_DIRECTORY_INVALID', 'update security state directory');
     const temp = `${this.statePath}.${crypto.randomUUID()}.tmp`;
     const body = JSON.stringify(state, null, 2) + '\n';
     fs.writeFileSync(temp, body, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
@@ -120,7 +128,7 @@ class TrustedUpdateManager {
     const state = this.verifyManifest(manifest, signature, now);
     verifyOnlineUpdatePackage({ filePath: downloadedPackagePath, manifest });
 
-    fs.mkdirSync(this.stagingRoot, { recursive: true, mode: 0o700 });
+    ensureTrustedDirectory(this.stagingRoot, 'UPDATE_STAGING_DIRECTORY_INVALID', 'update staging root');
     const stagedName = `${manifest.releaseSequence}-${manifest.package.name}`;
     const stagedPath = path.join(this.stagingRoot, stagedName);
     if (fs.existsSync(stagedPath)) fail('verified update staging target already exists', 'UPDATE_STAGE_COLLISION');

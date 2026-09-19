@@ -83,8 +83,22 @@ try {
   });
   assert.throws(
     () => manager.verifyManifest(badHost.manifest, badHost.signature, now),
-    /host is not trusted/,
-    'signed metadata must still be pinned to trusted distribution hosts'
+    /origin is not trusted/,
+    'signed metadata must still be pinned to trusted distribution origins'
+  );
+
+  const unexpectedPort = signedManifest({
+    releaseSequence: 43,
+    version: '1.2.5',
+    package: {
+      ...candidate.manifest.package,
+      url: `https://updates.example.invalid:4443/releases/${path.basename(packagePath)}`,
+    },
+  });
+  assert.throws(
+    () => manager.verifyManifest(unexpectedPort.manifest, unexpectedPort.signature, now),
+    /origin is not trusted/,
+    'a trusted hostname on an unexpected port must not bypass exact-origin policy'
   );
 
   fs.writeFileSync(statePath, '{broken json', 'utf8');
@@ -104,8 +118,29 @@ try {
     statePath: path.join(root, 'wrong-state.json'),
     stagingRoot: path.join(root, 'wrong-stage'),
   }), /fingerprint mismatch/);
+
+  if (process.platform !== 'win32') {
+    const realStage = path.join(root, 'real-stage');
+    const linkedStage = path.join(root, 'linked-stage');
+    fs.mkdirSync(realStage, { recursive: true });
+    fs.symlinkSync(realStage, linkedStage, 'dir');
+    const symlinkManager = new TrustedUpdateManager({
+      currentVersion: '1.2.3',
+      trustedPublicKeyPem: publicKeyPem,
+      trustedPublicKeySha256: fingerprint,
+      allowedDownloadHosts: ['updates.example.invalid'],
+      statePath: path.join(root, 'symlink-state', 'update-state.json'),
+      stagingRoot: linkedStage,
+    });
+    const symlinkCandidate = signedManifest({ releaseSequence: 50, version: '1.3.0' });
+    assert.throws(
+      () => symlinkManager.stageVerifiedCandidate({ ...symlinkCandidate, downloadedPackagePath: packagePath, now }),
+      /update staging root must be a real non-symlink directory/,
+      'update staging must reject a symlinked root'
+    );
+  }
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-console.log('✓ Update runtime enforcement: signed manifest, host pinning, anti-replay state, verified staging and tamper rejection PASS');
+console.log('✓ Update runtime enforcement: signed manifest, exact-origin pinning, anti-replay state, verified staging and tamper rejection PASS');

@@ -81,11 +81,12 @@ jobs:
           $entry = $lock.architectures.'${{ matrix.arch }}'
           if (-not $entry) { throw 'missing Node runtime architecture lock' }
           $uri = [Uri]($lock.source + $entry.archive)
-          if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'nodejs.org' -or $uri.AbsolutePath -notlike '/dist/v22.23.2/*') {
+          if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'nodejs.org' -or $uri.Port -ne 443 -or $uri.UserInfo -or $uri.AbsolutePath -notlike '/dist/v22.23.2/*') {
             throw "untrusted Node runtime origin: $uri"
           }
           $archive = Join-Path $env:RUNNER_TEMP $entry.archive
-          Invoke-WebRequest -Uri $uri -OutFile $archive
+          $response = Invoke-WebRequest -Uri $uri -OutFile $archive -MaximumRedirection 0 -PassThru
+          if ([int]$response.StatusCode -ne 200) { throw "Node runtime download returned HTTP $($response.StatusCode)" }
           $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne ([string]$entry.sha256).ToLowerInvariant()) { throw 'Node runtime SHA-256 mismatch' }
           $extract = Join-Path $env:RUNNER_TEMP "node-runtime-${{ matrix.arch }}"

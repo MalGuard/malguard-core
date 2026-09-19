@@ -115,16 +115,37 @@ function parseTimestamp(value, label) {
   return ms;
 }
 
+function normalizeTrustedDownloadOrigin(value) {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error('trusted update download origin is invalid');
+
+  let parsed;
+  try {
+    parsed = raw.includes('://') ? new URL(raw) : new URL(`https://${raw}`);
+  } catch (_) {
+    throw new Error('trusted update download origin is invalid');
+  }
+
+  if (parsed.protocol !== 'https:') throw new Error('trusted update download origin must use HTTPS');
+  if (parsed.username || parsed.password) throw new Error('trusted update download origin must not contain credentials');
+  if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    throw new Error('trusted update download origin must not contain a path, query or fragment');
+  }
+  return parsed.origin.toLowerCase();
+}
+
 function verifyPinnedHttpsUrl(rawUrl, packageName, allowedDownloadHosts) {
   if (!Array.isArray(allowedDownloadHosts) || allowedDownloadHosts.length === 0) {
-    throw new Error('trusted update download host allowlist is required');
+    throw new Error('trusted update download origin allowlist is required');
   }
   let parsed;
   try { parsed = new URL(rawUrl); } catch (_) { throw new Error('invalid update package URL'); }
   if (parsed.protocol !== 'https:') throw new Error('update package URL must use HTTPS');
   if (parsed.username || parsed.password) throw new Error('update package URL must not contain credentials');
-  const allowed = new Set(allowedDownloadHosts.map(host => String(host).toLowerCase()));
-  if (!allowed.has(parsed.hostname.toLowerCase())) throw new Error('update package host is not trusted');
+
+  const allowedOrigins = new Set(allowedDownloadHosts.map(normalizeTrustedDownloadOrigin));
+  if (!allowedOrigins.has(parsed.origin.toLowerCase())) throw new Error('update package origin is not trusted');
+
   let leaf;
   try { leaf = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || ''); }
   catch (_) { throw new Error('invalid update package URL path'); }
@@ -184,6 +205,14 @@ function verifyOnlineUpdateManifest({
   return true;
 }
 
+function sameFileIdentity(a, b) {
+  return a.dev === b.dev
+    && a.ino === b.ino
+    && a.size === b.size
+    && a.mtimeMs === b.mtimeMs
+    && a.ctimeMs === b.ctimeMs;
+}
+
 function verifyPackageFile(filePath, expectedSha256, { expectedSize = null, maxBytes = MAX_PACKAGE_BYTES } = {}) {
   if (typeof expectedSha256 !== 'string' || !SHA256_RE.test(expectedSha256)) throw new Error('invalid expected package sha256');
   const initial = fs.lstatSync(filePath);
@@ -196,7 +225,7 @@ function verifyPackageFile(filePath, expectedSha256, { expectedSize = null, maxB
   let actual;
   try {
     const before = fs.fstatSync(fd);
-    if (!before.isFile() || before.size !== initial.size || before.mtimeMs !== initial.mtimeMs) {
+    if (!before.isFile() || !sameFileIdentity(before, initial)) {
       throw new Error('update package changed before verification');
     }
     const hash = crypto.createHash('sha256');
@@ -207,14 +236,14 @@ function verifyPackageFile(filePath, expectedSha256, { expectedSize = null, maxB
       hash.update(buffer.subarray(0, bytesRead));
     }
     const after = fs.fstatSync(fd);
-    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw new Error('update package changed during verification');
+    if (!sameFileIdentity(after, before)) throw new Error('update package changed during verification');
     actual = hash.digest('hex');
   } finally {
     fs.closeSync(fd);
   }
 
   const finalStat = fs.lstatSync(filePath);
-  if (!finalStat.isFile() || finalStat.isSymbolicLink() || finalStat.size !== initial.size || finalStat.mtimeMs !== initial.mtimeMs) {
+  if (!finalStat.isFile() || finalStat.isSymbolicLink() || !sameFileIdentity(finalStat, initial)) {
     throw new Error('update package changed after verification');
   }
   if (!crypto.timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expectedSha256, 'hex'))) {
@@ -236,6 +265,8 @@ module.exports = {
   canonicalize,
   compareVersions,
   publicKeyFingerprint,
+  normalizeTrustedDownloadOrigin,
+  verifyPinnedHttpsUrl,
   verifyManifest,
   verifyOnlineUpdateManifest,
   verifyPackageFile,
