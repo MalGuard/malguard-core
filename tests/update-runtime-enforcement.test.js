@@ -118,6 +118,27 @@ try {
     statePath: path.join(root, 'wrong-state.json'),
     stagingRoot: path.join(root, 'wrong-stage'),
   }), /fingerprint mismatch/);
+
+  if (process.platform !== 'win32') {
+    const realStage = path.join(root, 'real-stage');
+    const linkedStage = path.join(root, 'linked-stage');
+    fs.mkdirSync(realStage, { recursive: true });
+    fs.symlinkSync(realStage, linkedStage, 'dir');
+    const symlinkManager = new TrustedUpdateManager({
+      currentVersion: '1.2.3',
+      trustedPublicKeyPem: publicKeyPem,
+      trustedPublicKeySha256: fingerprint,
+      allowedDownloadHosts: ['updates.example.invalid'],
+      statePath: path.join(root, 'symlink-state', 'update-state.json'),
+      stagingRoot: linkedStage,
+    });
+    const symlinkCandidate = signedManifest({ releaseSequence: 50, version: '1.3.0' });
+    assert.throws(
+      () => symlinkManager.stageVerifiedCandidate({ ...symlinkCandidate, downloadedPackagePath: packagePath, now }),
+      /update staging root must be a real non-symlink directory/,
+      'update staging must reject a symlinked root'
+    );
+  }
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
