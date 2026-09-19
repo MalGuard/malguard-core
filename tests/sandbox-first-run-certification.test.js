@@ -93,6 +93,44 @@ class FakeReleaseGradeBackend {
     assert.equal(result.sampleExecutionStarted, true);
     assert.equal(goodBackend.analyzeCalls.length, 2, 'customer scan must execute only after certification');
     assert.equal(path.resolve(goodBackend.analyzeCalls[1].samplePath), path.resolve(sample));
+
+    const fakeSuccessfulResult = (attempted, started) => ({
+      ok: true,
+      verdict: 'safe',
+      releaseGrade: true,
+      sampleSha256: result.preflight.sha256,
+      telemetry: {
+        schemaVersion: '1.1.0',
+        execution: {
+          attempted,
+          started,
+          exitCode: null,
+          timedOut: false,
+          cpuBudgetExceeded: false,
+          outputQuotaExceeded: false,
+          error: null,
+        },
+        baselineProcesses: [],
+        finalProcesses: [],
+        recentFiles: [],
+      },
+    });
+
+    goodBackend.analyze = async () => fakeSuccessfulResult(false, false);
+    const notAttempted = await controller.analyzeUntrustedSample(sample);
+    assert.equal(notAttempted.ok, false);
+    assert.equal(notAttempted.verdict, 'inconclusive');
+    assert.equal(notAttempted.code, 'SANDBOX_SAMPLE_EXECUTION_NOT_ATTEMPTED');
+    assert.equal(notAttempted.sandboxLaunched, false);
+    assert.equal(notAttempted.sampleExecutionStarted, false);
+
+    goodBackend.analyze = async () => fakeSuccessfulResult(true, false);
+    const notStarted = await controller.analyzeUntrustedSample(sample);
+    assert.equal(notStarted.ok, false);
+    assert.equal(notStarted.verdict, 'inconclusive');
+    assert.equal(notStarted.code, 'SANDBOX_SAMPLE_EXECUTION_NOT_STARTED');
+    assert.equal(notStarted.sandboxLaunched, false);
+    assert.equal(notStarted.sampleExecutionStarted, false);
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true });
   }
