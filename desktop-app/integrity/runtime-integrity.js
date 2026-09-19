@@ -8,20 +8,43 @@ const SUMS_FILE = 'SHA256SUMS.txt';
 const PACKAGE_MANIFEST = 'PACKAGE-MANIFEST.json';
 const HASH_RE = /^[a-f0-9]{64}$/;
 
-function sha256File(filePath) {
-  const hash = crypto.createHash('sha256');
-  const fd = fs.openSync(filePath, 'r');
+function sameFileIdentity(a, b) {
+  return a.dev === b.dev
+    && a.ino === b.ino
+    && a.size === b.size
+    && a.mtimeMs === b.mtimeMs
+    && a.ctimeMs === b.ctimeMs;
+}
+
+function sha256RegularFile(filePath, expectedStat = null) {
+  const noFollow = Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+  const fd = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow);
   try {
+    const before = fs.fstatSync(fd);
+    if (!before.isFile() || (expectedStat && !sameFileIdentity(before, expectedStat))) {
+      const error = new Error('runtime integrity file changed before hashing');
+      error.code = 'RUNTIME_INTEGRITY_FILE_CHANGED';
+      throw error;
+    }
+
+    const hash = crypto.createHash('sha256');
     const buffer = Buffer.allocUnsafe(64 * 1024);
-    let bytesRead = 0;
-    do {
-      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
-      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead));
-    } while (bytesRead > 0);
+    for (;;) {
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+
+    const after = fs.fstatSync(fd);
+    if (!sameFileIdentity(before, after)) {
+      const error = new Error('runtime integrity file changed during hashing');
+      error.code = 'RUNTIME_INTEGRITY_FILE_CHANGED';
+      throw error;
+    }
+    return { hash: hash.digest('hex'), stat: after };
   } finally {
     fs.closeSync(fd);
   }
-  return hash.digest('hex');
 }
 
 function normalizeRelative(value) {
@@ -113,9 +136,16 @@ function verifyRuntimePackageIntegrity(root, { requireSealed = false } = {}) {
     let stat;
     try { stat = fs.lstatSync(target); } catch (_) { return fail('RUNTIME_INTEGRITY_FILE_MISSING', relative); }
     if (!stat.isFile() || stat.isSymbolicLink()) return fail('RUNTIME_INTEGRITY_FILE_TYPE_INVALID', relative);
-    let actualHash;
-    try { actualHash = sha256File(target); } catch (_) { return fail('RUNTIME_INTEGRITY_READ_FAILED', relative); }
-    const ok = crypto.timingSafeEqual(Buffer.from(actualHash, 'hex'), Buffer.from(expectedHash, 'hex'));
+    let hashed;
+    try { hashed = sha256RegularFile(target, stat); } catch (error) {
+      return fail(error.code || 'RUNTIME_INTEGRITY_READ_FAILED', relative);
+    }
+    let finalStat;
+    try { finalStat = fs.lstatSync(target); } catch (_) { return fail('RUNTIME_INTEGRITY_FILE_MISSING', relative); }
+    if (!finalStat.isFile() || finalStat.isSymbolicLink() || !sameFileIdentity(finalStat, hashed.stat)) {
+      return fail('RUNTIME_INTEGRITY_FILE_CHANGED', relative);
+    }
+    const ok = crypto.timingSafeEqual(Buffer.from(hashed.hash, 'hex'), Buffer.from(expectedHash, 'hex'));
     if (!ok) return fail('RUNTIME_INTEGRITY_HASH_MISMATCH', relative);
   }
 
