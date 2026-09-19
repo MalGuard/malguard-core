@@ -2,7 +2,8 @@
   "name": "malguard-core",
   "version": "0.6.1-beta.1",
   "private": true,
-  "description": "MalGuard desktop security core and local control service",
+  "license": "MIT",
+  "description": "MalGuard open-source defensive game security core and local control service",
   "type": "commonjs",
   "engines": {
     "node": ">=20"
