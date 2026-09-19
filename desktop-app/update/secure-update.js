@@ -205,6 +205,14 @@ function verifyOnlineUpdateManifest({
   return true;
 }
 
+function sameFileIdentity(a, b) {
+  return a.dev === b.dev
+    && a.ino === b.ino
+    && a.size === b.size
+    && a.mtimeMs === b.mtimeMs
+    && a.ctimeMs === b.ctimeMs;
+}
+
 function verifyPackageFile(filePath, expectedSha256, { expectedSize = null, maxBytes = MAX_PACKAGE_BYTES } = {}) {
   if (typeof expectedSha256 !== 'string' || !SHA256_RE.test(expectedSha256)) throw new Error('invalid expected package sha256');
   const initial = fs.lstatSync(filePath);
@@ -217,7 +225,7 @@ function verifyPackageFile(filePath, expectedSha256, { expectedSize = null, maxB
   let actual;
   try {
     const before = fs.fstatSync(fd);
-    if (!before.isFile() || before.size !== initial.size || before.mtimeMs !== initial.mtimeMs) {
+    if (!before.isFile() || !sameFileIdentity(before, initial)) {
       throw new Error('update package changed before verification');
     }
     const hash = crypto.createHash('sha256');
@@ -228,14 +236,14 @@ function verifyPackageFile(filePath, expectedSha256, { expectedSize = null, maxB
       hash.update(buffer.subarray(0, bytesRead));
     }
     const after = fs.fstatSync(fd);
-    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw new Error('update package changed during verification');
+    if (!sameFileIdentity(after, before)) throw new Error('update package changed during verification');
     actual = hash.digest('hex');
   } finally {
     fs.closeSync(fd);
   }
 
   const finalStat = fs.lstatSync(filePath);
-  if (!finalStat.isFile() || finalStat.isSymbolicLink() || finalStat.size !== initial.size || finalStat.mtimeMs !== initial.mtimeMs) {
+  if (!finalStat.isFile() || finalStat.isSymbolicLink() || !sameFileIdentity(finalStat, initial)) {
     throw new Error('update package changed after verification');
   }
   if (!crypto.timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expectedSha256, 'hex'))) {
