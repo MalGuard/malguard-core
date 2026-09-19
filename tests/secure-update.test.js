@@ -146,6 +146,12 @@ const fixture = path.join(dir, 'package.bin');
 fs.writeFileSync(fixture, packageBytes);
 assert.equal(verifyPackageFile(fixture, sha256, { expectedSize: packageBytes.length }), true);
 assert.equal(verifyOnlineUpdatePackage({ filePath: fixture, manifest: online }), true);
+assert.throws(() => verifyPackageFile(dir, sha256), /regular non-symlink file/);
+if (process.platform !== 'win32') {
+  const symlinkPath = path.join(dir, 'package-link.bin');
+  fs.symlinkSync(fixture, symlinkPath);
+  assert.throws(() => verifyPackageFile(symlinkPath, sha256), /regular non-symlink file/);
+}
 assert.throws(() => verifyPackageFile(fixture, ''), /invalid expected package sha256/);
 assert.throws(() => verifyPackageFile(fixture, 'not-a-sha256'), /invalid expected package sha256/);
 assert.throws(() => verifyPackageFile(fixture, sha256, { expectedSize: packageBytes.length + 1 }), /size mismatch/);
