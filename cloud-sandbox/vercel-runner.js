@@ -21,13 +21,13 @@ async function runInspection({ Sandbox, data, name = 'upload.bin' } = {}) {
       persistent: false
     });
 
-    // Relative paths are resolved under /vercel/sandbox by writeFiles().
-    // Keep the command cwd in that same workspace so file materialization
-    // does not depend on an absolute path being present.
+    // writeFiles() resolves relative paths under /vercel/sandbox.
+    // Use the same documented workspace for the file, while keeping the
+    // string runCommand overload already supported by the deployed SDK.
     await sandbox.writeFiles([{ path: 'input.bin', content: data }]);
 
     const script = "const fs=require('fs'),crypto=require('crypto');" +
-      "const b=fs.readFileSync('input.bin');" +
+      "const b=fs.readFileSync('/vercel/sandbox/input.bin');" +
       "const h=b.subarray(0,16).toString('hex');" +
       "let type='unknown';" +
       "if(h.startsWith('4d5a'))type='windows-pe';" +
@@ -38,12 +38,7 @@ async function runInspection({ Sandbox, data, name = 'upload.bin' } = {}) {
       "else if(h.startsWith('494433')||h.startsWith('fff')||h.startsWith('ffe'))type='mp3';" +
       "process.stdout.write(JSON.stringify({bytes:b.length,sha256:crypto.createHash('sha256').update(b).digest('hex'),type}));";
 
-    const result = await sandbox.runCommand({
-      cmd: 'node',
-      args: ['-e', script],
-      cwd: '/vercel/sandbox'
-    });
-
+    const result = await sandbox.runCommand('node', ['-e', script]);
     if (result.exitCode !== 0) {
       throw new Error('sandbox-inspection-command-failed');
     }
