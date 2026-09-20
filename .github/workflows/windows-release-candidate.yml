@@ -231,7 +231,7 @@ jobs:
           "$hash  $([IO.Path]::GetFileName($setup))" | Set-Content -LiteralPath "$setup.sha256" -Encoding ascii
           $signature = Get-AuthenticodeSignature -LiteralPath $setup
           Write-Host "Installer Authenticode state: $($signature.Status)"
-          Write-Host 'NOTE: release-candidate Setup is installable, but public distribution remains blocked until the final installer is signed by the pinned MalGuard publisher certificate.'
+          Write-Host 'NOTE: this Setup is unsigned. It may be published only as an explicitly labeled Unsigned Preview with SHA-256 and source-commit provenance. It must never be represented as Authenticode-signed.'
 
       - name: Upload trusted-main Windows installable release candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
