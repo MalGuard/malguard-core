@@ -7,7 +7,7 @@
 #pragma comment(lib, "bcrypt.lib")
 
 static std::vector<unsigned char> resourceBytes(int id) {
-  HRSRC r=FindResourceW(nullptr,MAKEINTRESOURCEW(id),RT_RCDATA); if(!r) throw 1;
+  HRSRC r=FindResourceW(nullptr,MAKEINTRESOURCEW(id),MAKEINTRESOURCEW(10)); if(!r) throw 1;
   HGLOBAL h=LoadResource(nullptr,r); if(!h) throw 1;
   DWORD n=SizeofResource(nullptr,r); void* p=LockResource(h); if(!p||!n) throw 1;
   return std::vector<unsigned char>((unsigned char*)p,(unsigned char*)p+n);
