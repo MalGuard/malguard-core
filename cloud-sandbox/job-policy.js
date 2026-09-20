@@ -20,4 +20,5 @@ function validateSafeFixture(data){
   if(!data.equals(ALLOWED_FIXTURE))return {ok:false,reason:'safe-fixture-only'};
   return v;
 }
-module.exports={ALLOWED_FIXTURE,MAX_INSPECTION_BYTES,validateInspectionFile,createInspectionJob,validateSafeFixture};
+function createIsolationJob(data){const v=validateSafeFixture(data);if(!v.ok)return {accepted:false,...v};return createInspectionJob(data)}
+module.exports={ALLOWED_FIXTURE,MAX_INSPECTION_BYTES,validateInspectionFile,createInspectionJob,validateSafeFixture,createIsolationJob};
