@@ -17,7 +17,7 @@ After acceptance, release and download pages will include the required attributi
 - CI actions and build dependencies remain pinned and fail closed according to repository policy.
 - Artifacts are re-opened and integrity-verified after packaging.
 - Source commit/provenance binding must match the expected release source.
-- The current Windows workflow creates unsigned engineering release candidates only. Public distribution remains blocked until the resulting installer passes the Authenticode verification gate.
+- The current Windows workflow creates unsigned release candidates. By explicit maintainer decision, an installer may be published as an **Unsigned Preview** only when the release page clearly states that Authenticode is absent and publishes the matching SHA-256 and exact source commit. An unsigned preview must never be described as signed, trusted, production-signed, or equivalent to a future Authenticode release.
 
 ## SignPath integration boundary
 
