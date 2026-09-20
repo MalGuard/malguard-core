@@ -14,5 +14,8 @@
     "diagnose": "node tools/health-report.js",
     "verify:readiness": "node tools/verify-product-readiness.js",
     "package:portable": "node tools/build-portable-package.js"
+  },
+  "dependencies": {
+    "@vercel/sandbox": "3.3.0"
   }
 }
