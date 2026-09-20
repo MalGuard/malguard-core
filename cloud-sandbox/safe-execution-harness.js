@@ -2,6 +2,7 @@
 
 const crypto=require('crypto');
 const SAFE_PROGRAM=Buffer.from("process.stdout.write(JSON.stringify({marker:'MALGUARD_SAFE_EXEC_V1',pid:process.pid,node:process.version}))\n",'utf8');
+// Production rollout marker: safe execution harness v1.
 const SAFE_SHA256=crypto.createHash('sha256').update(SAFE_PROGRAM).digest('hex');
 
 async function runSafeExecutionFixture({Sandbox}={}){
