@@ -28,6 +28,8 @@ assert(/desktop-app\/bin/.test(workflow), 'launcher must be staged into the seal
 assert(/runtime\/node\.exe/.test(workflow), 'bundled Node runtime must be sealed into the package');
 assert(/Build Windows Setup executable/.test(workflow), 'installable Setup executable must be built');
 assert(/Installer Authenticode state/.test(workflow), 'installer signature state must be surfaced');
+assert(/Verify native PE architecture/.test(workflow) && /0xAA64/.test(workflow) && /0x8664/.test(workflow), 'release workflow must verify ARM64 and x64 PE machine types');
+assert(/ARM64 payload architecture PASS, but public Setup EXE is intentionally withheld/.test(workflow), 'mislabeled x64 IExpress wrapper must not be published as ARM64 Setup');
 assert(/explicitly labeled Unsigned Preview/.test(workflow), 'unsigned installer may only be published as an explicitly labeled Unsigned Preview');
 assert(/SHA-256 and source-commit provenance/.test(workflow), 'unsigned preview must publish hash and exact source provenance');
 assert(/never be represented as Authenticode-signed/.test(workflow), 'unsigned preview must never be represented as signed');
