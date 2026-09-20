@@ -37,6 +37,7 @@ const tests=[
  'runtime-containment.test.js',
  'sandbox-backend.test.js',
  'cloud-sandbox-policy.test.js',
+ 'cloud-sandbox-vercel-runner.test.js',
  'malguard-microvm-backend.test.js',
  'malguard-portable-vm-backend.test.js',
  'isolation-backend-router.test.js',
