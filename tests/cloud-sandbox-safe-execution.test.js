@@ -1,0 +1,5 @@
+'use strict';
+const assert=require('assert');const {SAFE_PROGRAM,SAFE_SHA256,runSafeExecutionFixture}=require('../cloud-sandbox/safe-execution-harness');const crypto=require('crypto');
+assert.equal(crypto.createHash('sha256').update(SAFE_PROGRAM).digest('hex'),SAFE_SHA256);
+class FakeSandbox{static async create(opts){assert.equal(opts.networkPolicy,'deny-all');assert.equal(opts.persistent,false);return new FakeSandbox()}async writeFiles(files){this.data=files[0].content}async runCommand(cmd,args){assert.equal(cmd,'node');if(args[0]==='-e')return{stdout:async()=>SAFE_SHA256};return{stdout:async()=>JSON.stringify({marker:'MALGUARD_SAFE_EXEC_V1',pid:123,node:'v24-test'})}}async stop(){this.stopped=true}}
+runSafeExecutionFixture({Sandbox:FakeSandbox}).then(r=>{assert.equal(r.ok,true);assert.equal(r.report.marker,'MALGUARD_SAFE_EXEC_V1');assert.equal(r.isolation.networkPolicy,'deny-all');assert.equal(r.isolation.execution,'allowlisted-safe-fixture-only');console.log('✓ safe execution harness is allowlisted, integrity-checked and isolated')}).catch(e=>{console.error(e);process.exit(1)});
