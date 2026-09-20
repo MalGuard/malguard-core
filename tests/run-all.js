@@ -40,6 +40,7 @@ const tests=[
  'cloud-sandbox-vercel-runner.test.js',
  'cloud-sandbox-self-test-api.test.js',
  'cloud-sandbox-safe-execution.test.js',
+ 'cloud-sandbox-benign-upload-execution.test.js',
  'malguard-microvm-backend.test.js',
  'malguard-portable-vm-backend.test.js',
  'isolation-backend-router.test.js',
