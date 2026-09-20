@@ -248,9 +248,13 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $([IO.Path]::GetFileName($setup))" | Set-Content -LiteralPath "$setup.sha256" -Encoding ascii
           if ('${{ matrix.arch }}' -eq 'arm64') {
-            Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath "$setup.sha256" -Force -ErrorAction SilentlyContinue
-            Write-Host 'ARM64 payload architecture PASS, but public Setup EXE is intentionally withheld: IExpress outer wrapper is x64.'
+            $bytes = [IO.File]::ReadAllBytes($setup)
+            if ($bytes.Length -lt 256 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) { throw 'ARM64 Setup is not a valid PE image' }
+            $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+            if ($pe -lt 0 -or ($pe + 6) -gt $bytes.Length) { throw 'ARM64 Setup PE header is invalid' }
+            $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
+            if ($machine -ne 0xAA64) { throw ('ARM64 Setup PE architecture mismatch: expected 0xAA64, got 0x{0:X4}' -f $machine) }
+            Write-Host 'Native ARM64 Setup PE architecture PASS: 0xAA64.'
           }
           $signature = if (Test-Path -LiteralPath $setup) { Get-AuthenticodeSignature -LiteralPath $setup } else { $null }
           if ($signature) { Write-Host "Installer Authenticode state: $($signature.Status)" }
