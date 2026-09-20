@@ -2,12 +2,16 @@
 
 const { runSafeFixture } = require('../cloud-sandbox/vercel-runner');
 
+const ALLOWED_ORIGIN = 'https://malguard.github.io';
+
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+  res.setHeader('Vary', 'Origin');
 
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ ok: false, error: 'method-not-allowed' });
   }
 
