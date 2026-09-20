@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('assert');
+const fs=require('fs');
+const path=require('path');
+const src=fs.readFileSync(path.join(__dirname,'..','api','cloud-sandbox-self-test.js'),'utf8');
+assert.match(src,/req\.method !== 'POST'/);
+assert.match(src,/runSafeFixture/);
+assert.match(src,/@vercel\/sandbox/);
+assert.match(src,/Cache-Control', 'no-store/);
+assert.doesNotMatch(src,/req\.body|req\.query|runCommand\s*\([^)]*req/);
+console.log('✓ Cloud Sandbox self-test API is POST-only and accepts no user command/file input');
