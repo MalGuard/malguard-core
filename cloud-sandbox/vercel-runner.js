@@ -1,36 +1,16 @@
 'use strict';
-
-const { ALLOWED_FIXTURE, createIsolationJob } = require('./job-policy');
-
-async function runSafeFixture({ Sandbox } = {}) {
-  if (!Sandbox || typeof Sandbox.create !== 'function') throw new Error('sandbox-provider-unavailable');
-  const job = createIsolationJob(ALLOWED_FIXTURE);
-  if (!job.accepted) throw new Error('safe-fixture-policy-rejected');
-
-  let sandbox;
-  try {
-    sandbox = await Sandbox.create({
-      runtime: 'node24',
-      timeout: job.isolation.timeoutMs,
-      networkPolicy: 'deny-all',
-      persistent: false
-    });
-    await sandbox.writeFiles([{
-      path: '/vercel/sandbox/malguard-safe-fixture.txt',
-      content: ALLOWED_FIXTURE
-    }]);
-    const result = await sandbox.runCommand('node', ['-e',
-      "const fs=require('fs'),crypto=require('crypto');const p='/vercel/sandbox/malguard-safe-fixture.txt';const b=fs.readFileSync(p);process.stdout.write(JSON.stringify({bytes:b.length,sha256:crypto.createHash('sha256').update(b).digest('hex'),marker:b.toString('utf8').trim()}));"
-    ]);
-    const stdout = await result.stdout();
-    const report = JSON.parse(stdout);
-    if (report.sha256 !== job.fixture.sha256 || report.bytes !== job.fixture.bytes || report.marker !== 'MALGUARD_SAFE_SANDBOX_FIXTURE_V1') {
-      throw new Error('sandbox-report-integrity-failed');
-    }
-    return { ok: true, jobId: job.jobId, report, isolation: job.isolation };
-  } finally {
-    if (sandbox && typeof sandbox.stop === 'function') await sandbox.stop();
-  }
+const {ALLOWED_FIXTURE,createInspectionJob}=require('./job-policy');
+async function runInspection({Sandbox,data,name='upload.bin'}={}){
+ if(!Sandbox||typeof Sandbox.create!=='function')throw new Error('sandbox-provider-unavailable');
+ const job=createInspectionJob(data);if(!job.accepted)throw new Error('inspection-policy-rejected:'+job.reason);
+ let sandbox;try{
+  sandbox=await Sandbox.create({runtime:'node24',timeout:job.isolation.timeoutMs,networkPolicy:'deny-all',persistent:false});
+  const p='/vercel/sandbox/input.bin';await sandbox.writeFiles([{path:p,content:data}]);
+  const script="const fs=require('fs'),crypto=require('crypto');const b=fs.readFileSync('/vercel/sandbox/input.bin');const h=b.subarray(0,16).toString('hex');let type='unknown';if(h.startsWith('4d5a'))type='windows-pe';else if(h.startsWith('504b0304'))type='zip';else if(h.startsWith('25504446'))type='pdf';else if(h.startsWith('89504e470d0a1a0a'))type='png';else if(h.startsWith('ffd8ff'))type='jpeg';else if(h.startsWith('494433')||h.startsWith('fff')||h.startsWith('ffe'))type='mp3';process.stdout.write(JSON.stringify({bytes:b.length,sha256:crypto.createHash('sha256').update(b).digest('hex'),type}));";
+  const r=await sandbox.runCommand('node',['-e',script]);const report=JSON.parse(await r.stdout());
+  if(report.sha256!==job.file.sha256||report.bytes!==job.file.bytes)throw new Error('sandbox-report-integrity-failed');
+  return {ok:true,jobId:job.jobId,name,report,isolation:job.isolation};
+ }finally{if(sandbox&&typeof sandbox.stop==='function')await sandbox.stop()}
 }
-
-module.exports = { runSafeFixture };
+async function runSafeFixture({Sandbox}={}){return runInspection({Sandbox,data:ALLOWED_FIXTURE,name:'malguard-safe-fixture.txt'})}
+module.exports={runSafeFixture,runInspection};
