@@ -3,7 +3,7 @@ name: Publish MalGuard 0.6.1 beta 1 Unsigned Preview
 on:
   push:
     branches:
-      - dev/publish-0.6.1-beta.1-unsigned-preview
+      - main
     paths:
       - .github/workflows/publish-0.6.1-beta.1-unsigned-preview.yml
 
