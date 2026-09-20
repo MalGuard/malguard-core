@@ -1,0 +1,5 @@
+'use strict';
+const assert=require('assert');const {ALLOWED_SOURCE,ALLOWED_SHA256,strictBase64,runBenignUploadedFixture}=require('../cloud-sandbox/benign-upload-execution');
+assert(strictBase64(ALLOWED_SOURCE.toString('base64')).equals(ALLOWED_SOURCE));assert.equal(strictBase64('%%%'),null);
+class S{static last;static async create(o){assert.equal(o.networkPolicy,'deny-all');assert.equal(o.persistent,false);return S.last=new S()}async writeFiles(f){assert(f[0].content.equals(ALLOWED_SOURCE))}async runCommand(c,a){assert.equal(c,'node');if(a[0]==='-e')return{stdout:async()=>ALLOWED_SHA256};return{stdout:async()=>JSON.stringify({marker:'MALGUARD_BENIGN_UPLOAD_V1',runtime:'v24-test'})}}async stop(){this.stopped=true}}
+(async()=>{const r=await runBenignUploadedFixture({Sandbox:S,data:ALLOWED_SOURCE});assert(r.ok);assert.equal(r.report.marker,'MALGUARD_BENIGN_UPLOAD_V1');assert(S.last.stopped);await assert.rejects(()=>runBenignUploadedFixture({Sandbox:S,data:Buffer.from('unknown')}),/upload-not-allowlisted/);console.log('✓ benign uploaded execution is exact-hash allowlisted and torn down')})().catch(e=>{console.error(e);process.exit(1)});
