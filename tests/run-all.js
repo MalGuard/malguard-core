@@ -36,6 +36,7 @@ const tests=[
  'runtime-game-process-guard.test.js',
  'runtime-containment.test.js',
  'sandbox-backend.test.js',
+ 'cloud-sandbox-policy.test.js',
  'malguard-microvm-backend.test.js',
  'malguard-portable-vm-backend.test.js',
  'isolation-backend-router.test.js',
