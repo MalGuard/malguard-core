@@ -28,7 +28,9 @@ assert(/desktop-app\/bin/.test(workflow), 'launcher must be staged into the seal
 assert(/runtime\/node\.exe/.test(workflow), 'bundled Node runtime must be sealed into the package');
 assert(/Build Windows Setup executable/.test(workflow), 'installable Setup executable must be built');
 assert(/Installer Authenticode state/.test(workflow), 'installer signature state must be surfaced');
-assert(/public distribution remains blocked/.test(workflow), 'unsigned RC must not be represented as a public final release');
+assert(/explicitly labeled Unsigned Preview/.test(workflow), 'unsigned installer may only be published as an explicitly labeled Unsigned Preview');
+assert(/SHA-256 and source-commit provenance/.test(workflow), 'unsigned preview must publish hash and exact source provenance');
+assert(/never be represented as Authenticode-signed/.test(workflow), 'unsigned preview must never be represented as signed');
 
 assert(/PACKAGE-MANIFEST\.json/.test(launcher) && /SHA256SUMS\.txt/.test(launcher), 'launcher must resolve a sealed package root');
 assert(/integrity\\\\preload\.js/.test(launcher), 'launcher must preload runtime integrity verification');
@@ -50,4 +52,4 @@ const verifyIndex = installer.indexOf('Assert-SealedPayload $stage');
 const replaceIndex = installer.indexOf('Move-Item -LiteralPath $stage -Destination $target');
 assert(verifyIndex >= 0 && replaceIndex > verifyIndex, 'installer must verify the payload before atomic replacement');
 
-console.log('✓ Windows installable scanner source: pinned runtime, sealed launcher, pre-install payload verification, atomic rollback and public-signing gate PASS');
+console.log('✓ Windows installable scanner source: pinned runtime, sealed launcher, pre-install payload verification, atomic rollback and unsigned-preview provenance gate PASS');
