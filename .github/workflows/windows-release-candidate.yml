@@ -141,6 +141,24 @@ jobs:
             Write-Host "$file SHA-256: $hash"
           }
 
+      - name: Verify native PE architecture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Get-PeMachine([string]$Path) {
+            $bytes = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path))
+            if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) { throw "not a PE file: $Path" }
+            $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+            if ($pe -lt 0 -or $pe + 6 -gt $bytes.Length -or $bytes[$pe] -ne 0x50 -or $bytes[$pe+1] -ne 0x45) { throw "invalid PE header: $Path" }
+            return [BitConverter]::ToUInt16($bytes, $pe + 4)
+          }
+          $expected = if ('${{ matrix.arch }}' -eq 'arm64') { 0xAA64 } else { 0x8664 }
+          foreach ($file in @('desktop-app/bin/MalGuard.exe','desktop-app/runtime/node.exe','desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe')) {
+            $actual = Get-PeMachine $file
+            if ($actual -ne $expected) { throw ("PE architecture mismatch for {0}: expected 0x{1:X4}, got 0x{2:X4}" -f $file,$expected,$actual) }
+            Write-Host ("PE architecture PASS: {0} = 0x{1:X4}" -f $file,$actual)
+          }
+
       - name: Run Sandbox and release hardening regressions
         shell: pwsh
         run: |
@@ -229,8 +247,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Windows installer builder failed with exit code $LASTEXITCODE" }
           $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $([IO.Path]::GetFileName($setup))" | Set-Content -LiteralPath "$setup.sha256" -Encoding ascii
-          $signature = Get-AuthenticodeSignature -LiteralPath $setup
-          Write-Host "Installer Authenticode state: $($signature.Status)"
+          if ('${{ matrix.arch }}' -eq 'arm64') {
+            Remove-Item -LiteralPath $setup -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "$setup.sha256" -Force -ErrorAction SilentlyContinue
+            Write-Host 'ARM64 payload architecture PASS, but public Setup EXE is intentionally withheld: IExpress outer wrapper is x64.'
+          }
+          $signature = if (Test-Path -LiteralPath $setup) { Get-AuthenticodeSignature -LiteralPath $setup } else { $null }
+          if ($signature) { Write-Host "Installer Authenticode state: $($signature.Status)" }
           Write-Host 'NOTE: this Setup is unsigned. It may be published only as an explicitly labeled Unsigned Preview with SHA-256 and source-commit provenance. It must never be represented as Authenticode-signed.'
 
       - name: Upload trusted-main Windows installable release candidate
