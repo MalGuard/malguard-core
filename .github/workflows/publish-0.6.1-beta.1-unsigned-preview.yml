@@ -1,0 +1,67 @@
+name: Publish MalGuard 0.6.1 beta 1 Unsigned Preview
+
+on:
+  push:
+    branches:
+      - dev/publish-0.6.1-beta.1-unsigned-preview
+    paths:
+      - .github/workflows/publish-0.6.1-beta.1-unsigned-preview.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: 9bd450df2345eb2f9c9025b05f3d21bef8e43a5d
+      SOURCE_RUN: "35500370760"
+      TAG: v0.6.1-beta.1-unsigned-preview
+    steps:
+      - name: Verify source workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          data="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN}")"
+          test "$(jq -r .head_sha <<<"$data")" = "$SOURCE_SHA"
+          test "$(jq -r .conclusion <<<"$data")" = "success"
+          test "$(jq -r .head_branch <<<"$data")" = "main"
+      - name: Download verified build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/x64 release/arm64
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name malguard-windows-x64-release-candidate --dir release/x64
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name malguard-windows-arm64-release-candidate --dir release/arm64
+      - name: Verify installer hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "fc1b090f2caf0102725dd228d67674568cc62f48bd7fcb6f0ec171ead386a7fd  release/x64/MalGuard-Setup-0.6.1-beta.1-windows-x64.exe" | sha256sum -c -
+          echo "557732ad765968a5fa8767e5d6c040fdda3f747db0b3e7dd7353e83f00b402fa  release/arm64/MalGuard-Setup-0.6.1-beta.1-windows-arm64.exe" | sha256sum -c -
+          grep -F "fc1b090f2caf0102725dd228d67674568cc62f48bd7fcb6f0ec171ead386a7fd" release/x64/MalGuard-Setup-0.6.1-beta.1-windows-x64.exe.sha256
+          grep -F "557732ad765968a5fa8767e5d6c040fdda3f747db0b3e7dd7353e83f00b402fa" release/arm64/MalGuard-Setup-0.6.1-beta.1-windows-arm64.exe.sha256
+      - name: Publish prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          # MalGuard 0.6.1-beta.1 — Unsigned Preview
+
+          This is an **unsigned preview** build for Windows. It is **not Authenticode-signed** and must not be treated as a production-signed release.
+
+          Source commit: `9bd450df2345eb2f9c9025b05f3d21bef8e43a5d`
+
+          SHA-256:
+          - x64 Setup: `fc1b090f2caf0102725dd228d67674568cc62f48bd7fcb6f0ec171ead386a7fd`
+          - ARM64 Setup: `557732ad765968a5fa8767e5d6c040fdda3f747db0b3e7dd7353e83f00b402fa`
+
+          Windows may identify the publisher as unknown because Authenticode signing is not present. Do not disable Windows security features to install it.
+          EOF
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists; refusing duplicate publication."
+            exit 1
+          fi
+          gh release create "$TAG"             --repo "$GITHUB_REPOSITORY"             --target "$SOURCE_SHA"             --title "MalGuard 0.6.1-beta.1 Unsigned Preview"             --notes-file release-notes.md             --prerelease             release/x64/MalGuard-Setup-0.6.1-beta.1-windows-x64.exe             release/x64/MalGuard-Setup-0.6.1-beta.1-windows-x64.exe.sha256             release/arm64/MalGuard-Setup-0.6.1-beta.1-windows-arm64.exe             release/arm64/MalGuard-Setup-0.6.1-beta.1-windows-arm64.exe.sha256
