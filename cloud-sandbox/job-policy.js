@@ -17,7 +17,7 @@ function createInspectionJob(data){
 }
 function validateSafeFixture(data){
   const v=validateInspectionFile(data); if(!v.ok)return v;
-  if(!data.equals(ALLOWED_FIXTURE))return {ok:false,reason:'safe-fixture-only'};
+  if(!data.equals(ALLOWED_FIXTURE))return {ok:false,reason:'phase1-safe-fixtures-only'};
   return v;
 }
 function createIsolationJob(data){const v=validateSafeFixture(data);if(!v.ok)return {accepted:false,...v};return createInspectionJob(data)}
