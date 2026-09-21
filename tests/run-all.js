@@ -46,6 +46,7 @@ const tests=[
  'malguard-portable-vm-backend.test.js',
  'isolation-backend-router.test.js',
  'sandbox-router-default.test.js',
+ 'gta-guard-sandbox-routing.test.js',
  'sandbox-first-run-certification.test.js',
  'virtual-windows-validation-lab.test.js',
  'embedded-validation-lab.test.js',
