@@ -11,7 +11,7 @@ const { ManagedInstallGuard } = require('../desktop-guard/windows-agent/managed-
 const { ProtectionCoordinator } = require('../desktop-guard/windows-agent/protection-coordinator.js');
 const { RuntimeGameProcessGuard } = require('../desktop-guard/windows-agent/runtime-process-guard.js');
 const { SandboxController } = require('./sandbox/sandbox-controller.js');
-const { WindowsSandboxBackend } = require('./sandbox/windows-sandbox-backend.js');
+const { IsolationBackendRouter } = require('./sandbox/isolation-backend-router.js');
 const { EmbeddedValidationLab } = require('./sandbox/embedded-validation-lab.js');
 const { IncidentStore } = require('../desktop-guard/windows-agent/incident-store.js');
 const { SettingsStore } = require('./settings-store.js');
@@ -28,8 +28,9 @@ const PORT = Number(process.env.MALGUARD_PORT || 18777);
 const HOST = '127.0.0.1';
 const threatIntel = new ThreatIntelService();
 const scanner = new ScannerBridge({ threatIntel });
+const isolationBackend = new IsolationBackendRouter({ prefer: 'windows-sandbox' });
 const sandbox = new SandboxController({
-  windowsBackend: new WindowsSandboxBackend(),
+  isolationBackend,
   autoCertify: true,
 });
 const validationLab = new EmbeddedValidationLab({ windowsBackend: sandbox.windowsBackend });
@@ -121,7 +122,11 @@ async function handler(req, res) {
     if (req.method === 'GET' && url.pathname === '/api/status') {
       const protection = protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, accessGateProtected:false, watcherHealthy:false, runtimeProcessHealthy:false, runtimeProcessProtection:null, state:'stopped', reason:null };
       const sandboxCertification = sandbox.certificationStatus();
-      const sandboxMode = sandboxCertification.ok === true ? 'windows-sandbox-certified' : sandboxCertification.state === 'running' ? 'windows-sandbox-self-certifying' : 'fail-closed-until-sandbox-certified';
+      const sandboxMode = sandboxCertification.ok === true
+        ? `${sandboxCertification.selectedBackend || 'isolation-backend'}-certified`
+        : sandboxCertification.state === 'running'
+          ? 'isolation-backend-self-certifying'
+          : 'fail-closed-until-isolation-backend-certified';
       return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', guardConfigured: config.watchRoots.length > 0, watching: protection.completeProtection === true, realtimeProtection: protection, runtimeProcessProtection: protection.runtimeProcessProtection, guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode, sandboxCertification, threatIntel: await threatIntel.status() });
     }
     if (req.method === 'GET' && url.pathname === '/api/entitlement/status') return json(res, 200, { ok: true, entitlement: entitlementGate.status() });
@@ -146,7 +151,11 @@ async function handler(req, res) {
     if (req.method === 'POST' && url.pathname === '/api/quarantine/restore') { const body = await readJson(req); if (typeof body.id !== 'string') return json(res, 400, { ok: false, code: 'ID_REQUIRED' }); const a = ensureAgent(); return json(res, 200, { ok: true, entry: await a.restore(body.id) }); }
     if (req.method === 'POST' && url.pathname === '/api/install') { const body = await readJson(req); if (typeof body.source !== 'string' || typeof body.destination !== 'string') return json(res, 400, { ok: false, code: 'SOURCE_AND_DESTINATION_REQUIRED' }); ensureAgent(); return json(res, 200, await managedInstall.install(body.source, body.destination)); }
     if (req.method === 'GET' && url.pathname === '/api/incidents') return json(res, 200, { ok: true, incidents: await incidentStore.list(100) });
-    if (req.method === 'GET' && url.pathname === '/api/sandbox/status') return json(res, 200, { ok: true, certification: sandbox.certificationStatus() });
+    if (req.method === 'GET' && url.pathname === '/api/sandbox/status') {
+      const certification = sandbox.certificationStatus();
+      const capabilities = await sandbox.windowsBackend.capabilities();
+      return json(res, 200, { ok: true, certification, capabilities, selectedBackend: certification.selectedBackend || capabilities.selectedBackend || null });
+    }
     if (req.method === 'POST' && url.pathname === '/api/sandbox/self-test') return json(res, 200, await sandbox.ensureRuntimeCertified({ force: true }));
     if (req.method === 'POST' && url.pathname === '/api/sandbox/readiness') return json(res, 200, await validationLab.run());
     if (req.method === 'POST' && url.pathname === '/api/sandbox/analyze') { const entitlement = requirePlanForApi(res, 'pro'); if (!entitlement) return; const body = await readJson(req); const result = await sandbox.analyzeUntrustedSample(body.path); return json(res, result.ok ? 200 : 409, result); }
