@@ -5,7 +5,7 @@ const path = require('path');
 const http = require('http');
 const { ScannerBridge } = require('../desktop-app/scanner-bridge.js');
 const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller.js');
-const { WindowsSandboxBackend } = require('../desktop-app/sandbox/windows-sandbox-backend.js');
+const { IsolationBackendRouter } = require('../desktop-app/sandbox/isolation-backend-router.js');
 const { startServer, sandbox: productSandbox } = require('../desktop-app/server.js');
 
 function requestJson({ port, method = 'GET', path: requestPath }) {
@@ -24,8 +24,8 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
 }
 
 (async()=>{
- assert(productSandbox.windowsBackend instanceof WindowsSandboxBackend,
-   'production Sandbox execution must be pinned to WindowsSandboxBackend, not a fallback router');
+ assert(productSandbox.windowsBackend instanceof IsolationBackendRouter,
+   'production Sandbox execution must use the certified multi-backend isolation router');
 
  const scanner = new ScannerBridge();
  let r = await scanner.scanPath(path.join(__dirname,'corpus','benign-config-read.lua'),'pro');
