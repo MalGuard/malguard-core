@@ -113,7 +113,7 @@ const RULES = Object.freeze([
 
   // ---------- Shared: obfuscation / encoded execution ----------
   rule('SH-OBF-001', ['lua', 'csharp'], 'obfuscation', 'low', 'low', 'Base64 decode؛ به‌تنهایی بسیار ضعیف است.', /\b(?:FromBase64String|base64\.decode|decode64)\b/gi),
-  rule('SH-OBF-002', ['lua', 'csharp'], 'obfuscation', 'high', 'high', 'PowerShell encoded-command flag.', /(?:^|\s)-(?:enc|encodedcommand)\b/gi),
+  rule('SH-OBF-002', ['lua', 'csharp'], 'obfuscation', 'high', 'high', 'PowerShell encoded-command flag.', /(?:^|[\s"'=])-(?:enc|encodedcommand)\b/gi),
   rule('SH-ANTI-001', ['lua', 'csharp'], 'anti_analysis', 'low', 'low', 'بررسی حضور debugger.', /\b(?:IsDebuggerPresent|CheckRemoteDebuggerPresent)\b/gi),
   rule('SH-ANTI-002', ['lua', 'csharp'], 'anti_analysis', 'low', 'low', 'نشانهٔ بررسی VMware/VirtualBox/Sandboxie.', /\b(?:vmware|virtualbox|sandboxie|sbiedll)\b/gi),
 
@@ -297,6 +297,34 @@ function stripCSharpComments(text) {
     }
   }
   return out.join('');
+}
+
+// Fold only adjacent, bounded string literals. This catches simple static
+// evasion such as "dis" + "cord.com" without evaluating code, resolving
+// variables, decoding payloads, or executing the sample. Newlines are kept so
+// evidence line numbers remain truthful. The pass limit prevents pathological
+// inputs from consuming the analysis budget.
+function foldAdjacentStringLiterals(text, language, deadline) {
+  let folded = text;
+  const patterns = language === 'lua'
+    ? [
+        /"((?:\\.|[^"\\\r\n]){0,128})"[ \t]*\.\.[ \t]*"((?:\\.|[^"\\\r\n]){0,128})"/g,
+        /'((?:\\.|[^'\\\r\n]){0,128})'[ \t]*\.\.[ \t]*'((?:\\.|[^'\\\r\n]){0,128})'/g,
+      ]
+    : [/"((?:\\.|[^"\\\r\n]){0,128})"[ \t]*\+[ \t]*"((?:\\.|[^"\\\r\n]){0,128})"/g];
+
+  for (let pass = 0; pass < 16 && nowMs() <= deadline; pass++) {
+    let changed = false;
+    for (const pattern of patterns) {
+      pattern.lastIndex = 0;
+      folded = folded.replace(pattern, (_match, left, right) => {
+        changed = true;
+        return '"' + left + right + '"';
+      });
+    }
+    if (!changed) break;
+  }
+  return folded;
 }
 
 function buildLineStarts(text) {
@@ -555,6 +583,15 @@ const ScriptAnalyzer = {
 
     const ruleScan = scanRules(cleaned, language, lineStarts, deadline);
     const findings = ruleScan.findings;
+    const folded = foldAdjacentStringLiterals(cleaned, language, deadline);
+    let foldedScan = null;
+    if (folded !== cleaned && nowMs() <= deadline) {
+      foldedScan = scanRules(folded, language, buildLineStarts(folded), deadline);
+      const seen = new Set(findings.map(f => f.rule + ':' + f.line + ':' + f.match.toLowerCase()));
+      for (const finding of foldedScan.findings) {
+        if (!addFinding(findings, seen, finding)) break;
+      }
+    }
     scanLongBase64(cleaned, lineStarts, deadline, findings);
 
     // یک خط بسیار طولانی به‌تنهایی malicious نیست؛ فقط یک شاهد low برای
@@ -567,12 +604,14 @@ const ScriptAnalyzer = {
       });
     }
 
-    if (ruleScan.timedOut || nowMs() > deadline) {
+    const ruleTimedOut = ruleScan.timedOut || !!(foldedScan && foldedScan.timedOut);
+    const ruleTruncated = ruleScan.truncated || !!(foldedScan && foldedScan.truncated) || findings.length >= SCRIPT_LIMITS.MAX_FINDINGS;
+    if (ruleTimedOut || nowMs() > deadline) {
       return buildBase({
         supported: true, language, verdict: 'inconclusive', confidence: 'low', score: null,
         hash: await hashPromise, evidence: findings,
         reasons: ['بودجهٔ زمانی ScriptAnalyzer تمام شد؛ برای جلوگیری از نتیجهٔ ناقص SAFE صادر نشد.'],
-        warnings: ruleScan.truncated ? ['فهرست یافته‌ها به سقف MAX_FINDINGS رسید.'] : [],
+        warnings: ruleTruncated ? ['فهرست یافته‌ها به سقف MAX_FINDINGS رسید.'] : [],
         errorCode: ERROR_CODES.ANALYSIS_TIMEOUT, metrics,
       });
     }
@@ -589,7 +628,7 @@ const ScriptAnalyzer = {
     for (const combo of scored.fired) reasons.push('ترکیب رفتاری: ' + combo.description);
 
     const warnings = [];
-    if (ruleScan.truncated) warnings.push('تعداد یافته‌ها به سقف MAX_FINDINGS رسید؛ خروجی evidence کوتاه شده است.');
+    if (ruleTruncated) warnings.push('تعداد یافته‌ها به سقف MAX_FINDINGS رسید؛ خروجی evidence کوتاه شده است.');
     if (metrics.veryLongLineCount > 0) warnings.push('یک یا چند خط بسیار طولانی دیده شد؛ ممکن است minified/obfuscated یا صرفاً دادهٔ تعبیه‌شده باشد.');
 
     return buildBase({
