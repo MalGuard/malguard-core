@@ -156,31 +156,46 @@ async function analyzerTests() {
   assert.equal(r.verdict, 'safe');
   assert.equal(r.evidence.length, 0);
 
-  // 11) Lua command API alone is not enough for MALICIOUS
+  // 11) adjacent C# string literals cannot hide a webhook endpoint
+  r = await A.analyze(new FileLike('split_webhook.cs', `
+    class C { string Hook = "https://dis" + "cord.com/api/webhooks/" + "123/TEST"; }
+  `));
+  assert.notEqual(r.verdict, 'safe');
+  assert.ok(r.evidence.some(e => e.rule === 'SH-EXF-001'));
+
+  // 12) adjacent literals cannot hide PowerShell encoded execution markers
+  r = await A.analyze(new FileLike('split_powershell.cs', `
+    class C { void Run() { var p = "po" + "wershell"; var a = "-enc"; } }
+  `));
+  assert.notEqual(r.verdict, 'safe');
+  assert.ok(r.evidence.some(e => e.rule === 'CS-CMD-003'));
+  assert.ok(r.evidence.some(e => e.rule === 'SH-OBF-002'));
+
+  // 13) Lua command API alone is not enough for MALICIOUS
   r = await A.analyze(new FileLike('helper.lua', 'os.execute("echo gta")'));
   assert.notEqual(r.verdict, 'malicious');
 
-  // 12) oversized script
+  // 14) oversized script
   r = await A.analyze(new FileLike('huge.lua', 'print(1)', A.limits.MAX_SCRIPT_SIZE + 1));
   assert.equal(r.verdict, 'invalid');
   assert.equal(r.errorCode, 'too_large');
 
-  // 13) binary file renamed to Lua
+  // 15) binary file renamed to Lua
   r = await A.analyze(new FileLike('fake.lua', Buffer.from([0x4d,0x5a,0x00,0x03,0x00,0xff,0x10,0x00])));
   assert.equal(r.verdict, 'invalid');
   assert.equal(r.errorCode, 'binary_like_input');
 
-  // 14) malformed UTF-8
+  // 16) malformed UTF-8
   r = await A.analyze(new FileLike('broken.cs', Buffer.from([0x63,0x6c,0x61,0x73,0x73,0x20,0xc3,0x28])));
   assert.equal(r.verdict, 'invalid');
   assert.equal(r.errorCode, 'invalid_utf8');
 
-  // 15) empty file
+  // 17) empty file
   r = await A.analyze(new FileLike('empty.lua', Buffer.alloc(0)));
   assert.equal(r.verdict, 'invalid');
   assert.equal(r.errorCode, 'empty_file');
 
-  console.log('✓ ScriptAnalyzer: 15 tests passed');
+  console.log('✓ ScriptAnalyzer: 17 tests passed');
 }
 
 async function directIntegrationTests() {
