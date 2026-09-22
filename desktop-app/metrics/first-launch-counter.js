@@ -75,7 +75,7 @@ async function recordFirstSuccessfulLaunch(options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 5000;
   const disabled = options.disabled === true || process.env.MALGUARD_DISABLE_ANONYMOUS_INSTALL_COUNT === '1';
-  const ci = options.ci === true || Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
+  const ci = options.ci === true ? true : options.ci === false ? false : Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
 
   if (disabled) return { ok: true, counted: false, reason: 'disabled' };
   if (ci) return { ok: true, counted: false, reason: 'ci' };
