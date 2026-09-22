@@ -7,6 +7,9 @@ on:
       - 'desktop-app/update/**'
       - 'desktop-app/integrity/**'
       - 'desktop-app/metrics/**'
+      - 'api/install-hardware-report.js'
+      - 'tests/compatibility-profile.test.js'
+      - 'tests/install-hardware-report-api.test.js'
       - 'desktop-app/server.js'
       - 'tests/first-launch-counter.test.js'
       - 'PRIVACY.md'
@@ -171,6 +174,8 @@ jobs:
           node tests/sandbox-first-run-certification.test.js
           node tests/sandbox-telemetry.test.js
           node tests/first-launch-counter.test.js
+          node tests/compatibility-profile.test.js
+          node tests/install-hardware-report-api.test.js
           node tests/secure-update.test.js
           node tests/release-trust.test.js
           node tests/runtime-package-integrity.test.js
