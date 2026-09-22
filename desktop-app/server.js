@@ -14,7 +14,7 @@ const { SandboxController } = require('./sandbox/sandbox-controller.js');
 const { IsolationBackendRouter } = require('./sandbox/isolation-backend-router.js');
 const { EmbeddedValidationLab } = require('./sandbox/embedded-validation-lab.js');
 const { IncidentStore } = require('../desktop-guard/windows-agent/incident-store.js');
-const { SettingsStore } = require('./settings-store.js');
+const { SettingsStore } = require('./settings-store.js');\nconst { recordFirstSuccessfulLaunch } = require('./metrics/first-launch-counter.js');
 const { ProtectedFolderAclGate } = require('../desktop-guard/windows-agent/acl-protection.js');
 const { ThreatIntelService } = require('./threat-intel/service.js');
 const { ModelScanPipelineManager } = require('./pro-scan-pipeline.js');
@@ -196,6 +196,11 @@ if (require.main === module) {
       const result = await protectionCoordinator.start();
       if (!result || result.ok !== true || result.completeProtection !== true || result.runtimeProcessHealthy !== true) { const error = new Error('Real-time protection failed to reach protected runtime healthy state during service startup.'); error.code = result && result.reason ? result.reason : 'SERVICE_GUARD_START_FAILED'; throw error; }
     }
+    void recordFirstSuccessfulLaunch({
+      version: DESKTOP_VERSION,
+      settingsFile: settingsStore.filePath,
+      packageRoot: ROOT,
+    }).catch(() => {});
     console.log(`MalGuard Desktop ${DESKTOP_VERSION} running at http://${HOST}:${PORT}`); console.log('Localhost only. No remote binding.');
   }).catch(async error => { await recordRuntimeError(error, { area: 'startup' }); console.error(`MalGuard startup failed: ${safeText(error.code || error.name || 'INTERNAL_ERROR', 128)}`); process.exit(1); });
 }
