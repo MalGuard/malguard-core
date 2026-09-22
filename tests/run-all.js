@@ -56,6 +56,7 @@ const tests=[
  'sandbox-native-containment-source.test.js',
  'windows-service-source.test.js',
  'windows-acceptance-harness.test.js',
+ 'first-launch-counter.test.js',
  'settings-store.test.js',
  'access-gate.test.js',
  'malwarebazaar-client.test.js',
