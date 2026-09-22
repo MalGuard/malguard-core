@@ -20,6 +20,14 @@ A file itself must not be uploaded to a third-party service without an explicit 
 
 MalGuard's error-reporting design is local-first. Diagnostic information is not automatically published by this repository. Users may choose to export or submit diagnostics when asking for support.
 
+## Anonymous release metrics
+
+Official Windows download buttons may use GitHub Release assets so GitHub can expose aggregate download counts.
+
+Packaged Windows builds may make one request after the first successful launch to a small, static GitHub Release beacon asset. MalGuard does not attach a user, device, advertising, or installation identifier to this request, and no scanned file or scan result is included. A local marker stored alongside MalGuard settings prevents the same installation from intentionally sending the beacon again.
+
+GitHub may receive standard network metadata, such as the source IP address, as part of serving the public asset under GitHub's own service policies. Users can disable the MalGuard first-launch request by setting `MALGUARD_DISABLE_ANONYMOUS_INSTALL_COUNT=1`.
+
 ## Changes
 
 If a future release introduces new data collection, telemetry, or external transfer behavior, this policy and the user-facing disclosure must be updated before that behavior is enabled in a public release.
