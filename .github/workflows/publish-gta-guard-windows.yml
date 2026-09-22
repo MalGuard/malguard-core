@@ -1,0 +1,51 @@
+name: Publish GTA Guard Windows x64
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-gta-guard-windows.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: 3cc15b4deaf2f0980510e2ef2610e5350f4f65f4
+      SOURCE_RUN_ID: '35724474385'
+      TAG: gta-guard-0.6.1-beta.1-3cc15b4
+      ASSET: MalGuard-Setup-0.6.1-beta.1-windows-x64.exe
+      EXPECTED_SHA256: 16bde4efc7cde27ecb925a3336d6d84f8100a3ad231a321c32eab8a70e7dd604
+    steps:
+      - name: Download exact verified x64 release candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          gh run download "$SOURCE_RUN_ID"             --repo "$GITHUB_REPOSITORY"             --name malguard-windows-x64-release-candidate             --dir artifact
+
+      - name: Verify exact installer bytes
+        run: |
+          set -euo pipefail
+          test -f "artifact/$ASSET"
+          actual="$(sha256sum "artifact/$ASSET" | awk '{print $1}')"
+          test "$actual" = "$EXPECTED_SHA256"
+          grep -Fq "$EXPECTED_SHA256" "artifact/$ASSET.sha256"
+          echo "Verified $ASSET: $actual"
+
+      - name: Publish immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to replace assets."
+            exit 1
+          fi
+          gh release create "$TAG"             --repo "$GITHUB_REPOSITORY"             --target "$SOURCE_SHA"             --title "GTA Guard 0.6.1-beta.1 · Windows x64"             --notes "Unsigned Windows x64 preview built from commit $SOURCE_SHA. SHA-256: $EXPECTED_SHA256. Includes the anonymous coarse compatibility report documented in PRIVACY.md."             "artifact/$ASSET"             "artifact/$ASSET.sha256"
