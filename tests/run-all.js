@@ -57,6 +57,8 @@ const tests=[
  'windows-service-source.test.js',
  'windows-acceptance-harness.test.js',
  'first-launch-counter.test.js',
+ 'compatibility-profile.test.js',
+ 'install-hardware-report-api.test.js',
  'settings-store.test.js',
  'access-gate.test.js',
  'malwarebazaar-client.test.js',
