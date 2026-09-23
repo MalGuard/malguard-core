@@ -2,14 +2,29 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const cp = require('child_process');
 
 const appRoot = path.resolve(__dirname, '..');
-const source = path.resolve(process.argv[2] || '');
-if (!process.argv[2] || !fs.existsSync(source)) {
-  throw new Error('Usage: node app-shell/scripts/prepare-offline-site.js <site-root>');
+const lock = JSON.parse(fs.readFileSync(path.join(appRoot, 'site-lock.json'), 'utf8'));
+if (lock.repository !== 'MalGuard/malguard.github.io' || !/^[a-f0-9]{40}$/.test(lock.commit)) {
+  throw new Error('Invalid locked site source');
 }
 
-const lock = JSON.parse(fs.readFileSync(path.join(appRoot, 'site-lock.json'), 'utf8'));
+let source;
+if (process.argv[2]) {
+  source = path.resolve(process.argv[2]);
+  if (!fs.existsSync(source)) throw new Error('Site source does not exist: '+source);
+} else {
+  source = path.join(os.tmpdir(), 'malguard-offline-site-'+process.pid);
+  fs.rmSync(source,{recursive:true,force:true});
+  cp.execFileSync('git',['init',source],{stdio:'inherit'});
+  cp.execFileSync('git',['-C',source,'remote','add','origin','https://github.com/'+lock.repository+'.git'],{stdio:'inherit'});
+  cp.execFileSync('git',['-C',source,'fetch','--depth=1','origin',lock.commit],{stdio:'inherit'});
+  cp.execFileSync('git',['-C',source,'checkout','--detach','FETCH_HEAD'],{stdio:'inherit'});
+  const actual=cp.execFileSync('git',['-C',source,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
+  if(actual!==lock.commit) throw new Error('Locked site commit mismatch: '+actual);
+}
 const destinations = [
   path.join(appRoot, 'mobile', 'www'),
   path.join(appRoot, 'desktop', 'www')
@@ -68,7 +83,7 @@ for(const dest of destinations){
   fs.mkdirSync(dest,{recursive:true});
   for(const rel of files)copyFile(rel,dest);
   for(const rel of dirs)copyDir(rel,dest);
-  patchIndex(dest);
+  patchOfflineText(dest);
   verify(dest);
 }
 fs.writeFileSync(path.join(appRoot,'OFFLINE-SOURCE.json'),JSON.stringify(lock,null,2)+'\n');
