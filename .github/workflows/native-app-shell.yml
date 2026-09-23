@@ -165,6 +165,15 @@ jobs:
           npm install --ignore-scripts --no-audit --no-fund
           npx tauri --version
 
+      - name: Generate MalGuard desktop icons
+        working-directory: app-shell/desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npx tauri icon ../assets/malguard-app-icon.svg
+          if (-not (Test-Path -LiteralPath 'src-tauri/icons/icon.ico' -PathType Leaf)) { throw 'Windows icon was not generated' }
+          if (-not (Test-Path -LiteralPath 'src-tauri/icons/icon.png' -PathType Leaf)) { throw 'PNG icon was not generated' }
+
       - name: Build Windows preview executable
         working-directory: app-shell/desktop
         shell: pwsh
@@ -220,6 +229,15 @@ jobs:
           set -euo pipefail
           npm install --ignore-scripts --no-audit --no-fund
           npx tauri --version
+
+      - name: Generate MalGuard desktop icons
+        working-directory: app-shell/desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tauri icon ../assets/malguard-app-icon.svg
+          test -s src-tauri/icons/icon.icns
+          test -s src-tauri/icons/icon.png
 
       - name: Build macOS preview binary
         working-directory: app-shell/desktop
