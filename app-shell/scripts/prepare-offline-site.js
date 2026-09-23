@@ -85,6 +85,7 @@ for(const dest of destinations){
   for(const rel of dirs)copyDir(rel,dest);
   patchOfflineText(dest);
   verify(dest);
+  fs.writeFileSync(path.join(dest,'OFFLINE-SOURCE.json'),JSON.stringify(lock,null,2)+'\n');
 }
 fs.writeFileSync(path.join(appRoot,'OFFLINE-SOURCE.json'),JSON.stringify(lock,null,2)+'\n');
 console.log('Offline MalGuard bundle prepared from '+lock.repository+'@'+lock.commit);
