@@ -9,11 +9,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 jobs:
   publish:
+    permissions:
+      contents: write
+      actions: read
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
