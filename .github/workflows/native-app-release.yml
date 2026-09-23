@@ -63,12 +63,11 @@ jobs:
         run: |
           set -euo pipefail
           cd release-out
-          # Normalize Windows CRLF checksum manifests before GNU verification.
-          sed -i 's/\r$//' *.sha256
+          # Windows writes its checksum file with CRLF. Normalize all checksum
+          # manifests before verification on the Linux release runner.
           for sum in *.sha256; do
-            tr -d '\r' < "$sum" > "$sum.normalized"
-            sha256sum -c "$sum.normalized"
-            rm "$sum.normalized"
+            sed -i 's/\r$//' "$sum"
+            sha256sum -c "$sum"
           done
 
       - name: Publish immutable preview release
