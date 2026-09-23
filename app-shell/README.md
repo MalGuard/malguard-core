@@ -28,7 +28,7 @@ Each bundle contains `OFFLINE-SOURCE.json` with the locked website source.
 - iPhone / iPad: Capacitor native container
 - Windows: Tauri 2 native desktop container
 - macOS: Tauri 2 native desktop container
-- Linux: planned from the same local desktop bundle
+- Linux x64: offline AppImage and DEB preview packages from the same local desktop bundle
 
 ## Security boundary
 
@@ -42,7 +42,7 @@ Bundled website content receives no privileged native shell, filesystem or proce
 
 ## Offline capability boundary
 
-The interface, navigation, documentation and browser-local tools can run without internet once installed. Features that inherently require a remote service, such as cloud AI, web search, release downloads or live network intelligence, still require connectivity until a reviewed local engine exists.
+The interface, navigation, documentation and browser-local tools can run without internet once installed. Features that inherently require a remote service, such as cloud AI, web search, release downloads or live network intelligence, still require connectivity until a reviewed local engine exists. Android, Windows, macOS and Linux packages use the same pinned offline website snapshot; iOS uses the same bundle but physical-device distribution still requires Apple signing.
 
 ## Distribution
 

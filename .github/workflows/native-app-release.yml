@@ -23,7 +23,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RUN_ID: ${{ github.event.workflow_run.id }}
       RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-      RELEASE_TAG: app-v0.2.0-offline-preview.1
+      RELEASE_TAG: app-v0.2.0-offline-preview.2
 
     steps:
       - name: Verify trusted main source
@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-downloads release-out
-          for artifact in             malguard-android-preview             malguard-windows-app-preview             malguard-macos-app-preview             malguard-ios-simulator-preview
+          for artifact in             malguard-android-preview             malguard-windows-app-preview             malguard-macos-app-preview             malguard-ios-simulator-preview             malguard-linux-app-preview
           do
             mkdir -p "release-downloads/$artifact"
             gh run download "$RUN_ID"               --repo "$GITHUB_REPOSITORY"               --name "$artifact"               --dir "release-downloads/$artifact"
@@ -57,6 +57,10 @@ jobs:
           cp release-downloads/malguard-macos-app-preview/MalGuard-App-Preview-macOS.zip.sha256 release-out/
           cp release-downloads/malguard-ios-simulator-preview/MalGuard-iOS-Simulator-Preview.zip release-out/
           cp release-downloads/malguard-ios-simulator-preview/MalGuard-iOS-Simulator-Preview.zip.sha256 release-out/
+          cp release-downloads/malguard-linux-app-preview/MalGuard-App-Preview-Linux-x64.deb release-out/
+          cp release-downloads/malguard-linux-app-preview/MalGuard-App-Preview-Linux-x64.deb.sha256 release-out/
+          cp release-downloads/malguard-linux-app-preview/MalGuard-App-Preview-Linux-x64.AppImage release-out/
+          cp release-downloads/malguard-linux-app-preview/MalGuard-App-Preview-Linux-x64.AppImage.sha256 release-out/
 
       - name: Verify artifact integrity
         shell: bash
@@ -81,7 +85,8 @@ jobs:
           - Android / Samsung: installable offline APK preview.
           - Windows x64: offline NSIS setup preview.
           - macOS: zipped offline .app preview.
-          - iOS: Simulator-only developer preview. This is not an installable iPhone release.
+          - Linux x64: offline AppImage and DEB previews.
+          - iOS: Simulator-only developer preview. The app build is ready, but physical iPhone distribution requires Apple signing/TestFlight.
 
           Important:
           - Windows and macOS preview packages are not yet production-signed.
