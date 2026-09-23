@@ -133,3 +133,173 @@ jobs:
             app-shell/mobile/android/app/build/outputs/apk/debug/app-debug.apk.sha256
           if-no-files-found: error
           retention-days: 7
+
+
+  windows-preview:
+    needs: validate-shell
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.2'
+
+      - name: Record Rust toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          rustc --version
+          cargo --version
+
+      - name: Install desktop shell dependencies
+        working-directory: app-shell/desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --ignore-scripts --no-audit --no-fund
+          npx tauri --version
+
+      - name: Build Windows preview executable
+        working-directory: app-shell/desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm run build -- --no-bundle
+          $exe = Get-ChildItem -LiteralPath 'src-tauri/target/release' -Filter '*.exe' -File |
+            Where-Object { $_.Name -notmatch 'build-script|deps' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'Tauri Windows executable was not produced' }
+          New-Item -ItemType Directory -Path 'dist' -Force | Out-Null
+          $target = Join-Path (Resolve-Path 'dist') 'MalGuard-App-Preview-Windows-x64.exe'
+          Copy-Item -LiteralPath $exe.FullName -Destination $target -Force
+          $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  MalGuard-App-Preview-Windows-x64.exe" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
+
+      - name: Upload Windows preview artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: malguard-windows-app-preview
+          path: |
+            app-shell/desktop/dist/MalGuard-App-Preview-Windows-x64.exe
+            app-shell/desktop/dist/MalGuard-App-Preview-Windows-x64.exe.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-preview:
+    needs: validate-shell
+    runs-on: macos-14
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.2'
+
+      - name: Record Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+
+      - name: Install desktop shell dependencies
+        working-directory: app-shell/desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
+          npx tauri --version
+
+      - name: Build macOS preview binary
+        working-directory: app-shell/desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build -- --no-bundle
+          binary='src-tauri/target/release/malguard-app'
+          test -s "$binary"
+          mkdir -p dist
+          cp "$binary" dist/MalGuard-App-Preview-macOS
+          chmod +x dist/MalGuard-App-Preview-macOS
+          shasum -a 256 dist/MalGuard-App-Preview-macOS | tee dist/MalGuard-App-Preview-macOS.sha256
+
+      - name: Upload macOS preview artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: malguard-macos-app-preview
+          path: |
+            app-shell/desktop/dist/MalGuard-App-Preview-macOS
+            app-shell/desktop/dist/MalGuard-App-Preview-macOS.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  ios-simulator-preview:
+    needs: validate-shell
+    runs-on: macos-14
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.2'
+
+      - name: Install mobile shell dependencies
+        working-directory: app-shell/mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
+          npx cap --version
+
+      - name: Generate iOS native project
+        working-directory: app-shell/mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf ios
+          npx cap add ios
+          npx cap sync ios
+          test -d ios/App
+
+      - name: Build iOS Simulator preview
+        working-directory: app-shell/mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build-ios dist-ios
+          mkdir -p dist-ios
+          if [ -d ios/App/App.xcworkspace ]; then
+            xcodebuild               -workspace ios/App/App.xcworkspace               -scheme App               -configuration Debug               -destination 'generic/platform=iOS Simulator'               -derivedDataPath build-ios               CODE_SIGNING_ALLOWED=NO               build
+          else
+            xcodebuild               -project ios/App/App.xcodeproj               -scheme App               -configuration Debug               -destination 'generic/platform=iOS Simulator'               -derivedDataPath build-ios               CODE_SIGNING_ALLOWED=NO               build
+          fi
+          app="$(find build-ios/Build/Products -maxdepth 3 -type d -name 'App.app' | head -n 1)"
+          test -n "$app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" dist-ios/MalGuard-iOS-Simulator-Preview.zip
+          shasum -a 256 dist-ios/MalGuard-iOS-Simulator-Preview.zip | tee dist-ios/MalGuard-iOS-Simulator-Preview.zip.sha256
+
+      - name: Upload iOS Simulator preview artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: malguard-ios-simulator-preview
+          path: |
+            app-shell/mobile/dist-ios/MalGuard-iOS-Simulator-Preview.zip
+            app-shell/mobile/dist-ios/MalGuard-iOS-Simulator-Preview.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
