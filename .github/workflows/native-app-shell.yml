@@ -46,6 +46,16 @@ jobs:
         with:
           node-version: '22.23.2'
 
+      - name: Prepare locked offline site
+        shell: bash
+        run: |
+          set -euo pipefail
+          node app-shell/scripts/prepare-offline-site.js
+          test -f app-shell/mobile/www/OFFLINE-SOURCE.json
+          test -f app-shell/desktop/www/OFFLINE-SOURCE.json
+          test -f app-shell/mobile/www/index.html
+          test -f app-shell/desktop/www/index.html
+
       - name: Validate native shell policy
         shell: bash
         run: |
@@ -59,18 +69,22 @@ jobs:
           const capacitor = fs.readFileSync('app-shell/mobile/capacitor.config.ts', 'utf8');
           const readme = fs.readFileSync('app-shell/README.md', 'utf8');
 
-          const origin = 'https://malguard.github.io/';
-          if (!capacitor.includes("url: '" + origin + "'")) throw new Error('Capacitor production origin changed');
-          if (capacitor.includes('cleartext: true')) throw new Error('Cleartext mobile traffic must stay disabled');
-          if (!capacitor.includes("allowNavigation: ['malguard.github.io']")) throw new Error('Unexpected mobile navigation allowlist');
-
-          if (tauri.build.frontendDist !== origin) throw new Error('Tauri production origin changed');
+          const lock = JSON.parse(fs.readFileSync('app-shell/site-lock.json', 'utf8'));
+          if (lock.repository !== 'MalGuard/malguard.github.io' || !/^[a-f0-9]{40}$/.test(lock.commit)) {
+            throw new Error('Offline site lock is invalid');
+          }
+          if (capacitor.includes('server:') || capacitor.includes('https://malguard.github.io/')) {
+            throw new Error('Capacitor must load only the bundled local site');
+          }
+          if (tauri.build.frontendDist !== '../www') throw new Error('Tauri must load the bundled local site');
+          if (JSON.stringify(tauri).includes('https://malguard.github.io/')) throw new Error('Tauri config must not use the live site as its frontend');
           if (!tauri.app || !tauri.app.security || !Array.isArray(tauri.app.security.capabilities) || tauri.app.security.capabilities.length !== 0) {
-            throw new Error('Remote desktop content must have zero Tauri capabilities');
+            throw new Error('Bundled desktop content must have zero Tauri capabilities');
           }
 
           if (mobilePackage.private !== true || desktopPackage.private !== true) throw new Error('App shell packages must remain private');
           if (!readme.includes('must not introduce a second product UI')) throw new Error('UI source-of-truth policy missing');
+          if (!readme.includes('bundles a locked snapshot')) throw new Error('Offline bundle policy missing');
 
           const forbidden = [
             /shell:allow/i,
@@ -113,6 +127,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+
+      - name: Prepare locked offline site
+        shell: bash
+        run: |
+          set -euo pipefail
+          node app-shell/scripts/prepare-offline-site.js
+          test -f app-shell/mobile/www/OFFLINE-SOURCE.json
 
       - name: Install pinned major mobile toolchain
         working-directory: app-shell/mobile
@@ -177,6 +198,13 @@ jobs:
         with:
           node-version: '22.23.2'
 
+      - name: Prepare locked offline site
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node app-shell/scripts/prepare-offline-site.js
+          if (-not (Test-Path -LiteralPath 'app-shell/desktop/www/OFFLINE-SOURCE.json' -PathType Leaf)) { throw 'offline desktop bundle missing' }
+
       - name: Record Rust toolchain
         shell: pwsh
         run: |
@@ -239,6 +267,13 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.23.2'
+
+      - name: Prepare locked offline site
+        shell: bash
+        run: |
+          set -euo pipefail
+          node app-shell/scripts/prepare-offline-site.js
+          test -f app-shell/desktop/www/OFFLINE-SOURCE.json
 
       - name: Record Rust toolchain
         shell: bash
@@ -304,6 +339,13 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.23.2'
+
+      - name: Prepare locked offline site
+        shell: bash
+        run: |
+          set -euo pipefail
+          node app-shell/scripts/prepare-offline-site.js
+          test -f app-shell/mobile/www/OFFLINE-SOURCE.json
 
       - name: Install mobile shell dependencies
         working-directory: app-shell/mobile
