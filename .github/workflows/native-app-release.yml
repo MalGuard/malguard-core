@@ -64,6 +64,9 @@ jobs:
           set -euo pipefail
           cd release-out
           for sum in *.sha256; do
+            # Windows writes its sidecar with CRLF. Normalize the sidecar only;
+            # the release binary itself is never modified.
+            sed -i 's/\r$//' "$sum"
             sha256sum -c "$sum"
           done
 
