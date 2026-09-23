@@ -21,7 +21,27 @@ for (const file of files) {
 
   assert(!/^\s*permissions:\s*write-all\s*$/m.test(text), `${file}: write-all permissions are forbidden`);
   assert(!/^\s*pull_request_target\s*:/m.test(text), `${file}: pull_request_target is forbidden for repository workflows`);
-  assert(/^permissions:\s*\r?\n\s{2}contents:\s*read\s*$/m.test(text), `${file}: workflow must declare top-level read-only contents permission`);
+
+  const isNativeAppRelease = file === 'native-app-release.yml';
+  if (isNativeAppRelease) {
+    assert(/^on:\s*\r?\n\s{2}workflow_run:\s*$/m.test(text), `${file}: release publishing must be workflow_run-only`);
+    assert(/^permissions:\s*\r?\n\s{2}actions:\s*read\s*\r?\n\s{2}contents:\s*write\s*$/m.test(text),
+      `${file}: native app release must have exactly actions:read and contents:write`);
+    assert(/github\.event\.workflow_run\.conclusion\s*==\s*'success'/.test(text),
+      `${file}: release must require a successful source workflow`);
+    assert(/github\.event\.workflow_run\.event\s*==\s*'push'/.test(text),
+      `${file}: release must only accept push-triggered source workflows`);
+    assert(/github\.event\.workflow_run\.head_branch\s*==\s*'main'/.test(text),
+      `${file}: release must only accept main branch source workflows`);
+    assert(/main_sha=.*gh api .*branches\/main/.test(text),
+      `${file}: release must revalidate the current main SHA before publishing`);
+    assert(!/actions\/checkout@/.test(text),
+      `${file}: privileged release workflow must not checkout repository-controlled code`);
+  } else {
+    assert(/^permissions:\s*\r?\n\s{2}contents:\s*read\s*$/m.test(text),
+      `${file}: workflow must declare top-level read-only contents permission`);
+  }
+
   assert(!/^\s+(?:actions|checks|deployments|id-token|issues|packages|pages|pull-requests|repository-projects|security-events|statuses):\s*write\s*$/m.test(text), `${file}: workflow must not grant write-scoped token permissions`);
   assert(!/MALGUARD_RELEASE_SIGNING_PRIVATE_KEY_PEM/.test(text), `${file}: offline release signing private keys must never be referenced by GitHub Actions`);
   for (const line of lines.filter(value => value.includes('SignPath/github-action-submit-signing-request'))) {
@@ -71,4 +91,4 @@ for (const file of files) {
 
 assert(externalUses >= 3, 'expected external actions to be checked');
 assert(checkoutUses >= 1, 'expected checkout actions to be checked');
-console.log(`✓ Workflow supply-chain policy: ${files.length} workflows, ${externalUses} external actions pinned by full SHA, checkout credentials disabled, token permissions read-only, lifecycle scripts blocked, offline signing isolated, SignPath action pinning enforced, runtime redirects refused`);
+console.log(`✓ Workflow supply-chain policy: ${files.length} workflows, ${externalUses} external actions pinned by full SHA, checkout credentials disabled, privileged native-app publishing isolated to trusted main workflow_run, lifecycle scripts blocked, offline signing isolated, SignPath action pinning enforced, runtime redirects refused`);
