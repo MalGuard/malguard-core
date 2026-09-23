@@ -40,3 +40,6 @@ Tauri uses the official production URL as its external frontend. The initial app
 ## Distribution
 
 Do not connect Get MalGuard download buttons to a platform until a real platform artifact exists and passes its release checks.
+
+
+<!-- Release request marker: 2026-09-23 native app preview 0.1.0 -->
