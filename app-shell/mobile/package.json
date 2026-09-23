@@ -1,0 +1,23 @@
+{
+  "name": "malguard-mobile-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native Android/iOS shell for the official MalGuard production site",
+  "scripts": {
+    "cap": "cap",
+    "add:android": "cap add android",
+    "add:ios": "cap add ios",
+    "sync": "cap sync",
+    "sync:android": "cap sync android",
+    "sync:ios": "cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/ios": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0",
+    "typescript": "^5.9.0"
+  }
+}
