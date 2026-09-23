@@ -60,6 +60,22 @@ function patchOfflineText(dest){
     s=s.replace(/url\(["']https:\/\/cdn\.creativeclaw\.co\/[^"')]+["']\)/g,'url("/assets/malguard-earth-background.png")');
     s=s.replace(/@import\s+url\(["']?https:\/\/fonts\.googleapis\.com[^;]+;?/gi,'');
     s=s.replace(/<link\b[^>]*href=["']https:\/\/fonts\.googleapis\.com[^>]*>/gi,'');
+    s=s.replace(/connect-src\s+'self'\s+https:\/\/malware-ai-gray\.vercel\.app/gi,"connect-src 'self'");
+    s=s.replace(/href=["']https:\/\/malware-ai-gray\.vercel\.app\/?["']/gi,'href="/#malware-ai"');
+
+    const rel=path.relative(dest,p).replace(/\\/g,'/');
+    if(rel==='index.html'){
+      const bootstrap='<script src="/assets/offline-ai/offline-malware-ai-bootstrap.js"></script>';
+      if(!s.includes(bootstrap)){
+        if(!s.includes('</head>'))throw new Error('Offline index is missing </head>');
+        s=s.replace('</head>',bootstrap+'\n</head>');
+      }
+      s=s.replace(/<em>LIVE PREVIEW<\/em>/g,'<em>OFFLINE LOCAL</em>');
+    }
+    if(rel==='ai-intelligence.html'){
+      s=s.replace(/LIVE PREVIEW/g,'OFFLINE LOCAL');
+      s=s.replace(/Live web preview/gi,'Offline local preview');
+    }
     fs.writeFileSync(p,s);
   }
 }
@@ -79,8 +95,19 @@ function verify(dest){
     if(/<script\b[^>]*\bsrc=["']https?:\/\//i.test(s)) throw new Error('Remote script dependency: '+path.relative(dest,p));
     if(/url\(\s*["']?https?:\/\//i.test(s)) throw new Error('Remote CSS/image dependency: '+path.relative(dest,p));
   }
-  if(!fs.readFileSync(path.join(dest,'index.html'),'utf8').includes('/assets/malguard-earth-background.png')){
+  const offlineIndex=fs.readFileSync(path.join(dest,'index.html'),'utf8');
+  if(!offlineIndex.includes('/assets/malguard-earth-background.png')){
     throw new Error('Offline Earth image replacement did not apply');
+  }
+  if(!offlineIndex.includes('/assets/offline-ai/offline-malware-ai-bootstrap.js')){
+    throw new Error('Offline AI bootstrap was not injected');
+  }
+  if(/connect-src[^;]*malware-ai-gray\.vercel\.app/i.test(offlineIndex)){
+    throw new Error('Offline bundle still permits the cloud AI endpoint');
+  }
+  const aiPage=fs.readFileSync(path.join(dest,'ai-intelligence.html'),'utf8');
+  if(/href=["']https:\/\/malware-ai-gray\.vercel\.app/i.test(aiPage)){
+    throw new Error('Offline AI page still navigates to the cloud preview');
   }
 }
 
