@@ -63,6 +63,9 @@ jobs:
         run: |
           set -euo pipefail
           cd release-out
+          # Windows writes the checksum file with CRLF. Normalize checksum manifests
+          # before GNU sha256sum verifies the cross-platform release set.
+          sed -i 's/\r$//' *.sha256
           for sum in *.sha256; do
             sha256sum -c "$sum"
           done
