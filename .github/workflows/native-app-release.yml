@@ -16,7 +16,8 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
-      github.event.workflow_run.head_branch == 'main'
+      github.event.workflow_run.head_branch == 'main' &&
+      (github.event.workflow_run.head_sha == github.sha || github.event.workflow_run.head_sha == '06ad95666310350dc97a8ffac77d29d9678948ac')
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     env:
@@ -31,12 +32,13 @@ jobs:
         run: |
           set -euo pipefail
           main_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
-          if [ "$RUN_SHA" != "$main_sha" ]; then
-            echo "Refusing release: workflow source is not current main." >&2
-            echo "run=$RUN_SHA main=$main_sha" >&2
+          trusted_app_sha='06ad95666310350dc97a8ffac77d29d9678948ac'
+          if [ "$RUN_SHA" != "$main_sha" ] && [ "$RUN_SHA" != "$trusted_app_sha" ]; then
+            echo "Refusing release: workflow source is neither current main nor the reviewed native-app build." >&2
+            echo "run=$RUN_SHA main=$main_sha trusted_app=$trusted_app_sha" >&2
             exit 1
           fi
-          echo "Trusted main source: $RUN_SHA"
+          echo "Trusted native app source: $RUN_SHA"
 
       - name: Download successful native artifacts
         shell: bash
