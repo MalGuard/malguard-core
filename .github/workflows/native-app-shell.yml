@@ -18,6 +18,15 @@ on:
       - '.github/workflows/native-app-shell.yml'
       - '.github/workflows/native-app-release.yml'
   workflow_dispatch:
+    inputs:
+      release_publish:
+        description: Build verified native artifacts for preview release publishing
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: read
