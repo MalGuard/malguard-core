@@ -23,7 +23,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RUN_ID: ${{ github.event.workflow_run.id }}
       RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-      RELEASE_TAG: app-v0.2.0-offline-preview.1
+      RELEASE_TAG: app-v0.3.0-fully-offline-preview.1
 
     steps:
       - name: Verify trusted main source
@@ -75,18 +75,20 @@ jobs:
         run: |
           set -euo pipefail
           cat > release-notes.md <<'EOF'
-          MalGuard App Offline Preview bundles a locked snapshot of the official MalGuard production site inside native installable containers without introducing a second UI.
+          MalGuard App Fully Offline Preview bundles a locked snapshot of the official MalGuard production site and the verified MalGuard Local AI runtime inside native installable containers without introducing a second UI.
 
           Available preview packages:
-          - Android / Samsung: installable offline APK preview.
-          - Windows x64: offline NSIS setup preview.
-          - macOS: zipped offline .app preview.
-          - iOS: Simulator-only developer preview. This is not an installable iPhone release.
+          - Android / Samsung: installable fully offline APK preview with bundled Local AI.
+          - Windows x64: fully offline NSIS setup preview with bundled Local AI.
+          - macOS: zipped fully offline .app preview with bundled Local AI.
+          - iOS: fully offline Simulator-only developer preview with bundled Local AI. This is not an installable iPhone release.
 
           Important:
           - Windows and macOS preview packages are not yet production-signed.
           - iPhone distribution requires Apple signing and TestFlight/App Store distribution.
-          - The installed application UI is bundled locally from a pinned MalGuard website commit. Cloud-only features still require internet.
+          - The installed application UI is bundled locally from a pinned MalGuard website commit.
+          - Qwen2.5-0.5B-Instruct Local AI (q4) and its Transformers.js runtime are bundled and do not download at runtime.
+          - Explicit internet-only actions such as web search, fresh network intelligence, GitHub links and release navigation still require connectivity and are not misrepresented as offline.
           EOF
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -98,7 +100,7 @@ jobs:
             fi
             gh release upload "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               release-out/*               --clobber
           else
-            gh release create "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --target "$RUN_SHA"               --prerelease               --title "MalGuard App Offline Preview 0.2.0"               --notes-file release-notes.md               release-out/*
+            gh release create "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --target "$RUN_SHA"               --prerelease               --title "MalGuard App Fully Offline Preview 0.3.0"               --notes-file release-notes.md               release-out/*
           fi
 
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"

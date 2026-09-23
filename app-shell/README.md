@@ -18,7 +18,10 @@ At build time:
 2. `scripts/prepare-offline-site.js` fetches exactly that commit.
 3. Only the same approved production files used by GitHub Pages are copied into the native app.
 4. Critical remote runtime assets are rejected. The current remote Earth background is replaced with MalGuard's versioned local Earth asset.
-5. Android/iOS and Windows/macOS load the copied local files, not the live website.
+5. `offline-ai/model-lock.json` pins the Local AI model repository, commit, quantization, byte size and SHA-256.
+6. `scripts/prepare-offline-ai.js` builds one verified offline AI asset set.
+7. The exact same AI asset set is staged into Android, iOS, Windows and macOS packages.
+8. Android/iOS and Windows/macOS load the copied local files and local AI model, not the live website or cloud AI endpoint.
 
 Each bundle contains `OFFLINE-SOURCE.json` with the locked website source.
 
@@ -42,7 +45,16 @@ Bundled website content receives no privileged native shell, filesystem or proce
 
 ## Offline capability boundary
 
-The interface, navigation, documentation and browser-local tools can run without internet once installed. Features that inherently require a remote service, such as cloud AI, web search, release downloads or live network intelligence, still require connectivity until a reviewed local engine exists.
+The installed app is designed to launch and provide its core local experience without internet:
+
+- The complete MalGuard website interface is bundled locally.
+- Browser-local tools such as URL-text inspection and SHA-256 fingerprinting remain local.
+- Malware AI uses the existing MalGuard Local tier, Qwen2.5-0.5B-Instruct, bundled inside the app.
+- Transformers.js and ONNX Runtime Web assets are bundled locally.
+- Runtime model downloading is disabled.
+- Runtime external fetches are blocked by the offline app bootstrap unless they are same-origin local requests.
+
+Explicit internet features are not disguised as offline capabilities. Web search, live network intelligence, GitHub/release navigation and other fresh remote data still require connectivity and must fail clearly when offline.
 
 ## Distribution
 

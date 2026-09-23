@@ -1,0 +1,9 @@
+{
+  "name": "malguard-offline-ai-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Build-time vendor package for the fully offline MalGuard Local AI runtime",
+  "dependencies": {
+    "@huggingface/transformers": "3.8.1"
+  }
+}

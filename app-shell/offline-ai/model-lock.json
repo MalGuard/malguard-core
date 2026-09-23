@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0.0",
+  "provider": "Hugging Face",
+  "repository": "onnx-community/Qwen2.5-0.5B-Instruct",
+  "commit": "516c8d04add8a80c5228f32102b57953b8d421a9",
+  "localModelId": "malguard-qwen2.5-0.5b-instruct",
+  "dtype": "q4",
+  "transformersVersion": "3.8.1",
+  "modelFile": "onnx/model_q4.onnx",
+  "modelSize": 786156820,
+  "modelSha256": "09235a3b1c135cd04ef570e5053b5c079e028078a2cc5f76ba6a251e91bf3296",
+  "files": [
+    "added_tokens.json",
+    "config.json",
+    "generation_config.json",
+    "merges.txt",
+    "quantize_config.json",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "vocab.json",
+    "onnx/model_q4.onnx"
+  ]
+}
