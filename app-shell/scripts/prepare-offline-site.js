@@ -50,12 +50,18 @@ function copyDir(rel,dest){
   if(!fs.existsSync(from)||!fs.statSync(from).isDirectory()) throw new Error('Missing production directory: '+rel);
   fs.cpSync(from,to,{recursive:true});
 }
-function patchIndex(dest){
-  const p=path.join(dest,'index.html');
-  let s=fs.readFileSync(p,'utf8');
-  s=s.replace(/url\(["']https:\/\/assets\.science\.nasa\.gov\/[^"')]+["']\)/g,'url("/assets/malguard-earth-background.png")');
-  s=s.replace(/url\(["']https:\/\/cdn\.creativeclaw\.co\/[^"')]+["']\)/g,'url("/assets/malguard-earth-background.png")');
-  fs.writeFileSync(p,s);
+function patchOfflineText(dest){
+  const targets=[];
+  const walk=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(/\.(?:html|css|js)$/i.test(e.name))targets.push(p)}};
+  walk(dest);
+  for(const p of targets){
+    let s=fs.readFileSync(p,'utf8');
+    s=s.replace(/url\(["']https:\/\/assets\.science\.nasa\.gov\/[^"')]+["']\)/g,'url("/assets/malguard-earth-background.png")');
+    s=s.replace(/url\(["']https:\/\/cdn\.creativeclaw\.co\/[^"')]+["']\)/g,'url("/assets/malguard-earth-background.png")');
+    s=s.replace(/@import\s+url\(["']?https:\/\/fonts\.googleapis\.com[^;]+;?/gi,'');
+    s=s.replace(/<link\b[^>]*href=["']https:\/\/fonts\.googleapis\.com[^>]*>/gi,'');
+    fs.writeFileSync(p,s);
+  }
 }
 function verify(dest){
   const required=[
