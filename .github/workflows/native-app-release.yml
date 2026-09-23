@@ -1,0 +1,101 @@
+name: Publish MalGuard Native App Preview
+
+on:
+  workflow_run:
+    workflows:
+      - MalGuard Native App Shell
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-preview:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      RELEASE_TAG: app-v0.1.0-preview.1
+
+    steps:
+      - name: Verify trusted main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
+          if [ "$RUN_SHA" != "$main_sha" ]; then
+            echo "Refusing release: workflow source is not current main." >&2
+            echo "run=$RUN_SHA main=$main_sha" >&2
+            exit 1
+          fi
+          echo "Trusted main source: $RUN_SHA"
+
+      - name: Download successful native artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-downloads release-out
+          for artifact in             malguard-android-preview             malguard-windows-app-preview             malguard-macos-app-preview             malguard-ios-simulator-preview
+          do
+            mkdir -p "release-downloads/$artifact"
+            gh run download "$RUN_ID"               --repo "$GITHUB_REPOSITORY"               --name "$artifact"               --dir "release-downloads/$artifact"
+          done
+
+          cp release-downloads/malguard-android-preview/MalGuard-App-Preview-Android.apk release-out/
+          cp release-downloads/malguard-android-preview/MalGuard-App-Preview-Android.apk.sha256 release-out/
+          cp release-downloads/malguard-windows-app-preview/MalGuard-App-Preview-Windows-x64-Setup.exe release-out/
+          cp release-downloads/malguard-windows-app-preview/MalGuard-App-Preview-Windows-x64-Setup.exe.sha256 release-out/
+          cp release-downloads/malguard-macos-app-preview/MalGuard-App-Preview-macOS.zip release-out/
+          cp release-downloads/malguard-macos-app-preview/MalGuard-App-Preview-macOS.zip.sha256 release-out/
+          cp release-downloads/malguard-ios-simulator-preview/MalGuard-iOS-Simulator-Preview.zip release-out/
+          cp release-downloads/malguard-ios-simulator-preview/MalGuard-iOS-Simulator-Preview.zip.sha256 release-out/
+
+      - name: Verify artifact integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-out
+          for sum in *.sha256; do
+            sha256sum -c "$sum"
+          done
+
+      - name: Publish immutable preview release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          MalGuard App Preview wraps the official MalGuard production site in native installable containers without introducing a second UI.
+
+          Available preview packages:
+          - Android / Samsung: installable APK preview.
+          - Windows x64: NSIS setup preview.
+          - macOS: zipped .app preview.
+          - iOS: Simulator-only developer preview. This is not an installable iPhone release.
+
+          Important:
+          - Windows and macOS preview packages are not yet production-signed.
+          - iPhone distribution requires Apple signing and TestFlight/App Store distribution.
+          - The application UI is the official https://malguard.github.io/ site.
+          EOF
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')"
+            if [ "$tag_sha" != "$RUN_SHA" ]; then
+              echo "Refusing to overwrite $RELEASE_TAG from a different source commit." >&2
+              echo "tag=$tag_sha run=$RUN_SHA" >&2
+              exit 1
+            fi
+            gh release upload "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               release-out/*               --clobber
+          else
+            gh release create "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --target "$RUN_SHA"               --prerelease               --title "MalGuard App Preview 0.1.0"               --notes-file release-notes.md               release-out/*
+          fi
+
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"

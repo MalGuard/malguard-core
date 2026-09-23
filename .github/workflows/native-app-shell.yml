@@ -7,6 +7,14 @@ on:
     paths:
       - 'app-shell/**'
       - '.github/workflows/native-app-shell.yml'
+      - '.github/workflows/native-app-release.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'app-shell/**'
+      - '.github/workflows/native-app-shell.yml'
+      - '.github/workflows/native-app-release.yml'
   workflow_dispatch:
 
 permissions:
@@ -121,16 +129,24 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-          test -s app/build/outputs/apk/debug/app-debug.apk
-          sha256sum app/build/outputs/apk/debug/app-debug.apk | tee app/build/outputs/apk/debug/app-debug.apk.sha256
+          source_apk='app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$source_apk"
+          mkdir -p ../dist-android
+          target='../dist-android/MalGuard-App-Preview-Android.apk'
+          cp "$source_apk" "$target"
+          (
+            cd ../dist-android
+            sha256sum MalGuard-App-Preview-Android.apk > MalGuard-App-Preview-Android.apk.sha256
+            cat MalGuard-App-Preview-Android.apk.sha256
+          )
 
       - name: Upload Android preview artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: malguard-android-preview
           path: |
-            app-shell/mobile/android/app/build/outputs/apk/debug/app-debug.apk
-            app-shell/mobile/android/app/build/outputs/apk/debug/app-debug.apk.sha256
+            app-shell/mobile/dist-android/MalGuard-App-Preview-Android.apk
+            app-shell/mobile/dist-android/MalGuard-App-Preview-Android.apk.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -174,29 +190,27 @@ jobs:
           if (-not (Test-Path -LiteralPath 'src-tauri/icons/icon.ico' -PathType Leaf)) { throw 'Windows icon was not generated' }
           if (-not (Test-Path -LiteralPath 'src-tauri/icons/icon.png' -PathType Leaf)) { throw 'PNG icon was not generated' }
 
-      - name: Build Windows preview executable
+      - name: Build Windows preview installer
         working-directory: app-shell/desktop
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          npm run build -- --no-bundle
-          $exe = Get-ChildItem -LiteralPath 'src-tauri/target/release' -Filter '*.exe' -File |
-            Where-Object { $_.Name -notmatch 'build-script|deps' } |
-            Select-Object -First 1
-          if (-not $exe) { throw 'Tauri Windows executable was not produced' }
+          npm run build -- --bundles nsis
+          $setup = Get-ChildItem -LiteralPath 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File | Select-Object -First 1
+          if (-not $setup) { throw 'Tauri Windows NSIS installer was not produced' }
           New-Item -ItemType Directory -Path 'dist' -Force | Out-Null
-          $target = Join-Path (Resolve-Path 'dist') 'MalGuard-App-Preview-Windows-x64.exe'
-          Copy-Item -LiteralPath $exe.FullName -Destination $target -Force
+          $target = Join-Path (Resolve-Path 'dist') 'MalGuard-App-Preview-Windows-x64-Setup.exe'
+          Copy-Item -LiteralPath $setup.FullName -Destination $target -Force
           $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  MalGuard-App-Preview-Windows-x64.exe" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
+          "$hash  MalGuard-App-Preview-Windows-x64-Setup.exe" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
 
       - name: Upload Windows preview artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: malguard-windows-app-preview
           path: |
-            app-shell/desktop/dist/MalGuard-App-Preview-Windows-x64.exe
-            app-shell/desktop/dist/MalGuard-App-Preview-Windows-x64.exe.sha256
+            app-shell/desktop/dist/MalGuard-App-Preview-Windows-x64-Setup.exe
+            app-shell/desktop/dist/MalGuard-App-Preview-Windows-x64-Setup.exe.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -239,26 +253,29 @@ jobs:
           test -s src-tauri/icons/icon.icns
           test -s src-tauri/icons/icon.png
 
-      - name: Build macOS preview binary
+      - name: Build macOS preview app
         working-directory: app-shell/desktop
         shell: bash
         run: |
           set -euo pipefail
-          npm run build -- --no-bundle
-          binary='src-tauri/target/release/malguard-app'
-          test -s "$binary"
+          npm run build -- --bundles app
+          app="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -type d -name '*.app' | head -n 1)"
+          test -n "$app"
           mkdir -p dist
-          cp "$binary" dist/MalGuard-App-Preview-macOS
-          chmod +x dist/MalGuard-App-Preview-macOS
-          shasum -a 256 dist/MalGuard-App-Preview-macOS | tee dist/MalGuard-App-Preview-macOS.sha256
+          ditto -c -k --sequesterRsrc --keepParent "$app" dist/MalGuard-App-Preview-macOS.zip
+          (
+            cd dist
+            shasum -a 256 MalGuard-App-Preview-macOS.zip > MalGuard-App-Preview-macOS.zip.sha256
+            cat MalGuard-App-Preview-macOS.zip.sha256
+          )
 
       - name: Upload macOS preview artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: malguard-macos-app-preview
           path: |
-            app-shell/desktop/dist/MalGuard-App-Preview-macOS
-            app-shell/desktop/dist/MalGuard-App-Preview-macOS.sha256
+            app-shell/desktop/dist/MalGuard-App-Preview-macOS.zip
+            app-shell/desktop/dist/MalGuard-App-Preview-macOS.zip.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -310,7 +327,11 @@ jobs:
           app="$(find build-ios/Build/Products -maxdepth 3 -type d -name 'App.app' | head -n 1)"
           test -n "$app"
           ditto -c -k --sequesterRsrc --keepParent "$app" dist-ios/MalGuard-iOS-Simulator-Preview.zip
-          shasum -a 256 dist-ios/MalGuard-iOS-Simulator-Preview.zip | tee dist-ios/MalGuard-iOS-Simulator-Preview.zip.sha256
+          (
+            cd dist-ios
+            shasum -a 256 MalGuard-iOS-Simulator-Preview.zip > MalGuard-iOS-Simulator-Preview.zip.sha256
+            cat MalGuard-iOS-Simulator-Preview.zip.sha256
+          )
 
       - name: Upload iOS Simulator preview artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
