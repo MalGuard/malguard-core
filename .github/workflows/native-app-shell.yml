@@ -100,7 +100,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install --no-audit --no-fund
+          npm install --ignore-scripts --no-audit --no-fund
           npx cap --version
 
       - name: Generate Android native project
