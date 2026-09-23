@@ -134,7 +134,11 @@ jobs:
           mkdir -p ../dist-android
           target='../dist-android/MalGuard-App-Preview-Android.apk'
           cp "$source_apk" "$target"
-          sha256sum "$target" | tee "$target.sha256"
+          (
+            cd ../dist-android
+            sha256sum MalGuard-App-Preview-Android.apk > MalGuard-App-Preview-Android.apk.sha256
+            cat MalGuard-App-Preview-Android.apk.sha256
+          )
 
       - name: Upload Android preview artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -259,7 +263,11 @@ jobs:
           test -n "$app"
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent "$app" dist/MalGuard-App-Preview-macOS.zip
-          shasum -a 256 dist/MalGuard-App-Preview-macOS.zip | tee dist/MalGuard-App-Preview-macOS.zip.sha256
+          (
+            cd dist
+            shasum -a 256 MalGuard-App-Preview-macOS.zip > MalGuard-App-Preview-macOS.zip.sha256
+            cat MalGuard-App-Preview-macOS.zip.sha256
+          )
 
       - name: Upload macOS preview artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -319,7 +327,11 @@ jobs:
           app="$(find build-ios/Build/Products -maxdepth 3 -type d -name 'App.app' | head -n 1)"
           test -n "$app"
           ditto -c -k --sequesterRsrc --keepParent "$app" dist-ios/MalGuard-iOS-Simulator-Preview.zip
-          shasum -a 256 dist-ios/MalGuard-iOS-Simulator-Preview.zip | tee dist-ios/MalGuard-iOS-Simulator-Preview.zip.sha256
+          (
+            cd dist-ios
+            shasum -a 256 MalGuard-iOS-Simulator-Preview.zip > MalGuard-iOS-Simulator-Preview.zip.sha256
+            cat MalGuard-iOS-Simulator-Preview.zip.sha256
+          )
 
       - name: Upload iOS Simulator preview artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
