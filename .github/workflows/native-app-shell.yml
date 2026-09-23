@@ -52,20 +52,6 @@ jobs:
           set -euo pipefail
           node app-shell/scripts/prepare-offline-site.js
           test -f app-shell/mobile/www/OFFLINE-SOURCE.json
-
-      - name: Download locked offline AI runtime
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: malguard-offline-ai-runtime
-          path: app-shell/offline-ai/dist
-
-      - name: Stage fully offline AI into Android app
-        shell: bash
-        run: |
-          set -euo pipefail
-          node app-shell/scripts/stage-offline-ai.js app-shell/mobile/www
-          test -s app-shell/mobile/www/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx
-          test -s app-shell/mobile/www/assets/offline-ai/offline-ai-engine.mjs
           test -f app-shell/desktop/www/OFFLINE-SOURCE.json
           test -f app-shell/mobile/www/index.html
           test -f app-shell/desktop/www/index.html
@@ -211,12 +197,14 @@ jobs:
           name: malguard-offline-ai-runtime
           path: app-shell/offline-ai/dist
 
-      - name: Stage fully offline AI into iOS app
+      - name: Stage fully offline AI into Android app
         shell: bash
         run: |
           set -euo pipefail
           node app-shell/scripts/stage-offline-ai.js app-shell/mobile/www
           test -s app-shell/mobile/www/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx
+          test -s app-shell/mobile/www/assets/offline-ai/offline-ai-engine.mjs
+
 
       - name: Install pinned major mobile toolchain
         working-directory: app-shell/mobile
@@ -303,6 +291,7 @@ jobs:
           node app-shell/scripts/stage-offline-ai.js app-shell/desktop/www
           if (-not (Test-Path -LiteralPath 'app-shell/desktop/www/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx' -PathType Leaf)) { throw 'offline model missing from Windows bundle' }
 
+
       - name: Record Rust toolchain
         shell: pwsh
         run: |
@@ -388,6 +377,7 @@ jobs:
           node app-shell/scripts/stage-offline-ai.js app-shell/desktop/www
           test -s app-shell/desktop/www/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx
 
+
       - name: Record Rust toolchain
         shell: bash
         run: |
@@ -461,6 +451,20 @@ jobs:
           set -euo pipefail
           node app-shell/scripts/prepare-offline-site.js
           test -f app-shell/mobile/www/OFFLINE-SOURCE.json
+
+      - name: Download locked offline AI runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: malguard-offline-ai-runtime
+          path: app-shell/offline-ai/dist
+
+      - name: Stage fully offline AI into iOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          node app-shell/scripts/stage-offline-ai.js app-shell/mobile/www
+          test -s app-shell/mobile/www/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx
+
 
       - name: Install mobile shell dependencies
         working-directory: app-shell/mobile
