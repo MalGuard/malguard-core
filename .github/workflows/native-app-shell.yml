@@ -1,5 +1,7 @@
 name: MalGuard Native App Shell
 
+# Release trigger revision: 2
+
 on:
   pull_request:
     branches:
