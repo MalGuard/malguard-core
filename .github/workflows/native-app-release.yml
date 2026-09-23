@@ -64,7 +64,9 @@ jobs:
           set -euo pipefail
           cd release-out
           for sum in *.sha256; do
-            sha256sum -c "$sum"
+            tr -d '\r' < "$sum" > "$sum.normalized"
+            sha256sum -c "$sum.normalized"
+            rm "$sum.normalized"
           done
 
       - name: Publish immutable preview release
