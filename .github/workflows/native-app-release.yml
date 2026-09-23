@@ -64,7 +64,11 @@ jobs:
           set -euo pipefail
           cd release-out
           for sum in *.sha256; do
-            sha256sum -c "$sum"
+            # Windows PowerShell writes CRLF sidecars; normalize a temporary
+            # verification copy without mutating the published checksum file.
+            normalized="$RUNNER_TEMP/$(basename "$sum").lf"
+            tr -d '\r' < "$sum" > "$normalized"
+            sha256sum -c "$normalized"
           done
 
       - name: Publish immutable preview release
