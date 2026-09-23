@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "io.github.malguard.client",
   "build": {
-    "frontendDist": "https://malguard.github.io/"
+    "frontendDist": "../www"
   },
   "app": {
     "windows": [
