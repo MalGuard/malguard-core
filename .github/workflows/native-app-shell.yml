@@ -52,9 +52,26 @@ jobs:
           set -euo pipefail
           node app-shell/scripts/prepare-offline-site.js
           test -f app-shell/mobile/www/OFFLINE-SOURCE.json
+
+      - name: Download locked offline AI runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: malguard-offline-ai-runtime
+          path: app-shell/offline-ai/dist
+
+      - name: Stage fully offline AI into Android app
+        shell: bash
+        run: |
+          set -euo pipefail
+          node app-shell/scripts/stage-offline-ai.js app-shell/mobile/www
+          test -s app-shell/mobile/www/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx
+          test -s app-shell/mobile/www/assets/offline-ai/offline-ai-engine.mjs
           test -f app-shell/desktop/www/OFFLINE-SOURCE.json
           test -f app-shell/mobile/www/index.html
           test -f app-shell/desktop/www/index.html
+          grep -q '/assets/offline-ai/offline-malware-ai-bootstrap.js' app-shell/mobile/www/index.html
+          grep -q '/assets/offline-ai/offline-malware-ai-bootstrap.js' app-shell/desktop/www/index.html
+          ! grep -Eq 'connect-src[^;]*malware-ai-gray\.vercel\.app' app-shell/mobile/www/index.html
 
       - name: Validate native shell policy
         shell: bash
@@ -72,6 +89,15 @@ jobs:
           const lock = JSON.parse(fs.readFileSync('app-shell/site-lock.json', 'utf8'));
           if (lock.repository !== 'MalGuard/malguard.github.io' || !/^[a-f0-9]{40}$/.test(lock.commit)) {
             throw new Error('Offline site lock is invalid');
+          }
+          const aiLock = JSON.parse(fs.readFileSync('app-shell/offline-ai/model-lock.json', 'utf8'));
+          if (
+            aiLock.repository !== 'onnx-community/Qwen2.5-0.5B-Instruct' ||
+            aiLock.commit !== '516c8d04add8a80c5228f32102b57953b8d421a9' ||
+            aiLock.dtype !== 'q4' ||
+            aiLock.modelSha256 !== '09235a3b1c135cd04ef570e5053b5c079e028078a2cc5f76ba6a251e91bf3296'
+          ) {
+            throw new Error('Offline AI model lock is invalid');
           }
           if (capacitor.includes('server:') || capacitor.includes('https://malguard.github.io/')) {
             throw new Error('Capacitor must load only the bundled local site');
@@ -107,10 +133,54 @@ jobs:
           node -e "JSON.parse(require('fs').readFileSync('app-shell/mobile/package.json','utf8')); JSON.parse(require('fs').readFileSync('app-shell/desktop/package.json','utf8')); JSON.parse(require('fs').readFileSync('app-shell/desktop/src-tauri/tauri.conf.json','utf8'));"
           cargo metadata --manifest-path app-shell/desktop/src-tauri/Cargo.toml --no-deps --format-version 1 >/dev/null
 
-  android-preview:
+  offline-ai-assets:
     needs: validate-shell
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.2'
+
+      - name: Install pinned offline AI build dependency
+        working-directory: app-shell/offline-ai
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Prepare locked fully offline AI runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node app-shell/scripts/prepare-offline-ai.js
+          test -s app-shell/offline-ai/dist/OFFLINE-AI-SOURCE.json
+          test -s app-shell/offline-ai/dist/vendor/transformers.web.min.js
+          test -s app-shell/offline-ai/dist/vendor/ort-wasm-simd-threaded.jsep.wasm
+          test -s app-shell/offline-ai/dist/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx
+          actual="$(sha256sum app-shell/offline-ai/dist/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx | awk '{print $1}')"
+          test "$actual" = "09235a3b1c135cd04ef570e5053b5c079e028078a2cc5f76ba6a251e91bf3296"
+
+      - name: Upload locked offline AI runtime
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: malguard-offline-ai-runtime
+          path: app-shell/offline-ai/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  android-preview:
+    needs:
+      - validate-shell
+      - offline-ai-assets
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
       - name: Checkout exact source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -134,6 +204,19 @@ jobs:
           set -euo pipefail
           node app-shell/scripts/prepare-offline-site.js
           test -f app-shell/mobile/www/OFFLINE-SOURCE.json
+
+      - name: Download locked offline AI runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: malguard-offline-ai-runtime
+          path: app-shell/offline-ai/dist
+
+      - name: Stage fully offline AI into iOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          node app-shell/scripts/stage-offline-ai.js app-shell/mobile/www
+          test -s app-shell/mobile/www/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx
 
       - name: Install pinned major mobile toolchain
         working-directory: app-shell/mobile
@@ -184,9 +267,11 @@ jobs:
 
 
   windows-preview:
-    needs: validate-shell
+    needs:
+      - validate-shell
+      - offline-ai-assets
     runs-on: windows-2022
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - name: Checkout exact source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -204,6 +289,19 @@ jobs:
           $ErrorActionPreference = 'Stop'
           node app-shell/scripts/prepare-offline-site.js
           if (-not (Test-Path -LiteralPath 'app-shell/desktop/www/OFFLINE-SOURCE.json' -PathType Leaf)) { throw 'offline desktop bundle missing' }
+
+      - name: Download locked offline AI runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: malguard-offline-ai-runtime
+          path: app-shell/offline-ai/dist
+
+      - name: Stage fully offline AI into Windows app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node app-shell/scripts/stage-offline-ai.js app-shell/desktop/www
+          if (-not (Test-Path -LiteralPath 'app-shell/desktop/www/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx' -PathType Leaf)) { throw 'offline model missing from Windows bundle' }
 
       - name: Record Rust toolchain
         shell: pwsh
@@ -254,9 +352,11 @@ jobs:
           retention-days: 7
 
   macos-preview:
-    needs: validate-shell
+    needs:
+      - validate-shell
+      - offline-ai-assets
     runs-on: macos-14
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - name: Checkout exact source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -274,6 +374,19 @@ jobs:
           set -euo pipefail
           node app-shell/scripts/prepare-offline-site.js
           test -f app-shell/desktop/www/OFFLINE-SOURCE.json
+
+      - name: Download locked offline AI runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: malguard-offline-ai-runtime
+          path: app-shell/offline-ai/dist
+
+      - name: Stage fully offline AI into macOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          node app-shell/scripts/stage-offline-ai.js app-shell/desktop/www
+          test -s app-shell/desktop/www/models/malguard-qwen2.5-0.5b-instruct/onnx/model_q4.onnx
 
       - name: Record Rust toolchain
         shell: bash
@@ -326,9 +439,11 @@ jobs:
           retention-days: 7
 
   ios-simulator-preview:
-    needs: validate-shell
+    needs:
+      - validate-shell
+      - offline-ai-assets
     runs-on: macos-14
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - name: Checkout exact source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
