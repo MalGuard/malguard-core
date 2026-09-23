@@ -1,6 +1,6 @@
 {
   "name": "malguard-mobile-shell",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Native Android/iOS shell for the official MalGuard production site",
   "scripts": {
