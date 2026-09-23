@@ -23,7 +23,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RUN_ID: ${{ github.event.workflow_run.id }}
       RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-      RELEASE_TAG: app-v0.1.0-preview.1
+      RELEASE_TAG: malguard-app-v0.1.0-preview
 
     steps:
       - name: Verify trusted main source
