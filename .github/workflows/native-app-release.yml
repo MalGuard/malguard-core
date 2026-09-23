@@ -64,7 +64,11 @@ jobs:
           set -euo pipefail
           cd release-out
           for sum in *.sha256; do
-            sha256sum -c "$sum"
+            # Windows-generated checksum files can contain CRLF. Normalize only
+            # the text checksum manifest before verification; artifact bytes stay untouched.
+            tr -d '\r' < "$sum" > "$sum.normalized"
+            sha256sum -c "$sum.normalized"
+            rm "$sum.normalized"
           done
 
       - name: Publish immutable preview release
