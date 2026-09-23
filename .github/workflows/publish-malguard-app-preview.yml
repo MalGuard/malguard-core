@@ -1,0 +1,62 @@
+name: Publish MalGuard App Preview
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-malguard-app-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download verified native app artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/android release/windows release/macos release/ios
+          gh run download 35868639979 -R MalGuard/malguard-core -n malguard-android-preview -D release/android
+          gh run download 35868639979 -R MalGuard/malguard-core -n malguard-windows-app-preview -D release/windows
+          gh run download 35868639979 -R MalGuard/malguard-core -n malguard-macos-app-preview -D release/macos
+          gh run download 35868639979 -R MalGuard/malguard-core -n malguard-ios-simulator-preview -D release/ios
+          test -s release/android/app-debug.apk
+          test -s release/windows/MalGuard-App-Preview-Windows-x64.exe
+          test -s release/macos/MalGuard-App-Preview-macOS
+          test -s release/ios/MalGuard-iOS-Simulator-Preview.zip
+
+      - name: Normalize public release asset names
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp release/android/app-debug.apk release/MalGuard-App-Preview-Android.apk
+          cp release/windows/MalGuard-App-Preview-Windows-x64.exe release/MalGuard-App-Preview-Windows-x64.exe
+          cp release/macos/MalGuard-App-Preview-macOS release/MalGuard-App-Preview-macOS
+          cp release/ios/MalGuard-iOS-Simulator-Preview.zip release/MalGuard-iOS-Simulator-Preview.zip
+          sha256sum             release/MalGuard-App-Preview-Android.apk             release/MalGuard-App-Preview-Windows-x64.exe             release/MalGuard-App-Preview-macOS             release/MalGuard-iOS-Simulator-Preview.zip             > release/SHA256SUMS.txt
+
+      - name: Publish immutable GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='malguard-app-v0.1.0-preview'
+          if gh release view "$tag" -R MalGuard/malguard-core >/dev/null 2>&1; then
+            echo "Release $tag already exists; refusing to replace immutable preview."
+            exit 1
+          fi
+          gh release create "$tag"             -R MalGuard/malguard-core             --target "$GITHUB_SHA"             --title 'MalGuard App v0.1.0 Preview'             --prerelease             --notes 'Native app-shell preview using the official MalGuard production website as the exact application UI. Android, Windows and macOS artifacts are preview builds. The iOS asset is simulator-only and is not installable on a physical iPhone without Apple signing.'             release/MalGuard-App-Preview-Android.apk             release/MalGuard-App-Preview-Windows-x64.exe             release/MalGuard-App-Preview-macOS             release/MalGuard-iOS-Simulator-Preview.zip             release/SHA256SUMS.txt
