@@ -29,8 +29,9 @@ for (const file of files) {
       `${file}: native app release must have exactly actions:read and contents:write`);
     assert(/github\.event\.workflow_run\.conclusion\s*==\s*'success'/.test(text),
       `${file}: release must require a successful source workflow`);
-    assert(/github\.event\.workflow_run\.event\s*==\s*'push'/.test(text),
-      `${file}: release must only accept push-triggered source workflows`);
+    assert(/github\.event\.workflow_run\.event\s*==\s*'push'/.test(text) &&
+      /github\.event\.workflow_run\.event\s*==\s*'workflow_dispatch'/.test(text),
+      `${file}: release must only accept trusted push or explicit workflow_dispatch source workflows`);
     assert(/github\.event\.workflow_run\.head_branch\s*==\s*'main'/.test(text),
       `${file}: release must only accept main branch source workflows`);
     assert(/main_sha=.*gh api .*branches\/main/.test(text),
