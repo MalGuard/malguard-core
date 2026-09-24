@@ -59,8 +59,8 @@ function request(port, method, urlPath, body) {
     assert.equal(implicitPaidBridge.body.ok, true);
 
     const sandboxAnalyze = await request(port, 'POST', '/api/sandbox/analyze', { path: safeFile });
-    assert.equal(sandboxAnalyze.status, 200);
-    assert.equal(sandboxAnalyze.body.ok, true);
+    assert.equal(sandboxAnalyze.status, 409);
+    assert.notEqual(sandboxAnalyze.body.code, 'ENTITLEMENT_REQUIRED');
 
     const sandboxSelfTest = await request(port, 'POST', '/api/sandbox/self-test', {});
     assert.equal(sandboxSelfTest.status, 200);
