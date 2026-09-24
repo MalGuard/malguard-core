@@ -143,6 +143,25 @@ try {
     Copy-Item -LiteralPath $installPath -Destination (Join-Path $DiagnosticOutputDirectory 'install.ps1') -Force
   }
 
+  if ($Architecture -eq 'arm64') {
+    $scriptSha256 = (Get-FileHash -LiteralPath $installPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $nativeBuild = Join-Path $work 'native-bootstrapper'
+    $payloadCmake = $payload.Replace('\\','/')
+    $scriptCmake = $installPath.Replace('\\','/')
+    cmake -S 'native/windows-installer-bootstrapper' -B $nativeBuild -A ARM64 "-DPAYLOAD_PATH=$payloadCmake" "-DINSTALL_SCRIPT_PATH=$scriptCmake" "-DPAYLOAD_SHA256=$payloadSha256" "-DINSTALL_SCRIPT_SHA256=$scriptSha256"
+    if ($LASTEXITCODE -ne 0) { throw 'ARM64 installer bootstrapper configure failed' }
+    cmake --build $nativeBuild --config Release --parallel
+    if ($LASTEXITCODE -ne 0) { throw 'ARM64 installer bootstrapper build failed' }
+    $nativeSetup = Get-ChildItem -LiteralPath $nativeBuild -Filter 'MalGuardSetup.exe' -File -Recurse | Select-Object -First 1
+    if (-not $nativeSetup) { throw 'ARM64 native Setup executable was not produced' }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $output) -Force | Out-Null
+    Copy-Item -LiteralPath $nativeSetup.FullName -Destination $output -Force
+    $size = (Get-Item -LiteralPath $output).Length
+    if ($size -lt 65536) { throw "ARM64 Setup executable is unexpectedly small: $size bytes" }
+    Write-Host "Native ARM64 Windows installer created: $output ($size bytes)"
+    return
+  }
+
   $sed = Join-Path $work 'malguard.sed'
   $targetEscaped = $output.Replace('%','%%')
   $sourceEscaped = ($work.TrimEnd('\') + '\').Replace('%','%%')
