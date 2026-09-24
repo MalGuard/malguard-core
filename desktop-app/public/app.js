@@ -11,7 +11,7 @@ async function status(){try{const s=await api('/api/status');$('status').textCon
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')});
 
 const MODEL_HINTS={
- standard:'Standard: fast local protection and reputation analysis.',
+ standard:'Standard: GTA mod .asi and .dll files only.',
  plus:'Plus: deep multi-layer analysis with automatic isolated Sandbox escalation when needed.',
  pro:'Pro: direct behavioral analysis inside an isolated Windows Sandbox after a minimal safety preflight.',
 };
@@ -19,7 +19,7 @@ const VERDICT_COPY={
  safe:{label:'Safe',tone:'safe',title:'No threat detected',message:'MalGuard completed the selected analysis and found no malicious behavior in the available evidence.'},
  suspicious:{label:'Review recommended',tone:'warning',title:'Suspicious activity detected',message:'MalGuard found behavior or indicators that deserve caution. Keep the file blocked unless you trust its source.'},
  malicious:{label:'Threat blocked',tone:'danger',title:'Malicious activity detected',message:'MalGuard detected malicious evidence. Keep the file quarantined and do not run it.'},
- inconclusive:{label:'Protected',tone:'neutral',title:'More verification is required',message:'MalGuard did not mark this file safe. It remains protected while additional verification is required.'},
+ inconclusive:{label:'Unclear',tone:'inconclusive',title:'No safety verdict',message:'The analysis did not establish whether this file is safe. Do not treat it as approved.'},
 };
 function currentModel(){return $('scanModel').value}
 function updateModelUi(){
@@ -45,7 +45,23 @@ function resetCustomerResult(text='Ready to scan.'){
 function setScanSummary(text,tone='neutral'){
  const box=$('scanOut');
  box.className=`scan-summary result-${tone}`;
- box.textContent=text;
+ box.setAttribute('role',tone==='error'?'alert':'status');
+ box.replaceChildren();
+ if(['error','danger','warning','unsupported','inconclusive'].includes(tone)){
+   const title=document.createElement('strong');
+   title.textContent={error:'Scan failed',danger:'Threat detected',warning:'Review this result',unsupported:'Unsupported file type',inconclusive:'No safety verdict'}[tone];
+   box.append(title,document.createElement('br'));
+ }
+ box.append(document.createTextNode(text));
+}
+function standardSupportsFile(name){return /\.(asi|dll)$/i.test(name||'')}
+function scanFailureMessage(code){
+ if(code==='UPLOAD_NAME_INVALID')return 'The file name cannot be processed. Rename it and try again.';
+ if(code==='UPLOAD_EMPTY')return 'The selected file is empty. Choose a different file.';
+ if(code==='UPLOAD_TOO_LARGE')return 'The file is larger than 64 MB. Choose a smaller file.';
+ if(code==='LOCAL_UPLOAD_ORIGIN_REJECTED')return 'Open GTA Guard from its Desktop shortcut and try again.';
+ if(String(code||'').startsWith('ENTITLEMENT_'))return 'This protection level is unavailable. Select Standard for .asi or .dll files.';
+ return 'The scan stopped before a reliable result was available. The file was not marked safe. Open Scan diagnostics for the error code.';
 }
 function friendlyPhase(event){
  const phase=event&&event.phase;
@@ -168,23 +184,34 @@ $('scanBtn').onclick=async()=>{
    setScanSummary('Choose a file from this PC to begin scanning.','neutral');
    return;
  }
- if(file&&file.size>64*1024*1024){setScanSummary('Choose a file smaller than 64 MB.','setup');return;}
+ if(model==='standard'&&!standardSupportsFile(file?file.name:p)){
+   setScanSummary('Standard scans .asi and .dll GTA mod files only. ZIP packages and scripts require Plus or Pro when available; PDF files are not supported. No scan was run.','unsupported');
+   return;
+ }
+ if(file&&file.size>64*1024*1024){setScanSummary(scanFailureMessage('UPLOAD_TOO_LARGE'),'error');return;}
  $('scanBtn').disabled=true;
+ $('modelDiagnostics').hidden=true;
  setScanSummary('MalGuard is scanning the file securely…','neutral');
  try{
    const session=await runModelScan(p,model,file);
    const result=session&&session.finalResult?session.finalResult:null;
    if(model!=='standard')renderCustomerResult(session);
-   if(sandboxSetupRequired(result)){
+   if(session.state==='failed'){
+     setScanSummary(scanFailureMessage(session.error&&session.error.code),'error');
+     $('modelDiagnostics').hidden=false;
+     out('modelDiagnosticsOut',{code:session.error&&session.error.code||'SCAN_FAILED',message:session.error&&session.error.message||null});
+   }else if(sandboxSetupRequired(result)){
      setScanSummary('File kept protected. Secure Sandbox setup is required before isolated execution can run on this PC.','setup');
    }else if(result&&result.completionState==='preflight_failed_closed'){
      setScanSummary('File kept protected because MalGuard could not prepare it safely for isolated execution.','setup');
+   }else if(result&&result.verdict==='inconclusive'){
+     setScanSummary(VERDICT_COPY.inconclusive.message,'inconclusive');
    }else{
      const copy=VERDICT_COPY[result&&result.verdict]||VERDICT_COPY.inconclusive;
      setScanSummary(`${copy.title}. ${copy.message}`,copy.tone);
    }
  }catch(e){
-   setScanSummary(e.message==='UPLOAD_EMPTY'?'Choose a non-empty file.':e.message==='UPLOAD_TOO_LARGE'?'Choose a file smaller than 64 MB.':'MalGuard could not finish this scan. The file was not marked safe and no unsafe fallback was used.','setup');
+   setScanSummary(scanFailureMessage(e.message),'error');
    const diagnostics=$('modelDiagnostics');
    const diagnosticsOut=$('modelDiagnosticsOut');
    if(diagnostics&&diagnosticsOut){diagnostics.hidden=false;diagnosticsOut.textContent=JSON.stringify({code:'MODEL_SCAN_UI_ERROR',message:e.message},null,2);}
