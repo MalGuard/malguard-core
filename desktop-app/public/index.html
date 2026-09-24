@@ -33,6 +33,10 @@
         </select>
         <span id="modelHint" class="muted">Standard local protection.</span>
       </div>
+      <label id="cloudFallbackOption" class="cloud-fallback-option" hidden>
+        <input id="cloudFallback" type="checkbox">
+        <span><strong>Use disposable Cloud Inspection if local behavioral isolation is unavailable</strong><small>Opt-in. MalGuard may upload a bounded copy (up to 8 MB) to an ephemeral deny-all-network sandbox for inspection only. Windows samples are not executed there, the environment is destroyed after the job, and this fallback can never upgrade a file to SAFE.</small></span>
+      </label>
       <div class="row file-chooser"><input id="scanFile" type="file" aria-label="Choose a file from this PC"><button id="scanBtn">Scan selected file</button></div>
       <div id="scanOut" class="scan-summary result-neutral" role="status" aria-live="polite">Choose a supported file to scan.</div>
       <details id="modelDiagnostics" class="diagnostics" hidden>
@@ -82,9 +86,9 @@
         <pre id="selfOut">Not run.</pre>
       </details>
 
-      <h2>Secure Sandbox compatibility</h2>
-      <p class="muted">Plus and Pro execute suspicious files only inside an approved isolated Windows Sandbox. If this PC is not ready, MalGuard keeps the file protected instead of falling back to unsafe execution. On first launch MalGuard also runs a harmless execution probe inside the real Sandbox before enabling behavioral execution.</p>
-      <p class="muted">Standard local scanning works without Windows Sandbox. If certification fails, Plus and Pro will not run suspicious files outside isolation.</p>
+      <h2>Hybrid Isolation</h2>
+      <p class="muted">Plus and Pro use verified local Windows Sandbox for behavioral execution. If local isolation is unavailable, MalGuard can optionally continue with disposable Cloud Inspection: a fresh ephemeral sandbox with deny-all networking that is destroyed after the job. Cloud Inspection does not execute Windows samples and never turns incomplete evidence into a SAFE verdict.</p>
+      <p class="muted">Standard local scanning works offline. Behavioral execution stays fail-closed unless a local execution backend passes certification.</p>
       <button id="finalSandboxTest">Re-check real Sandbox execution</button>
       <p id="finalSandboxSummary" class="health-card health-checking">Real Sandbox execution has not been verified yet.</p>
       <details id="finalSandboxDiagnostics" class="diagnostics" hidden>

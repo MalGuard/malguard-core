@@ -33,7 +33,7 @@
 
       if (executionProven) {
         summary.className = 'health-card health-ready';
-        summary.textContent = 'Secure Sandbox verified: MalGuard launched a harmless test file inside the real Windows Sandbox. Plus and Pro behavioral execution is ready.';
+        summary.textContent = 'Local behavioral isolation verified: MalGuard launched a harmless test file inside the certified Windows Sandbox. Plus and Pro behavioral execution is ready.';
       } else {
         summary.className = 'health-card health-setup';
         const alternatives = report && report.windowsSandbox && report.windowsSandbox.alternatives;
@@ -42,8 +42,8 @@
           ? String(report.blockers[0]).replace(/[_-]/g, ' ').slice(0, 140)
           : '';
         summary.textContent = windows && windows.available === false
-          ? 'Isolated execution is unavailable on this PC. Standard file scans still work. If supported, enable the Windows Sandbox optional feature and hardware virtualization, restart Windows, then re-check. Plus/Pro will not execute files without verified isolation.'
-          : 'Isolated execution has not passed its safety check. Standard file scans still work. Re-check after setting up Windows Sandbox; see Advanced diagnostics for the cause. Plus/Pro will not execute files outside verified isolation.'
+          ? 'Local behavioral execution is unavailable on this PC. Standard scans still work. Plus/Pro can optionally use Disposable Cloud Inspection for non-executing analysis, but files will not be executed unless a local isolation backend is verified.'
+          : 'Local behavioral isolation has not passed its safety check. Standard scans still work. You can re-check local isolation or enable Disposable Cloud Inspection for non-executing fallback analysis. Plus/Pro will not execute files outside verified isolation.'
             + (reason ? ' Check: ' + reason + '.' : '');
       }
     } catch (error) {

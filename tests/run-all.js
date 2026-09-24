@@ -42,6 +42,7 @@ const tests=[
  'cloud-sandbox-safe-execution.test.js',
  'cloud-sandbox-benign-upload-execution.test.js',
  'cloud-sandbox-benign-behavior-telemetry.test.js',
+ 'cloud-ephemeral-inspection-client.test.js',
  'malguard-microvm-backend.test.js',
  'malguard-portable-vm-backend.test.js',
  'isolation-backend-router.test.js',
