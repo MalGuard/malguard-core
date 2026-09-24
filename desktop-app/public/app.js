@@ -7,7 +7,7 @@ async function api(path, method='GET', body){
  return data;
 }
 function out(id,data){$(id).textContent=JSON.stringify(data,null,2)}
-async function status(){try{const s=await api('/api/status');$('status').textContent=`${s.watching?'Guard active':'Guard idle'} · ${s.build?`build ${s.build}`:s.version}`;out('guardOut',s)}catch(e){$('status').textContent='Offline'}}
+async function status(){try{const s=await api('/api/status');$('status').textContent=`${s.watching?'Guard active':'Guard idle'} · ${s.version}`;const build=$('buildId');if(build)build.textContent=s.build?`Build ${s.build}`:'Build unavailable';out('guardOut',s)}catch(e){$('status').textContent='Offline';const build=$('buildId');if(build)build.textContent='Build unavailable'}}
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')});
 
 const MODEL_HINTS={
