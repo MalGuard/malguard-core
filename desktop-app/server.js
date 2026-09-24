@@ -213,7 +213,17 @@ async function handler(req, res) {
   }
 }
 
-function startServer(port = PORT) { const server = http.createServer(handler); return new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, HOST, () => resolve(server)); }); }
+function startServer(port = PORT) {
+  const server = http.createServer(handler);
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, HOST, () => {
+      threatIntel.startAutoSync();
+      server.once('close', () => { threatIntel.stopAutoSync(); });
+      resolve(server);
+    });
+  });
+}
 
 function installFatalErrorHandlers(reporter = errorReporter, exit = code => process.exit(code)) {
   let handlingFatal = false;
