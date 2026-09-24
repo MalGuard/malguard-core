@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <winhttp.h>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -67,7 +68,11 @@ bool serverReady() {
             DWORD read = 0;
             while (response.size() < 4096 && WinHttpReadData(request, chunk, sizeof(chunk), &read) && read > 0) {
                 response.append(chunk, read);
-                if (response.find("\"ok\":true") != std::string::npos && response.find("\"product\":\"MalGuard Desktop\"") != std::string::npos) {
+                // The actual /api/status serializer formats JSON with indentation.
+                // Allow JSON whitespace while retaining the expected product and ok checks.
+                static const std::regex okField(R"("ok"\s*:\s*true)");
+                static const std::regex productField(R"("product"\s*:\s*"MalGuard Desktop")");
+                if (std::regex_search(response, okField) && std::regex_search(response, productField)) {
                     ready = true;
                     break;
                 }
