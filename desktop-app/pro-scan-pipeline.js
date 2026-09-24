@@ -58,12 +58,13 @@ function deepStaticFallbackVerdict(localResult) {
 }
 
 class ModelScanPipelineManager {
-  constructor({ scanner, sandbox, now = () => Date.now(), ttlMs = DEFAULT_TTL_MS, maxSessions = 32 } = {}) {
+  constructor({ scanner, sandbox, cloudInspection = null, now = () => Date.now(), ttlMs = DEFAULT_TTL_MS, maxSessions = 32 } = {}) {
     if (!scanner || typeof scanner.scanPath !== 'function') throw new TypeError('scanner.scanPath is required');
     if (!sandbox || typeof sandbox.analyzeUntrustedSample !== 'function') throw new TypeError('sandbox.analyzeUntrustedSample is required');
     if (typeof sandbox.preflightSample !== 'function') throw new TypeError('sandbox.preflightSample is required');
     this.scanner = scanner;
     this.sandbox = sandbox;
+    this.cloudInspection = cloudInspection && typeof cloudInspection.inspect === 'function' ? cloudInspection : null;
     this.now = now;
     this.ttlMs = Math.max(30_000, Number(ttlMs) || DEFAULT_TTL_MS);
     this.maxSessions = Math.max(4, Number(maxSessions) || 32);
@@ -97,7 +98,7 @@ class ModelScanPipelineManager {
     return event;
   }
 
-  start(filePath, model = 'plus', { onFinish = null } = {}) {
+  start(filePath, model = 'plus', { onFinish = null, allowCloudFallback = false } = {}) {
     if (typeof filePath !== 'string' || !filePath.trim()) {
       const error = new Error('scan path is required');
       error.code = 'PATH_REQUIRED';
@@ -125,6 +126,8 @@ class ModelScanPipelineManager {
       localResult: null,
       preflight: null,
       sandboxResult: null,
+      cloudInspectionResult: null,
+      allowCloudFallback: allowCloudFallback === true,
       finalResult: null,
       error: null,
     };
@@ -189,14 +192,37 @@ class ModelScanPipelineManager {
   }
 
   async _runDeepStaticFallback(session, { model, reasonCode, existingLocal = null, preflight = null, sandboxResult = null, sandboxStarted = false, sampleExecutionStarted = false } = {}) {
-    this._emit(session, 'fallback_analysis', 'running', 'Sandbox unavailable; running deep non-executing fallback analysis', {
+    this._emit(session, 'fallback_analysis', 'running', 'Local behavioral Sandbox unavailable; running deep non-executing fallback analysis', {
       reasonCode: reasonCode || 'SANDBOX_UNAVAILABLE',
       executionMode: 'no_dynamic_execution',
+      cloudFallbackRequested: session.allowCloudFallback === true,
     });
 
     const local = existingLocal || await this.scanner.scanPath(session.filePath, 'pro');
     session.localResult = clone(local);
     const finalVerdict = deepStaticFallbackVerdict(local);
+
+    let cloudInspectionResult = null;
+    if (session.allowCloudFallback === true && this.cloudInspection) {
+      this._emit(session, 'cloud_ephemeral_inspection', 'running', 'Uploading a bounded copy for disposable cloud inspection', {
+        execution: 'inspection-only',
+        retention: 'destroy-after-run',
+      });
+      cloudInspectionResult = await this.cloudInspection.inspect(session.filePath);
+      session.cloudInspectionResult = clone(cloudInspectionResult);
+      if (cloudInspectionResult && cloudInspectionResult.ok === true) {
+        this._emit(session, 'cloud_ephemeral_inspection', 'completed', 'Disposable cloud inspection completed; environment destroyed after the job', {
+          type: cloudInspectionResult.report && cloudInspectionResult.report.type || 'unknown',
+          executionAttempted: false,
+          destroyAfterRun: true,
+        });
+      } else {
+        this._emit(session, 'cloud_ephemeral_inspection', 'blocked', 'Cloud inspection was unavailable; local fail-closed result preserved', {
+          code: cloudInspectionResult && cloudInspectionResult.code || 'CLOUD_INSPECTION_UNAVAILABLE',
+          executionAttempted: false,
+        });
+      }
+    }
 
     if (local && local.archiveInspection) {
       this._emit(session, 'fallback_archive_analysis', 'completed', 'Fallback archive inspection completed', {
@@ -229,10 +255,13 @@ class ModelScanPipelineManager {
       fallbackUsed: true,
       fallbackMode: 'deep_static_no_execution',
       dynamicAnalysisUnavailable: true,
+      cloudFallbackRequested: session.allowCloudFallback === true,
+      cloudInspectionCompleted: !!(cloudInspectionResult && cloudInspectionResult.ok === true),
       reasonCode: reasonCode || 'SANDBOX_UNAVAILABLE',
       localResult: clone(local),
       ...(preflight ? { preflight: clone(preflight) } : {}),
       ...(sandboxResult ? { sandboxResult: clone(sandboxResult) } : {}),
+      ...(cloudInspectionResult ? { cloudInspectionResult: clone(cloudInspectionResult) } : {}),
     };
     session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()} (deep static fallback)`, {
@@ -242,6 +271,7 @@ class ModelScanPipelineManager {
       sandboxStarted,
       sampleExecutionStarted,
       sandboxCompleted: false,
+      cloudInspectionCompleted: !!(cloudInspectionResult && cloudInspectionResult.ok === true),
     });
   }
 
