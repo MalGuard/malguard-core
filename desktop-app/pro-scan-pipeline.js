@@ -97,7 +97,7 @@ class ModelScanPipelineManager {
     return event;
   }
 
-  start(filePath, model = 'plus') {
+  start(filePath, model = 'plus', { onFinish = null } = {}) {
     if (typeof filePath !== 'string' || !filePath.trim()) {
       const error = new Error('scan path is required');
       error.code = 'PATH_REQUIRED';
@@ -135,7 +135,7 @@ class ModelScanPipelineManager {
         ? 'Preparing Plus deep scan'
         : 'Preparing Standard scan');
 
-    Promise.resolve().then(() => this._run(session)).catch(error => {
+    const run = Promise.resolve().then(() => this._run(session)).catch(error => {
       session.state = 'failed';
       session.error = { code: error.code || 'MODEL_PIPELINE_ERROR', message: error.message || 'Model pipeline failed' };
       this._emit(session, 'final_verdict', 'failed', `${session.model} scan failed closed`, session.error);
@@ -149,6 +149,7 @@ class ModelScanPipelineManager {
         error: session.error,
       };
     });
+    if (onFinish) void run.finally(() => Promise.resolve().then(onFinish).catch(() => {}));
     return this.snapshot(id);
   }
 
