@@ -17,6 +17,8 @@ const BACKEND_VERSION = '0.3.0';
 const RESULT_SCHEMA_VERSION = TELEMETRY_SCHEMA_VERSION;
 const DEFAULT_MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MAX_OUTPUT_FILES = 8;
+const DEFAULT_SANDBOX_TIMEOUT_MS = 60 * 1000;
+const ISOLATION_SELF_TEST_TIMEOUT_MS = 60 * 1000;
 
 function xmlEscape(value) {
   return String(value)
@@ -70,7 +72,7 @@ async function readStableRegularFile(filePath, maxBytes) {
 
 class WindowsSandboxBackend {
   constructor({
-    timeoutMs = 30000,
+    timeoutMs = DEFAULT_SANDBOX_TIMEOUT_MS,
     observeSeconds = 8,
     memoryMb = 2048,
     sessionRoot = null,
@@ -79,7 +81,7 @@ class WindowsSandboxBackend {
     preserveSessions = false,
     containmentProbePath = null,
   } = {}) {
-    this.timeoutMs = Math.max(5000, Number(timeoutMs) || 30000);
+    this.timeoutMs = Math.max(5000, Number(timeoutMs) || DEFAULT_SANDBOX_TIMEOUT_MS);
     this.observeSeconds = Math.max(1, Math.min(20, Number(observeSeconds) || 8));
     this.memoryMb = Math.max(2048, Number(memoryMb) || 2048);
     this.maxOutputBytes = Math.max(MAX_RESULT_BYTES, Number(maxOutputBytes) || DEFAULT_MAX_OUTPUT_BYTES);
@@ -261,7 +263,7 @@ class WindowsSandboxBackend {
         } catch (_) {}
       }, 250);
       if (typeof poller.unref === 'function') poller.unref();
-      timer = setTimeout(() => finish({ ok: false, code: 'SANDBOX_SELF_TEST_TIMEOUT' }), 20000);
+      timer = setTimeout(() => finish({ ok: false, code: 'SANDBOX_SELF_TEST_TIMEOUT' }), Math.max(ISOLATION_SELF_TEST_TIMEOUT_MS, this.timeoutMs));
       child.once('error', error => finish({ ok: false, code: 'SANDBOX_SELF_TEST_LAUNCH_FAILED', detail: error.message }));
     });
   }
@@ -433,6 +435,8 @@ module.exports = {
   RESULT_SCHEMA_VERSION,
   DEFAULT_MAX_OUTPUT_BYTES,
   DEFAULT_MAX_OUTPUT_FILES,
+  DEFAULT_SANDBOX_TIMEOUT_MS,
+  ISOLATION_SELF_TEST_TIMEOUT_MS,
   xmlEscape,
   readStableRegularFile,
 };
