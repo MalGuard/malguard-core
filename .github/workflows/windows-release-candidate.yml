@@ -267,16 +267,21 @@ jobs:
           if ($signature) { Write-Host "Installer Authenticode state: $($signature.Status)" }
           Write-Host 'NOTE: this Setup is unsigned. It may be published only as an explicitly labeled Unsigned Preview with SHA-256 and source-commit provenance. It must never be represented as Authenticode-signed.'
 
-      - name: Install x64 Setup and verify local server startup
+      - name: Install x64 payload and verify local server startup
         if: matrix.arch == 'x64'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
-          $setup = Join-Path (Get-Location) "dist/MalGuard-Setup-$version-windows-x64.exe"
+          $installScript = Join-Path $env:RUNNER_TEMP 'malguard-installer-test-x64/install.ps1'
+          $installedRoot = Join-Path $env:LOCALAPPDATA 'Programs/MalGuard'
           $installedNode = Join-Path $env:LOCALAPPDATA 'Programs/MalGuard/desktop-app/runtime/node.exe'
           try {
-            $installer = Start-Process -FilePath $setup -PassThru
+            & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installScript
+            if ($LASTEXITCODE -ne 0) { throw "Install script failed with exit code $LASTEXITCODE" }
+            foreach ($relative in @('PACKAGE-MANIFEST.json','SHA256SUMS.txt','app.js','desktop-app/server.js','desktop-app/runtime/node.exe')) {
+              if (-not (Test-Path -LiteralPath (Join-Path $installedRoot $relative) -PathType Leaf)) { throw "Installed payload missing: $relative" }
+            }
             $ready = $false
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
               try {
@@ -289,34 +294,9 @@ jobs:
               Start-Sleep -Seconds 1
             }
             if (-not $ready) {
-              $installedRoot = Join-Path $env:LOCALAPPDATA 'Programs/MalGuard'
-              Write-Host "Installed package root exists: $(Test-Path -LiteralPath $installedRoot -PathType Container)"
-              foreach ($relative in @('PACKAGE-MANIFEST.json','SHA256SUMS.txt','app.js','desktop-app/server.js','desktop-app/runtime/node.exe')) {
-                Write-Host "Installed $relative exists: $(Test-Path -LiteralPath (Join-Path $installedRoot $relative) -PathType Leaf)"
-              }
-              if (-not (Test-Path -LiteralPath $installedRoot -PathType Container)) {
-                $installScript = Join-Path $env:RUNNER_TEMP 'malguard-installer-test-x64/install.ps1'
-                Write-Host 'Running the exact installer script directly to expose its failure:'
-                & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installScript
-                Write-Host "Direct install script exit code: $LASTEXITCODE"
-              }
-              if (Test-Path -LiteralPath $installedNode -PathType Leaf) {
-                $stderr = Join-Path $env:RUNNER_TEMP 'malguard-installed-startup-stderr.txt'
-                $stdout = Join-Path $env:RUNNER_TEMP 'malguard-installed-startup-stdout.txt'
-                $env:MALGUARD_PORT = '18778'
-                $nodeProcess = Start-Process -FilePath $installedNode -WorkingDirectory $installedRoot -ArgumentList @('--require',('"' + (Join-Path $installedRoot 'desktop-app/integrity/preload.js') + '"'),('"' + (Join-Path $installedRoot 'desktop-app/server.js') + '"')) -RedirectStandardError $stderr -RedirectStandardOutput $stdout -PassThru
-                Start-Sleep -Seconds 4
-                Write-Host "Direct installed Node exited: $($nodeProcess.HasExited)"
-                if ($nodeProcess.HasExited) { Write-Host "Direct installed Node exit code: $($nodeProcess.ExitCode)" }
-                if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr | Select-Object -First 25 | ForEach-Object { Write-Host $_ } }
-                if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout | Select-Object -First 10 | ForEach-Object { Write-Host $_ } }
-                if (-not $nodeProcess.HasExited) { Stop-Process -Id $nodeProcess.Id -Force -ErrorAction SilentlyContinue }
-                Remove-Item Env:MALGUARD_PORT -ErrorAction SilentlyContinue
-              }
-              if ($installer.HasExited) { throw "Installed x64 server did not become ready; Setup exit code: $($installer.ExitCode)" }
               throw 'Installed x64 server did not become ready at /api/status'
             }
-            Write-Host 'Installed x64 Setup runtime startup PASS: /api/status returned the expected product and version.'
+            Write-Host 'Installed x64 payload runtime startup PASS: /api/status returned the expected product and version.'
           } finally {
             Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
               Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $installedNode, [StringComparison]::OrdinalIgnoreCase) } |
