@@ -12,7 +12,7 @@
     <header>
       <div>
         <h1>MalGuard Desktop</h1>
-        <p>Game-focused malware protection</p>
+        <p>Local protection on this PC · works offline for Standard scans</p>
       </div>
       <span id="status">Loading…</span>
     </header>
@@ -33,7 +33,9 @@
         </select>
         <span id="modelHint" class="muted">Standard local protection.</span>
       </div>
-      <div class="row"><input id="scanPath" placeholder="C:\Games\GTA V\mods\example.asi"><button id="scanBtn">Scan securely</button></div>
+      <div class="row file-chooser"><input id="scanFile" type="file" aria-label="Choose a file from this PC"><button id="scanBtn">Scan selected file</button></div>
+      <p class="muted">Choose a file on this laptop. MalGuard scans a temporary local copy and removes it when the scan ends. Files up to 64 MB.</p>
+      <details class="diagnostics"><summary>Advanced: enter a full file path instead</summary><input id="scanPath" aria-label="Full path to a file on this PC" placeholder="C:\Games\GTA V\mods\example.asi"></details>
       <div id="modelFlow" hidden>
         <h3 id="modelFlowTitle">Analysis flow</h3>
         <div id="modelSteps" class="pipeline-list"></div>
@@ -45,12 +47,14 @@
       </div>
       <div id="scanOut" class="scan-summary result-neutral">Ready to scan.</div>
 
-      <h2>Threat Intelligence</h2>
+      <details class="advanced-tools"><summary>Optional tools and protection settings</summary>
+      <h2>Online threat intelligence</h2>
+      <p class="muted">Optional malware reputation lookup. Standard local file scans do not need an Auth-Key or internet. Save stores your key on this PC; Remove deletes it; Refresh checks its status.</p>
       <div class="stack">
         <div class="row"><input id="abuseAuthKey" type="password" autocomplete="off" spellcheck="false" placeholder="abuse.ch Auth-Key (stored with Windows DPAPI)"><button id="saveThreatKey">Save Auth-Key</button><button id="clearThreatKey">Remove Auth-Key</button><button id="threatStatus">Refresh status</button></div>
         <p class="muted">MalGuard sends only the file SHA-256 for MalwareBazaar reputation lookup. The Auth-Key is never returned by the local API or written to project source.</p>
       </div>
-      <pre id="threatOut">Threat-intelligence status not checked.</pre>
+      <details class="diagnostics"><summary>Technical details</summary><pre id="threatOut">Threat-intelligence status not checked.</pre></details>
 
       <h2>Protection settings</h2>
       <div class="stack">
@@ -59,14 +63,14 @@
         <input id="stagingRoot" placeholder="Managed-install staging root">
         <div class="row"><button id="saveSettings">Save protection settings</button><button id="loadSettings">Reload settings</button></div>
       </div>
-      <pre id="settingsOut">Settings not loaded.</pre>
+      <details class="diagnostics"><summary>Technical details</summary><pre id="settingsOut">Settings not loaded.</pre></details>
 
       <h2>Real-time Guard</h2>
       <div class="row"><button id="startGuard">Start Guard</button><button id="stopGuard">Stop Guard</button><button id="enableGate">Enable Protected Folder</button><button id="disableGate">Disable Protected Folder</button><button id="gateStatus">Gate Status</button><button id="refreshQ">Refresh Quarantine</button><button id="refreshIncidents">Refresh Incidents</button></div>
-      <pre id="guardOut">Guard status not checked.</pre>
-      <pre id="gateOut">Access gate status not checked.</pre>
+      <p class="muted">Real-time Guard requires a configured game folder. Leave it off if you only want to scan a file.</p>
+      <details class="diagnostics"><summary>Technical details</summary><pre id="guardOut">Guard status not checked.</pre><pre id="gateOut">Access gate status not checked.</pre><pre id="incidentsOut">No incident journal loaded.</pre></details>
       <div id="quarantine"></div>
-      <pre id="incidentsOut">No incident journal loaded.</pre>
+      </details>
     </section>
 
     <section id="engine" class="panel">
@@ -80,6 +84,7 @@
 
       <h2>Secure Sandbox compatibility</h2>
       <p class="muted">Plus and Pro execute suspicious files only inside an approved isolated Windows Sandbox. If this PC is not ready, MalGuard keeps the file protected instead of falling back to unsafe execution. On first launch MalGuard also runs a harmless execution probe inside the real Sandbox before enabling behavioral execution.</p>
+      <p class="muted">Standard local scanning works without Windows Sandbox. If certification fails, Plus and Pro will not run suspicious files outside isolation.</p>
       <button id="finalSandboxTest">Re-check real Sandbox execution</button>
       <p id="finalSandboxSummary" class="health-card health-checking">Real Sandbox execution has not been verified yet.</p>
       <details id="finalSandboxDiagnostics" class="diagnostics" hidden>
