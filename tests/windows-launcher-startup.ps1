@@ -37,7 +37,8 @@ try {
   Set-Content -LiteralPath (Join-Path $fixture 'PACKAGE-MANIFEST.json') -Value '{}' -Encoding utf8
   Set-Content -LiteralPath (Join-Path $fixture 'SHA256SUMS.txt') -Value 'fixture' -Encoding utf8
   Set-Content -LiteralPath (Join-Path $integrity 'preload.js') -Value '// Isolated launcher fixture; package integrity is verified separately.' -Encoding utf8
-  $server = "const http=require('http');setTimeout(()=>http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:true,product:'MalGuard Desktop'}))}).listen(18777,'127.0.0.1'),DELAY);"
+  # Match server.js json(): JSON.stringify(body, null, 2). A compact fixture hid a real launcher failure.
+  $server = "const http=require('http');setTimeout(()=>http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:true,product:'MalGuard Desktop'},null,2))}).listen(18777,'127.0.0.1'),DELAY);"
 
   try {
     Invoke-Launcher ($server.Replace('DELAY','0')) 0 | Out-Null
