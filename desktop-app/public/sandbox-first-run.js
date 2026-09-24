@@ -36,7 +36,15 @@
         summary.textContent = 'Secure Sandbox verified: MalGuard launched a harmless test file inside the real Windows Sandbox. Plus and Pro behavioral execution is ready.';
       } else {
         summary.className = 'health-card health-setup';
-        summary.textContent = 'Secure Sandbox is not certified on this PC yet. MalGuard will not execute suspicious files outside isolation and will keep Plus/Pro fail-closed.';
+        const alternatives = report && report.windowsSandbox && report.windowsSandbox.alternatives;
+        const windows = alternatives && alternatives.windowsSandbox;
+        const reason = Array.isArray(report && report.blockers) && report.blockers.length
+          ? String(report.blockers[0]).replace(/[_-]/g, ' ').slice(0, 140)
+          : '';
+        summary.textContent = windows && windows.available === false
+          ? 'Isolated execution is unavailable on this PC. Standard file scans still work. If supported, enable the Windows Sandbox optional feature and hardware virtualization, restart Windows, then re-check. Plus/Pro will not execute files without verified isolation.'
+          : 'Isolated execution has not passed its safety check. Standard file scans still work. Re-check after setting up Windows Sandbox; see Advanced diagnostics for the cause. Plus/Pro will not execute files outside verified isolation.'
+            + (reason ? ' Check: ' + reason + '.' : '');
       }
     } catch (error) {
       summary.className = 'health-card health-setup';

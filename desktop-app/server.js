@@ -22,12 +22,20 @@ const { ThreatIntelService } = require('./threat-intel/service.js');
 const { ModelScanPipelineManager } = require('./pro-scan-pipeline.js');
 const { EntitlementGate } = require('./entitlement/entitlement-gate.js');
 const { LocalErrorReporter, safeText } = require('./diagnostics/error-reporter.js');
+const { stageScanUpload, discardScanUpload } = require('./local-scan-upload.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC = path.join(__dirname, 'public');
 const DESKTOP_VERSION = fs.readFileSync(path.join(ROOT, 'DESKTOP-VERSION'), 'utf8').trim();
 const PORT = Number(process.env.MALGUARD_PORT || 18777);
 const HOST = '127.0.0.1';
+const BUILD = (() => {
+  try {
+    const commit = JSON.parse(fs.readFileSync(path.join(ROOT, 'PACKAGE-MANIFEST.json'), 'utf8')).sourceCommit;
+    return typeof commit === 'string' && /^[a-f0-9]{40}$/.test(commit) ? commit.slice(0, 7) : null;
+  } catch (_) { return null; }
+})();
+let activeStagedScans = 0;
 const threatIntel = new ThreatIntelService();
 const scanner = new ScannerBridge({ threatIntel });
 const isolationBackend = new IsolationBackendRouter({ prefer: 'windows-sandbox' });
@@ -129,7 +137,7 @@ async function handler(req, res) {
         : sandboxCertification.state === 'running'
           ? 'isolation-backend-self-certifying'
           : 'fail-closed-until-isolation-backend-certified';
-      return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', guardConfigured: config.watchRoots.length > 0, watching: protection.completeProtection === true, realtimeProtection: protection, runtimeProcessProtection: protection.runtimeProcessProtection, guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode, sandboxCertification, threatIntel: await threatIntel.status() });
+      return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, build: BUILD, supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', guardConfigured: config.watchRoots.length > 0, watching: protection.completeProtection === true, realtimeProtection: protection, runtimeProcessProtection: protection.runtimeProcessProtection, guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode, sandboxCertification, threatIntel: await threatIntel.status() });
     }
     if (req.method === 'GET' && url.pathname === '/api/entitlement/status') return json(res, 200, { ok: true, entitlement: entitlementGate.status() });
     if (req.method === 'GET' && url.pathname === '/api/threat-intel/status') return json(res, 200, { ok: true, status: await threatIntel.status() });
@@ -138,6 +146,41 @@ async function handler(req, res) {
     if (req.method === 'GET' && url.pathname === '/api/settings') return json(res, 200, { ok: true, settings: config });
     if (req.method === 'POST' && url.pathname === '/api/settings') { const body = await readJson(req); const settings = await applySettings(body); return json(res, 200, { ok: true, settings, guardRestarted: false }); }
     if (req.method === 'POST' && url.pathname === '/api/scan-path') { const body = await readJson(req); if (typeof body.path !== 'string') return json(res, 400, { ok: false, code: 'PATH_REQUIRED' }); const requestedMode = body.mode === 'free' ? 'free' : 'pro'; if (requestedMode === 'pro') { const entitlement = requirePlanForApi(res, 'plus'); if (!entitlement) return; } const result = await scanner.scanPath(body.path, requestedMode); return json(res, 200, { ok: true, result }); }
+    if (req.method === 'POST' && url.pathname === '/api/model-scan/upload') {
+      // A custom header prevents a cross-origin HTML form from staging a file on localhost.
+      if (req.headers['x-malguard-local-upload'] !== '1' || (req.headers.origin && req.headers.origin !== `http://${HOST}:${PORT}`)) {
+        return json(res, 403, { ok: false, code: 'LOCAL_UPLOAD_ORIGIN_REJECTED' });
+      }
+      const name = url.searchParams.get('name');
+      const model = url.searchParams.get('model') || 'standard';
+      if (!['standard', 'plus', 'pro'].includes(model)) return json(res, 400, { ok: false, code: 'INVALID_MODEL' });
+      try { entitlementGate.requireModel(model); }
+      catch (error) { if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error); throw error; }
+      if (activeStagedScans >= 4) return json(res, 429, { ok: false, code: 'TOO_MANY_LOCAL_SCANS' });
+      activeStagedScans++;
+      let upload;
+      let scanStarted = false;
+      try {
+        upload = await stageScanUpload(req, name);
+        const session = modelPipeline.start(upload.path, model, {
+          onFinish: async () => {
+            try { await discardScanUpload(upload); }
+            finally { activeStagedScans--; }
+          },
+        });
+        scanStarted = true;
+        return json(res, 202, { ok: true, session });
+      } catch (error) {
+        if (!scanStarted) {
+          if (upload) await discardScanUpload(upload);
+          activeStagedScans--;
+        }
+        if (['UPLOAD_NAME_INVALID', 'UPLOAD_EMPTY', 'UPLOAD_TOO_LARGE'].includes(error.code)) {
+          return json(res, error.code === 'UPLOAD_TOO_LARGE' ? 413 : 400, { ok: false, code: error.code });
+        }
+        throw error;
+      }
+    }
     if (req.method === 'POST' && url.pathname === '/api/model-scan/start') { const body = await readJson(req); if (typeof body.path !== 'string' || !body.path.trim()) return json(res, 400, { ok: false, code: 'PATH_REQUIRED' }); try { const model = body.model || 'standard'; const entitlement = entitlementGate.requireModel(model); const session = modelPipeline.start(body.path, model); return json(res, 202, { ok: true, entitlement: { plan: entitlement.plan, source: entitlement.source }, session }); } catch (error) { if (error.code === 'INVALID_MODEL') return json(res, 400, { ok: false, code: error.code, message: error.message }); if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error); throw error; } }
     if (req.method === 'GET' && url.pathname === '/api/model-scan/status') { const id = url.searchParams.get('id'); if (!id) return json(res, 400, { ok: false, code: 'SCAN_ID_REQUIRED' }); const session = modelPipeline.snapshot(id); if (!session) return json(res, 404, { ok: false, code: 'MODEL_SCAN_NOT_FOUND' }); return json(res, 200, { ok: true, session }); }
     if (req.method === 'POST' && url.pathname === '/api/pro-scan/start') { const body = await readJson(req); if (typeof body.path !== 'string' || !body.path.trim()) return json(res, 400, { ok: false, code: 'PATH_REQUIRED' }); try { const entitlement = entitlementGate.requireModel('plus'); const session = modelPipeline.start(body.path, 'plus'); return json(res, 202, { ok: true, deprecated: true, mappedModel: 'plus', entitlement: { plan: entitlement.plan, source: entitlement.source }, session }); } catch (error) { if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error); throw error; } }

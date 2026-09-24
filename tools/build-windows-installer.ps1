@@ -117,11 +117,15 @@ try {
   $shell = New-Object -ComObject WScript.Shell
   $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
   New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
-  $shortcut = $shell.CreateShortcut((Join-Path $startMenu 'MalGuard.lnk'))
-  $shortcut.TargetPath = Join-Path $target $launcherRelative
-  $shortcut.WorkingDirectory = $target
-  $shortcut.Description = 'MalGuard Security Scanner'
-  $shortcut.Save()
+  $desktop = $shell.SpecialFolders.Item('Desktop')
+  if (-not $desktop -or -not (Test-Path -LiteralPath $desktop -PathType Container)) { throw 'Windows Desktop shortcut folder is unavailable.' }
+  foreach ($shortcutPath in @((Join-Path $startMenu 'GTA Guard.lnk'), (Join-Path $desktop 'GTA Guard.lnk'))) {
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = Join-Path $target $launcherRelative
+    $shortcut.WorkingDirectory = $target
+    $shortcut.Description = 'GTA Guard local scanner'
+    $shortcut.Save()
+  }
 
   Start-Process -FilePath (Join-Path $target $launcherRelative) -WorkingDirectory $target
   if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }

@@ -53,6 +53,18 @@ std::wstring startupLogPath() {
     return logs + L"\\startup-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L".log";
 }
 
+std::wstring edgeExecutable() {
+    for (const wchar_t* variable : {L"ProgramFiles(x86)", L"ProgramFiles"}) {
+        std::vector<wchar_t> value(32768, L'\0');
+        const DWORD size = GetEnvironmentVariableW(variable, value.data(), static_cast<DWORD>(value.size()));
+        if (size > 0 && size < value.size()) {
+            const std::wstring candidate = std::wstring(value.data(), size) + L"\\Microsoft\\Edge\\Application\\msedge.exe";
+            if (regularFileExists(candidate)) return candidate;
+        }
+    }
+    return L"";
+}
+
 bool serverReady() {
     HINTERNET session = WinHttpOpen(L"MalGuard Launcher", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) return false;
@@ -172,9 +184,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR arguments, int) {
         return state == WAIT_OBJECT_0 ? 6 : 7;
     }
     CloseHandle(process.hProcess);
-    if (!headlessTest && reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", L"http://127.0.0.1:18777/", nullptr, nullptr, SW_SHOWNORMAL)) <= 32) {
-        reportError(L"MalGuard started, but Windows could not open the browser. Visit http://127.0.0.1:18777/ manually.");
-        return 8;
+    if (!headlessTest) {
+        const std::wstring edge = edgeExecutable();
+        const std::wstring target = edge.empty() ? L"http://127.0.0.1:18777/" : edge;
+        const wchar_t* parameters = edge.empty() ? nullptr : L"--app=http://127.0.0.1:18777/";
+        if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", target.c_str(), parameters, nullptr, SW_SHOWNORMAL)) <= 32) {
+            reportError(L"GTA Guard started, but Windows could not open its window. Visit http://127.0.0.1:18777/ manually.");
+            return 8;
+        }
     }
     return 0;
 }

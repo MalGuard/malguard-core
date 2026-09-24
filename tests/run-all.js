@@ -69,6 +69,7 @@ const tests=[
  'desktop-app.test.js',
  'pro-scan-pipeline.test.js',
  'pro-scan-api.test.js',
+ 'local-file-upload.test.js',
  'model-selection-ui.test.js',
 ];
 for(const test of tests){

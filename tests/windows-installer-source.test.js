@@ -37,6 +37,8 @@ assert(/never be represented as Authenticode-signed/.test(workflow), 'unsigned p
 assert(/PACKAGE-MANIFEST\.json/.test(launcher) && /SHA256SUMS\.txt/.test(launcher), 'launcher must resolve a sealed package root');
 assert(/integrity\\\\preload\.js/.test(launcher), 'launcher must preload runtime integrity verification');
 assert(/127\.0\.0\.1:18777/.test(launcher), 'launcher must only open the local MalGuard UI');
+assert(/--app=http:\/\/127\.0\.0\.1:18777\//.test(launcher), 'launcher should open a dedicated app window when Edge is present');
+assert(/SpecialFolders\.Item\('Desktop'\)/.test(installer) && /GTA Guard\.lnk/.test(installer), 'installer must create a GTA Guard Desktop shortcut');
 assert(/LOCALAPPDATA/.test(installer), 'installer must use a user-local install root');
 assert(/MalGuard\.previous/.test(installer), 'installer must retain rollback staging during replacement');
 assert(/NODE-LICENSE\.txt/.test(workflow), 'bundled Node license must ship with runtime');
