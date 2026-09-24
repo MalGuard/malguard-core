@@ -12,8 +12,8 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelect
 
 const MODEL_HINTS={
  standard:'Standard: GTA mod .asi and .dll files only.',
- plus:'Plus: deep multi-layer analysis with automatic isolated Sandbox escalation when needed.',
- pro:'Pro: direct behavioral analysis inside an isolated Windows Sandbox after a minimal safety preflight.',
+ plus:'Plus: deep local analysis, verified local Sandbox execution when available, and optional disposable Cloud Inspection fallback.',
+ pro:'Pro: direct verified local behavioral analysis, with optional disposable Cloud Inspection if local execution cannot certify.',
 };
 const VERDICT_COPY={
  safe:{label:'Safe',tone:'safe',title:'No threat detected',message:'MalGuard completed the selected analysis and found no malicious behavior in the available evidence.'},
@@ -22,9 +22,11 @@ const VERDICT_COPY={
  inconclusive:{label:'Unclear',tone:'inconclusive',title:'No safety verdict',message:'The analysis did not establish whether this file is safe. Do not treat it as approved.'},
 };
 function currentModel(){return $('scanModel').value}
+function cloudFallbackEnabled(){const box=$('cloudFallback');return currentModel()!=='standard'&&!!(box&&box.checked)}
 function updateModelUi(){
  const model=currentModel();
  $('modelHint').textContent=MODEL_HINTS[model]||'';
+ const cloudOption=$('cloudFallbackOption');if(cloudOption)cloudOption.hidden=model==='standard';
  $('modelFlow').hidden=model==='standard';
  $('modelFlowTitle').textContent=model==='pro'?'Pro secure analysis':'Plus deep analysis';
  if(model!=='standard'){
@@ -75,8 +77,9 @@ function friendlyPhase(event){
  if(phase==='threat_intelligence')return 'Threat-intelligence check completed';
  if(phase==='sandbox_decision')return status==='warning'?'Additional isolated analysis selected':'Sandbox decision completed';
  if(phase==='preflight')return status==='completed'?'File prepared for isolated analysis':status==='blocked'?'File could not be prepared safely':'Preparing file for isolated analysis';
+ if(phase==='cloud_ephemeral_inspection')return status==='completed'?'Disposable Cloud Inspection completed':status==='blocked'?'Cloud Inspection unavailable':'Running disposable Cloud Inspection';
  if(phase==='sandbox_analysis'){
-   if(status==='blocked')return 'Secure Sandbox setup is required on this PC';
+   if(status==='blocked')return 'Local behavioral Sandbox unavailable';
    if(status==='completed')return 'Isolated behavioral analysis completed';
    return 'Running isolated behavioral analysis';
  }
@@ -117,7 +120,9 @@ function renderCustomerResult(session){
  const preflightBlocked=result.completionState==='preflight_failed_closed';
  let copy=VERDICT_COPY[result.verdict]||VERDICT_COPY.inconclusive;
  if(setupRequired){
-   copy={label:'Protected',tone:'setup',title:'Secure Sandbox setup required',message:'MalGuard kept the file protected because isolated execution is not ready on this PC. The file was not executed outside the Sandbox.'};
+   copy=result.cloudInspectionCompleted===true
+     ?{label:'Protected',tone:'setup',title:'Cloud inspection completed',message:'The disposable cloud environment inspected the file and was destroyed after the job, but Windows behavioral execution was not proven on this PC. MalGuard therefore did not mark the file safe.'}
+     :{label:'Protected',tone:'setup',title:'Secure Sandbox setup required',message:'MalGuard kept the file protected because isolated execution is not ready on this PC. The file was not executed outside the Sandbox.'};
  }else if(preflightBlocked){
    copy={label:'Protected',tone:'setup',title:'File kept protected',message:'MalGuard could not prepare this file for isolated execution safely, so it stopped before running it.'};
  }
@@ -129,7 +134,7 @@ function renderCustomerResult(session){
  const message=document.createElement('p');message.className='result-message';message.textContent=copy.message;
  box.append(header,message);
  if(setupRequired){
-   const note=document.createElement('p');note.className='result-note';note.textContent='Plus and Pro stay fail-closed until this device passes the real Windows Sandbox compatibility check.';
+   const note=document.createElement('p');note.className='result-note';note.textContent=result.cloudInspectionCompleted===true?'Cloud Inspection is inspection-only and cannot replace verified Windows behavioral execution for a SAFE verdict.':'Plus and Pro stay fail-closed until this device passes a real local behavioral isolation check.';
    const actions=document.createElement('div');actions.className='result-actions';
    const check=document.createElement('button');check.type='button';check.textContent='Check Sandbox compatibility';
    check.onclick=()=>{const tab=document.querySelector('.tab[data-tab="engine"]');if(tab)tab.click();const button=$('finalSandboxTest');if(button)button.click();};
@@ -151,16 +156,17 @@ function renderPipeline(session){
  renderCustomerResult(session);
 }
 async function runModelScan(path,model,file=null){
+ const useCloud=cloudFallbackEnabled();
  $('modelSteps').innerHTML=''; resetCustomerResult('Starting secure analysis…');
  let started;
  if(file){
-   const response=await fetch(`/api/model-scan/upload?model=${encodeURIComponent(model)}&name=${encodeURIComponent(file.name)}`,{
+   const response=await fetch(`/api/model-scan/upload?model=${encodeURIComponent(model)}&name=${encodeURIComponent(file.name)}&cloudFallback=${useCloud?'1':'0'}`,{
      method:'POST',headers:{'content-type':'application/octet-stream','x-malguard-local-upload':'1'},body:file,
    });
    started=await response.json();
    if(!response.ok)throw new Error(started.code||'LOCAL_FILE_UPLOAD_FAILED');
  }else{
-   started=await api('/api/model-scan/start','POST',{path,model});
+   started=await api('/api/model-scan/start','POST',{path,model,cloudFallback:useCloud});
  }
  if(!started.session)throw new Error(started.code||'SCAN_NOT_STARTED');
  const id=started.session.id;
