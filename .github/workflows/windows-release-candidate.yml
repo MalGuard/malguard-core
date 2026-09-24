@@ -276,8 +276,7 @@ jobs:
           $setup = Join-Path (Get-Location) "dist/MalGuard-Setup-$version-windows-x64.exe"
           $installedNode = Join-Path $env:LOCALAPPDATA 'Programs/MalGuard/desktop-app/runtime/node.exe'
           try {
-            $installer = Start-Process -FilePath $setup -Wait -PassThru
-            if ($installer.ExitCode -ne 0) { throw "Setup exited with code $($installer.ExitCode)" }
+            $installer = Start-Process -FilePath $setup -PassThru
             $ready = $false
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
               try {
@@ -289,7 +288,10 @@ jobs:
               } catch {}
               Start-Sleep -Seconds 1
             }
-            if (-not $ready) { throw 'Installed x64 server did not become ready at /api/status' }
+            if (-not $ready) {
+              if ($installer.HasExited) { throw "Installed x64 server did not become ready; Setup exit code: $($installer.ExitCode)" }
+              throw 'Installed x64 server did not become ready at /api/status'
+            }
             Write-Host 'Installed x64 Setup runtime startup PASS: /api/status returned the expected product and version.'
           } finally {
             Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
