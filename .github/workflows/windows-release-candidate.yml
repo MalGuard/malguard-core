@@ -254,7 +254,7 @@ jobs:
           $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
           $root = Join-Path (Get-Location) "dist/malguard-desktop-$version"
           $setup = Join-Path (Get-Location) "dist/MalGuard-Setup-$version-windows-${{ matrix.arch }}.exe"
-          & pwsh -NoLogo -NoProfile -NonInteractive -File .\tools\build-windows-installer.ps1 -PackageRoot $root -Architecture '${{ matrix.arch }}' -OutputPath $setup
+          & pwsh -NoLogo -NoProfile -NonInteractive -File .\tools\build-windows-installer.ps1 -PackageRoot $root -Architecture '${{ matrix.arch }}' -OutputPath $setup -DiagnosticOutputDirectory (Join-Path $env:RUNNER_TEMP "malguard-installer-test-${{ matrix.arch }}")
           if ($LASTEXITCODE -ne 0) { throw "Windows installer builder failed with exit code $LASTEXITCODE" }
           $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $([IO.Path]::GetFileName($setup))" | Set-Content -LiteralPath "$setup.sha256" -Encoding ascii
@@ -293,6 +293,12 @@ jobs:
               Write-Host "Installed package root exists: $(Test-Path -LiteralPath $installedRoot -PathType Container)"
               foreach ($relative in @('PACKAGE-MANIFEST.json','SHA256SUMS.txt','app.js','desktop-app/server.js','desktop-app/runtime/node.exe')) {
                 Write-Host "Installed $relative exists: $(Test-Path -LiteralPath (Join-Path $installedRoot $relative) -PathType Leaf)"
+              }
+              if (-not (Test-Path -LiteralPath $installedRoot -PathType Container)) {
+                $installScript = Join-Path $env:RUNNER_TEMP 'malguard-installer-test-x64/install.ps1'
+                Write-Host 'Running the exact installer script directly to expose its failure:'
+                & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installScript
+                Write-Host "Direct install script exit code: $LASTEXITCODE"
               }
               if (Test-Path -LiteralPath $installedNode -PathType Leaf) {
                 $stderr = Join-Path $env:RUNNER_TEMP 'malguard-installed-startup-stderr.txt'
