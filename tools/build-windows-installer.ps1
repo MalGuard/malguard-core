@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory=$true)][string]$PackageRoot,
   [Parameter(Mandatory=$true)][ValidateSet('x64','arm64')][string]$Architecture,
-  [Parameter(Mandatory=$true)][string]$OutputPath
+  [Parameter(Mandatory=$true)][string]$OutputPath,
+  [string]$DiagnosticOutputDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -136,6 +137,11 @@ try {
   $installer = $installer.Replace('__MALGUARD_PAYLOAD_SHA256__', $payloadSha256)
   $installPath = Join-Path $work 'install.ps1'
   Set-Content -LiteralPath $installPath -Value $installer -Encoding UTF8
+  if ($DiagnosticOutputDirectory) {
+    New-Item -ItemType Directory -Path $DiagnosticOutputDirectory -Force | Out-Null
+    Copy-Item -LiteralPath $payload -Destination (Join-Path $DiagnosticOutputDirectory 'payload.zip') -Force
+    Copy-Item -LiteralPath $installPath -Destination (Join-Path $DiagnosticOutputDirectory 'install.ps1') -Force
+  }
 
   $sed = Join-Path $work 'malguard.sed'
   $targetEscaped = $output.Replace('%','%%')
