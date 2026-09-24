@@ -5,3 +5,6 @@
 .file-chooser+.scan-summary{margin:10px 0 8px;padding:12px 16px;line-height:1.5}.scan-summary.result-error{border:2px solid #f87171;border-left-width:6px;background:#300f16;color:#ffe3e3}.scan-summary.result-error strong{color:#ffb1b1}.scan-summary.result-inconclusive,.scan-summary.result-unsupported{border:2px solid #bb923f;border-left-width:6px;background:#251e0f;color:#ffeba9}.scan-summary.result-inconclusive strong,.scan-summary.result-unsupported strong{color:#ffe3a0}
 
 .header-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.build-id{padding:8px 12px;border:1px solid #36566e;border-radius:999px;background:#071019;color:#b9cfe0;font:700 12px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.02em}@media(max-width:600px){.header-status{justify-content:flex-start}}
+
+
+.cloud-fallback-option{display:flex;gap:10px;align-items:flex-start;margin:10px 0 14px;padding:12px 14px;border:1px solid #29445c;border-radius:12px;background:#08121c}.cloud-fallback-option input{flex:none;min-width:0;width:18px;height:18px;margin-top:2px}.cloud-fallback-option span{display:grid;gap:4px}.cloud-fallback-option strong{font-size:13px}.cloud-fallback-option small{color:#8fa7bd;line-height:1.45}.cloud-fallback-option[hidden]{display:none}
