@@ -4,10 +4,14 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { WindowsSandboxBackend } = require('../desktop-app/sandbox/windows-sandbox-backend.js');
+const { WindowsSandboxBackend, DEFAULT_SANDBOX_TIMEOUT_MS, ISOLATION_SELF_TEST_TIMEOUT_MS } = require('../desktop-app/sandbox/windows-sandbox-backend.js');
 const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller.js');
 
 (async () => {
+  assert.equal(DEFAULT_SANDBOX_TIMEOUT_MS, 60000, 'default behavioral Sandbox launch timeout must allow slow Windows hosts');
+  assert.equal(ISOLATION_SELF_TEST_TIMEOUT_MS, 60000, 'isolation self-test timeout must allow slow Windows Sandbox startup');
+  const defaultBackend = new WindowsSandboxBackend();
+  assert.equal(defaultBackend.timeoutMs, 60000);
   const backend = new WindowsSandboxBackend({ memoryMb: 2048, timeoutMs: 10000, observeSeconds: 5 });
   const caps = await backend.capabilities();
   assert.equal(caps.backend, 'windows-sandbox');
