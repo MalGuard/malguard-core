@@ -17,7 +17,11 @@ function Stop-FixtureProcesses {
 function Invoke-Launcher([string]$script, [int]$expectedExit, [int]$minimumMs = 0) {
   Set-Content -LiteralPath (Join-Path $fixture 'desktop-app\server.js') -Value $script -Encoding utf8
   $watch = [Diagnostics.Stopwatch]::StartNew()
-  $process = Start-Process -FilePath (Join-Path $bin 'MalGuard.exe') -ArgumentList '--headless-startup-test' -PassThru -Wait
+  $process = Start-Process -FilePath (Join-Path $bin 'MalGuard.exe') -ArgumentList '--headless-startup-test' -PassThru
+  if (-not $process.WaitForExit(30000)) {
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    throw 'Launcher did not exit within 30 seconds'
+  }
   $watch.Stop()
   if ($process.ExitCode -ne $expectedExit) { throw "Launcher exited $($process.ExitCode); expected $expectedExit" }
   if ($watch.ElapsedMilliseconds -lt $minimumMs) { throw "Launcher reported readiness prematurely after $($watch.ElapsedMilliseconds) ms" }
@@ -65,7 +69,8 @@ try {
   } finally { Stop-FixtureProcesses }
 
   Remove-Item -LiteralPath (Join-Path $fixture 'desktop-app\server.js') -Force
-  $process = Start-Process -FilePath (Join-Path $bin 'MalGuard.exe') -ArgumentList '--headless-startup-test' -PassThru -Wait
+  $process = Start-Process -FilePath (Join-Path $bin 'MalGuard.exe') -ArgumentList '--headless-startup-test' -PassThru
+  if (-not $process.WaitForExit(30000)) { throw 'Incomplete install launcher did not exit' }
   if ($process.ExitCode -ne 2) { throw "Incomplete install returned $($process.ExitCode), expected 2" }
   Write-Host 'Launcher incomplete install rejection PASS'
 } finally {
