@@ -15,6 +15,7 @@ on:
       - 'PRIVACY.md'
       - 'native/sandbox-containment-probe/**'
       - 'native/windows-launcher/**'
+      - 'tests/windows-launcher-startup.ps1'
       - 'tests/sandbox-*.test.js'
       - 'tests/secure-update.test.js'
       - 'tests/release-trust.test.js'
@@ -122,6 +123,14 @@ jobs:
           $target = Join-Path (Get-Location) 'desktop-app/bin'
           New-Item -ItemType Directory -Path $target -Force | Out-Null
           Copy-Item -LiteralPath $launcher.FullName -Destination (Join-Path $target 'MalGuard.exe') -Force
+
+      - name: Run launcher startup regressions
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & pwsh -NoLogo -NoProfile -NonInteractive -File .\tests\windows-launcher-startup.ps1 -Launcher (Resolve-Path 'desktop-app/bin/MalGuard.exe').Path -Node (Resolve-Path 'desktop-app/runtime/node.exe').Path
+          if ($LASTEXITCODE -ne 0) { throw "Launcher startup regression failed: $LASTEXITCODE" }
 
       - name: Build native Sandbox containment probe
         shell: pwsh
