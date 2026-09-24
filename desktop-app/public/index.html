@@ -34,18 +34,18 @@
         <span id="modelHint" class="muted">Standard local protection.</span>
       </div>
       <div class="row file-chooser"><input id="scanFile" type="file" aria-label="Choose a file from this PC"><button id="scanBtn">Scan selected file</button></div>
-      <p class="muted">Choose a file on this laptop. MalGuard scans a temporary local copy and removes it when the scan ends. Files up to 64 MB.</p>
+      <div id="scanOut" class="scan-summary result-neutral" role="status" aria-live="polite">Choose a supported file to scan.</div>
+      <details id="modelDiagnostics" class="diagnostics" hidden>
+        <summary>Scan diagnostics</summary>
+        <pre id="modelDiagnosticsOut">No diagnostic data yet.</pre>
+      </details>
+      <p class="muted">Standard supports GTA mod .asi and .dll files. ZIP packages and scripts need Plus or Pro when available. PDF files are outside GTA Guard scanning. Files up to 64 MB. Temporary local copies are removed after scanning.</p>
       <details class="diagnostics"><summary>Advanced: enter a full file path instead</summary><input id="scanPath" aria-label="Full path to a file on this PC" placeholder="C:\Games\GTA V\mods\example.asi"></details>
       <div id="modelFlow" hidden>
         <h3 id="modelFlowTitle">Analysis flow</h3>
         <div id="modelSteps" class="pipeline-list"></div>
         <div id="modelFinal" class="scan-result result-neutral">Ready for secure analysis.</div>
-        <details id="modelDiagnostics" class="diagnostics" hidden>
-          <summary>Advanced diagnostics</summary>
-          <pre id="modelDiagnosticsOut">No diagnostic data yet.</pre>
-        </details>
       </div>
-      <div id="scanOut" class="scan-summary result-neutral">Ready to scan.</div>
 
       <details class="advanced-tools"><summary>Optional tools and protection settings</summary>
       <h2>Online threat intelligence</h2>

@@ -71,6 +71,7 @@ const tests=[
  'pro-scan-api.test.js',
  'local-file-upload.test.js',
  'model-selection-ui.test.js',
+ 'scanner-feedback-ui.test.js',
 ];
 for(const test of tests){
  const started=Date.now();
