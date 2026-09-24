@@ -94,9 +94,9 @@ function executedResult(verdict, extra = {}) {
  const plusSafe=await waitFor(plusSafeManager,plusSafeManager.start('/tmp/safe.lua','plus').id);
  assert.equal(plusSafe.finalResult.model,'plus');
  assert.equal(plusSafe.finalResult.verdict,'safe');
- assert.equal(plusSafe.finalResult.sandboxRequested,false);
+ assert.equal(plusSafe.finalResult.sandboxRequested,true);
  assert.equal(plusMode,'pro');
- assert.equal(plusSandboxCalls,0);
+ assert.equal(plusSandboxCalls,1);
  assert(plusSafe.events.some(e=>e.phase==='script_analysis'));
 
  const plusSuspiciousManager = new ModelScanPipelineManager({
