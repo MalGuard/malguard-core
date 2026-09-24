@@ -24,6 +24,7 @@ const ROOT_FILES = [
   'archive-inspector.js',
   'archive-entry-reader.js',
   'script-analyzer.js',
+  'app.js',
 ];
 
 const RUNTIME_DIRS = [
