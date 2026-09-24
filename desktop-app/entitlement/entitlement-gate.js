@@ -30,7 +30,8 @@ class EntitlementGate {
   }
 
   verify() {
-    if (!this.token || !this.publicKeyPem) return { valid: true, plan: 'standard', source: 'default-standard' };
+    if (!this.token && !this.publicKeyPem) return { valid: true, plan: 'pro', source: 'premium-preview' };
+    if (!this.token || !this.publicKeyPem) throw Object.assign(new Error('entitlement configuration incomplete'), { code: 'ENTITLEMENT_INVALID' });
     const { payloadB64, signatureB64, claims } = decodeToken(this.token);
     if (!claims || claims.schemaVersion !== '1.0.0' || !Object.hasOwn(PLAN_LEVEL, claims.plan)) {
       throw Object.assign(new Error('unsupported entitlement claims'), { code: 'ENTITLEMENT_INVALID' });

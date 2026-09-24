@@ -18,10 +18,11 @@ const proToken = makeToken(privateKey, { schemaVersion: '1.0.0', subject: 'synth
 const plusToken = makeToken(privateKey, { schemaVersion: '1.0.0', subject: 'synthetic-test', plan: 'plus', expiresAt: now + 60_000 });
 
 const defaultGate = new EntitlementGate({ now: () => now });
-assert.equal(defaultGate.status().plan, 'standard');
-assert.equal(defaultGate.requireModel('standard').plan, 'standard');
-assert.throws(() => defaultGate.requireModel('plus'), err => err && err.code === 'ENTITLEMENT_REQUIRED');
-assert.throws(() => defaultGate.requireModel('pro'), err => err && err.code === 'ENTITLEMENT_REQUIRED');
+assert.equal(defaultGate.status().plan, 'pro');
+assert.equal(defaultGate.status().source, 'premium-preview');
+assert.equal(defaultGate.requireModel('standard').plan, 'pro');
+assert.equal(defaultGate.requireModel('plus').plan, 'pro');
+assert.equal(defaultGate.requireModel('pro').plan, 'pro');
 
 const plusGate = new EntitlementGate({ publicKeyPem, token: plusToken, now: () => now });
 assert.equal(plusGate.requireModel('standard').plan, 'plus');
@@ -40,4 +41,4 @@ tamperedParts[0] = Buffer.from(JSON.stringify(tamperedClaims)).toString('base64u
 const tampered = tamperedParts.join('.');
 assert.throws(() => new EntitlementGate({ publicKeyPem, token: tampered, now: () => now }).requireModel('pro'), err => err && err.code === 'ENTITLEMENT_INVALID');
 
-console.log('✓ Entitlement gate: signed Standard/Plus/Pro boundary, expiry and tamper rejection PASS');
+console.log('✓ Entitlement gate: premium preview unlock plus signed Standard/Plus/Pro boundary, expiry and tamper rejection PASS');
