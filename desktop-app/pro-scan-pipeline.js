@@ -7,6 +7,7 @@ const PIPELINE_VERSION = '1.4.0';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
+const GTA_PLUGIN_EXTENSIONS = new Set(['.asi', '.dll']);
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -191,7 +192,7 @@ class ModelScanPipelineManager {
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${verdict.toUpperCase()}`, { verdict, model: 'standard' });
   }
 
-  async _runDeepStaticFallback(session, { model, reasonCode, existingLocal = null, preflight = null, sandboxResult = null, sandboxStarted = false, sampleExecutionStarted = false } = {}) {
+  async _runDeepStaticFallback(session, { model, reasonCode, existingLocal = null, preflight = null, sandboxResult = null, sandboxStarted = false, sampleExecutionStarted = false, pluginDirectExecutionUnsupported = false } = {}) {
     this._emit(session, 'fallback_analysis', 'running', 'Local behavioral Sandbox unavailable; running deep non-executing fallback analysis', {
       reasonCode: reasonCode || 'SANDBOX_UNAVAILABLE',
       executionMode: 'no_dynamic_execution',
@@ -255,6 +256,7 @@ class ModelScanPipelineManager {
       fallbackUsed: true,
       fallbackMode: 'deep_static_no_execution',
       dynamicAnalysisUnavailable: true,
+      pluginDirectExecutionUnsupported: pluginDirectExecutionUnsupported === true,
       cloudFallbackRequested: session.allowCloudFallback === true,
       cloudInspectionCompleted: !!(cloudInspectionResult && cloudInspectionResult.ok === true),
       reasonCode: reasonCode || 'SANDBOX_UNAVAILABLE',
@@ -271,6 +273,7 @@ class ModelScanPipelineManager {
       sandboxStarted,
       sampleExecutionStarted,
       sandboxCompleted: false,
+      pluginDirectExecutionUnsupported: pluginDirectExecutionUnsupported === true,
       cloudInspectionCompleted: !!(cloudInspectionResult && cloudInspectionResult.ok === true),
     });
   }
@@ -351,6 +354,7 @@ class ModelScanPipelineManager {
         model: 'plus',
         reasonCode: code,
         existingLocal: local,
+        pluginDirectExecutionUnsupported: code === 'SANDBOX_SAMPLE_TYPE_UNSUPPORTED' && GTA_PLUGIN_EXTENSIONS.has(path.extname(session.filePath).toLowerCase()),
         sandboxResult: sandboxResult || { ok: false, verdict: 'inconclusive' },
         sandboxStarted,
         sampleExecutionStarted,
@@ -391,8 +395,26 @@ class ModelScanPipelineManager {
     const preflight = await this.sandbox.preflightSample(session.filePath);
     session.preflight = clone(preflight);
     if (!preflight || preflight.ok !== true) {
+      const code = preflight && preflight.code ? preflight.code : 'SANDBOX_PREFLIGHT_FAILED';
+      const extension = path.extname(session.filePath).toLowerCase();
+      const pluginDirectExecutionUnsupported = code === 'SANDBOX_SAMPLE_TYPE_UNSUPPORTED' && GTA_PLUGIN_EXTENSIONS.has(extension);
+
+      if (pluginDirectExecutionUnsupported) {
+        this._emit(session, 'preflight', 'warning', 'GTA plugin cannot be launched directly; switching Pro to non-executing fallback analysis', {
+          code,
+          extension,
+          fallback: 'deep_static_no_execution',
+        });
+        return this._runDeepStaticFallback(session, {
+          model: 'pro',
+          reasonCode: code,
+          preflight,
+          pluginDirectExecutionUnsupported: true,
+        });
+      }
+
       this._emit(session, 'preflight', 'blocked', 'Pro Sandbox preflight failed closed', {
-        code: preflight && preflight.code ? preflight.code : 'SANDBOX_PREFLIGHT_FAILED',
+        code,
       });
       session.finalResult = {
         model: 'pro',
@@ -488,4 +510,5 @@ module.exports = {
   mergeSandboxVerdict,
   directSandboxVerdict,
   deepStaticFallbackVerdict,
+  GTA_PLUGIN_EXTENSIONS,
 };
