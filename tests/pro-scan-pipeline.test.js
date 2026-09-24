@@ -150,6 +150,33 @@ function executedResult(verdict, extra = {}) {
  assert.equal(fakeOk.finalResult.sandboxCompleted,false);
  assert.equal(fakeOk.finalResult.fallbackUsed,true);
 
+ // Opt-in Hybrid Isolation may add disposable cloud inspection after local Sandbox failure.
+ let cloudCalls = 0;
+ const hybridManager = new ModelScanPipelineManager({
+   scanner:{scanPath:async()=>({finalVerdict:'safe',contentSha256:'2'.repeat(64),threatIntel:{status:'disabled'}})},
+   sandbox:sandboxMock(),
+   cloudInspection:{inspect:async()=>{cloudCalls++;return {ok:true,mode:'cloud_ephemeral_inspection',executionAttempted:false,report:{bytes:12,sha256:'2'.repeat(64),type:'windows-pe'},isolation:{ephemeral:true,networkPolicy:'deny-all',hostFallback:false,destroyAfterRun:true,execution:'inspection-only'}}}},
+ });
+ const hybrid=await waitFor(hybridManager,hybridManager.start('/tmp/hybrid.dll','pro',{allowCloudFallback:true}).id);
+ assert.equal(cloudCalls,1);
+ assert.equal(hybrid.finalResult.cloudFallbackRequested,true);
+ assert.equal(hybrid.finalResult.cloudInspectionCompleted,true);
+ assert.equal(hybrid.finalResult.dynamicAnalysisUnavailable,true);
+ assert.equal(hybrid.finalResult.verdict,'inconclusive','inspection-only fallback must never upgrade a file to SAFE');
+ assert(hybrid.events.some(e=>e.phase==='cloud_ephemeral_inspection'&&e.status==='completed'));
+
+ // Cloud upload remains opt-in; no upload occurs unless the caller explicitly enables it.
+ cloudCalls = 0;
+ const hybridOptOutManager = new ModelScanPipelineManager({
+   scanner:{scanPath:async()=>({finalVerdict:'safe',contentSha256:'3'.repeat(64),threatIntel:{status:'disabled'}})},
+   sandbox:sandboxMock(),
+   cloudInspection:{inspect:async()=>{cloudCalls++;return {ok:true}}},
+ });
+ const hybridOptOut=await waitFor(hybridOptOutManager,hybridOptOutManager.start('/tmp/hybrid-optout.dll','pro').id);
+ assert.equal(cloudCalls,0);
+ assert.equal(hybridOptOut.finalResult.cloudFallbackRequested,false);
+ assert.equal(hybridOptOut.finalResult.cloudInspectionCompleted,false);
+
  // When real Sandbox succeeds, Pro remains direct-Sandbox and the fallback scanner is not used.
  let successfulProScannerCalls = 0;
  const proMaliciousManager = new ModelScanPipelineManager({
