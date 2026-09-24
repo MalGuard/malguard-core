@@ -179,6 +179,7 @@ jobs:
           node tests/secure-update.test.js
           node tests/release-trust.test.js
           node tests/runtime-package-integrity.test.js
+          node tests/packaging-foundation.test.js
           node tests/workflow-supply-chain.test.js
           node tests/public-release-policy.test.js
           node tests/windows-installer-source.test.js
@@ -265,6 +266,36 @@ jobs:
           $signature = if (Test-Path -LiteralPath $setup) { Get-AuthenticodeSignature -LiteralPath $setup } else { $null }
           if ($signature) { Write-Host "Installer Authenticode state: $($signature.Status)" }
           Write-Host 'NOTE: this Setup is unsigned. It may be published only as an explicitly labeled Unsigned Preview with SHA-256 and source-commit provenance. It must never be represented as Authenticode-signed.'
+
+      - name: Install x64 Setup and verify local server startup
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
+          $setup = Join-Path (Get-Location) "dist/MalGuard-Setup-$version-windows-x64.exe"
+          $installedNode = Join-Path $env:LOCALAPPDATA 'Programs/MalGuard/desktop-app/runtime/node.exe'
+          try {
+            $installer = Start-Process -FilePath $setup -Wait -PassThru
+            if ($installer.ExitCode -ne 0) { throw "Setup exited with code $($installer.ExitCode)" }
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              try {
+                $status = Invoke-RestMethod -Uri 'http://127.0.0.1:18777/api/status' -TimeoutSec 2
+                if ($status.ok -eq $true -and $status.product -eq 'MalGuard Desktop' -and $status.version -eq $version) {
+                  $ready = $true
+                  break
+                }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'Installed x64 server did not become ready at /api/status' }
+            Write-Host 'Installed x64 Setup runtime startup PASS: /api/status returned the expected product and version.'
+          } finally {
+            Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $installedNode, [StringComparison]::OrdinalIgnoreCase) } |
+              ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          }
 
       - name: Upload trusted-main Windows installable release candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
