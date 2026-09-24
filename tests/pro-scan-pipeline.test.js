@@ -150,6 +150,29 @@ function executedResult(verdict, extra = {}) {
  assert.equal(fakeOk.finalResult.sandboxCompleted,false);
  assert.equal(fakeOk.finalResult.fallbackUsed,true);
 
+ // GTA ASI/DLL plugins are not standalone executables. Pro must route them to fail-closed fallback instead of stopping at preflight.
+ let pluginScannerCalls = 0;
+ let pluginSandboxCalls = 0;
+ let pluginCloudCalls = 0;
+ const pluginManager = new ModelScanPipelineManager({
+   scanner:{scanPath:async()=>{pluginScannerCalls++;return {finalVerdict:'safe',contentSha256:'4'.repeat(64),threatIntel:{status:'disabled'}}}},
+   sandbox:sandboxMock({
+     preflightSample:async()=>({ok:false,code:'SANDBOX_SAMPLE_TYPE_UNSUPPORTED',extension:'.asi'}),
+     analyzeUntrustedSample:async()=>{pluginSandboxCalls++;return executedResult('safe')},
+   }),
+   cloudInspection:{inspect:async()=>{pluginCloudCalls++;return {ok:true,mode:'cloud_ephemeral_inspection',executionAttempted:false,report:{bytes:230,sha256:'4'.repeat(64),type:'unknown'},isolation:{ephemeral:true,networkPolicy:'deny-all',hostFallback:false,destroyAfterRun:true,execution:'inspection-only'}}}},
+ });
+ const plugin=await waitFor(pluginManager,pluginManager.start('/tmp/GTA-Guard-Safe-Test-Mod.asi','pro',{allowCloudFallback:true}).id);
+ assert.equal(pluginScannerCalls,1);
+ assert.equal(pluginSandboxCalls,0,'ASI plugin must not be launched as a standalone executable');
+ assert.equal(pluginCloudCalls,1);
+ assert.equal(plugin.finalResult.completionState,'deep_static_fallback');
+ assert.equal(plugin.finalResult.pluginDirectExecutionUnsupported,true);
+ assert.equal(plugin.finalResult.cloudInspectionCompleted,true);
+ assert.equal(plugin.finalResult.verdict,'inconclusive','non-executing plugin fallback must not promote SAFE');
+ assert(plugin.events.some(e=>e.phase==='preflight'&&e.status==='warning'));
+ assert(plugin.events.some(e=>e.phase==='fallback_analysis'&&e.status==='completed'));
+
  // Opt-in Hybrid Isolation may add disposable cloud inspection after local Sandbox failure.
  let cloudCalls = 0;
  const hybridManager = new ModelScanPipelineManager({

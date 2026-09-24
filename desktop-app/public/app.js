@@ -95,8 +95,11 @@ function friendlyMeta(event){
  if(status==='failed')return 'Stopped safely';
  return 'Queued';
 }
+function pluginDirectExecutionUnsupported(result){
+ return !!(result&&result.pluginDirectExecutionUnsupported===true);
+}
 function sandboxSetupRequired(result){
- return !!(result&&(
+ return !!(result&&!pluginDirectExecutionUnsupported(result)&&(
    result.completionState==='sandbox_unavailable_fail_closed'||
    (result.sandboxRequested===true&&result.sandboxCompleted===false&&result.completionState!=='preflight_failed_closed')
  ));
@@ -118,8 +121,13 @@ function renderCustomerResult(session){
  }
  const setupRequired=sandboxSetupRequired(result);
  const preflightBlocked=result.completionState==='preflight_failed_closed';
+ const pluginFallback=pluginDirectExecutionUnsupported(result);
  let copy=VERDICT_COPY[result.verdict]||VERDICT_COPY.inconclusive;
- if(setupRequired){
+ if(pluginFallback&&result.verdict==='inconclusive'){
+   copy=result.cloudInspectionCompleted===true
+     ?{label:'Protected',tone:'inconclusive',title:'GTA plugin inspected without direct execution',message:'This ASI/DLL plugin cannot be launched safely as a standalone Windows program. MalGuard completed local fallback analysis and disposable Cloud Inspection, but did not claim a SAFE result without real plugin execution proof.'}
+     :{label:'Protected',tone:'inconclusive',title:'GTA plugin inspected without direct execution',message:'This ASI/DLL plugin cannot be launched safely as a standalone Windows program. MalGuard completed non-executing fallback analysis and kept the result inconclusive instead of pretending the plugin was behaviorally tested.'};
+ }else if(setupRequired){
    copy=result.cloudInspectionCompleted===true
      ?{label:'Protected',tone:'setup',title:'Cloud inspection completed',message:'The disposable cloud environment inspected the file and was destroyed after the job, but Windows behavioral execution was not proven on this PC. MalGuard therefore did not mark the file safe.'}
      :{label:'Protected',tone:'setup',title:'Secure Sandbox setup required',message:'MalGuard kept the file protected because isolated execution is not ready on this PC. The file was not executed outside the Sandbox.'};
@@ -206,6 +214,10 @@ $('scanBtn').onclick=async()=>{
      setScanSummary(scanFailureMessage(session.error&&session.error.code),'error');
      $('modelDiagnostics').hidden=false;
      out('modelDiagnosticsOut',{code:session.error&&session.error.code||'SCAN_FAILED',message:session.error&&session.error.message||null});
+   }else if(pluginDirectExecutionUnsupported(result)){
+     setScanSummary(result.cloudInspectionCompleted===true
+       ?'GTA plugin inspected locally and in a disposable cloud environment. Direct plugin execution was not performed, so the result remains fail-closed.'
+       :'GTA plugin inspected with non-executing fallback analysis. Direct plugin execution was not performed, so MalGuard did not claim a SAFE result.','inconclusive');
    }else if(sandboxSetupRequired(result)){
      setScanSummary('File kept protected. Secure Sandbox setup is required before isolated execution can run on this PC.','setup');
    }else if(result&&result.completionState==='preflight_failed_closed'){
