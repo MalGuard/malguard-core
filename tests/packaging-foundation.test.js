@@ -22,12 +22,20 @@ for (const required of [
   'SHA256SUMS.txt',
   'package.json',
   'rules.json',
+  'app.js',
   'desktop-app/server.js',
   'desktop-app/threat-intel/credential-store.js',
   'desktop-guard/windows-agent/agent.js',
 ]) {
   assert.ok(fs.existsSync(path.join(out, required)), `missing packaged runtime file: ${required}`);
 }
+
+const bridge = spawnSync(process.execPath, ['-e', "new (require('./desktop-app/scanner-bridge.js').ScannerBridge)()"], {
+  cwd: out,
+  encoding: 'utf8',
+  windowsHide: true,
+});
+assert.equal(bridge.status, 0, `packaged scanner startup failed: ${bridge.stderr || bridge.stdout}`);
 
 assert.ok(!fs.existsSync(path.join(out, 'tests')), 'tests must not ship in portable runtime package');
 assert.ok(!fs.existsSync(path.join(out, '.env')), 'environment secret file must not ship');
