@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const path = require('path');
 
-const PIPELINE_VERSION = '1.3.0';
+const PIPELINE_VERSION = '1.4.0';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
@@ -276,10 +276,11 @@ class ModelScanPipelineManager {
       source: intel.source || null,
     });
 
-    if (!shouldSandbox(localVerdict)) {
-      this._emit(session, 'sandbox_decision', 'completed', localVerdict === 'malicious'
-        ? 'Sandbox skipped: local evidence is already malicious'
-        : 'Sandbox not required for this result', { requested: false, localVerdict });
+    if (localVerdict === 'malicious') {
+      this._emit(session, 'sandbox_decision', 'completed', 'Sandbox skipped: local evidence is already malicious', {
+        requested: false,
+        localVerdict,
+      });
       session.finalResult = {
         model: 'plus',
         verdict: localVerdict,
@@ -292,7 +293,9 @@ class ModelScanPipelineManager {
       return;
     }
 
-    this._emit(session, 'sandbox_decision', 'warning', 'Suspicious or inconclusive result detected. Send to Sandbox.', {
+    this._emit(session, 'sandbox_decision', 'warning', localVerdict === 'safe'
+      ? 'Plus includes isolated behavioral analysis. Send to Sandbox.'
+      : 'Suspicious or inconclusive result detected. Send to Sandbox.', {
       requested: true,
       localVerdict,
     });
