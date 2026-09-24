@@ -289,6 +289,24 @@ jobs:
               Start-Sleep -Seconds 1
             }
             if (-not $ready) {
+              $installedRoot = Join-Path $env:LOCALAPPDATA 'Programs/MalGuard'
+              Write-Host "Installed package root exists: $(Test-Path -LiteralPath $installedRoot -PathType Container)"
+              foreach ($relative in @('PACKAGE-MANIFEST.json','SHA256SUMS.txt','app.js','desktop-app/server.js','desktop-app/runtime/node.exe')) {
+                Write-Host "Installed $relative exists: $(Test-Path -LiteralPath (Join-Path $installedRoot $relative) -PathType Leaf)"
+              }
+              if (Test-Path -LiteralPath $installedNode -PathType Leaf) {
+                $stderr = Join-Path $env:RUNNER_TEMP 'malguard-installed-startup-stderr.txt'
+                $stdout = Join-Path $env:RUNNER_TEMP 'malguard-installed-startup-stdout.txt'
+                $env:MALGUARD_PORT = '18778'
+                $nodeProcess = Start-Process -FilePath $installedNode -WorkingDirectory $installedRoot -ArgumentList @('--require',('"' + (Join-Path $installedRoot 'desktop-app/integrity/preload.js') + '"'),('"' + (Join-Path $installedRoot 'desktop-app/server.js') + '"')) -RedirectStandardError $stderr -RedirectStandardOutput $stdout -PassThru
+                Start-Sleep -Seconds 4
+                Write-Host "Direct installed Node exited: $($nodeProcess.HasExited)"
+                if ($nodeProcess.HasExited) { Write-Host "Direct installed Node exit code: $($nodeProcess.ExitCode)" }
+                if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr | Select-Object -First 25 | ForEach-Object { Write-Host $_ } }
+                if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout | Select-Object -First 10 | ForEach-Object { Write-Host $_ } }
+                if (-not $nodeProcess.HasExited) { Stop-Process -Id $nodeProcess.Id -Force -ErrorAction SilentlyContinue }
+                Remove-Item Env:MALGUARD_PORT -ErrorAction SilentlyContinue
+              }
               if ($installer.HasExited) { throw "Installed x64 server did not become ready; Setup exit code: $($installer.ExitCode)" }
               throw 'Installed x64 server did not become ready at /api/status'
             }
