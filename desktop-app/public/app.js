@@ -7,7 +7,7 @@ async function api(path, method='GET', body){
  return data;
 }
 function out(id,data){$(id).textContent=JSON.stringify(data,null,2)}
-async function status(){try{const s=await api('/api/status');$('status').textContent=s.watching?'Guard active':'Guard idle';out('guardOut',s)}catch(e){$('status').textContent='Offline'}}
+async function status(){try{const s=await api('/api/status');$('status').textContent=`${s.watching?'Guard active':'Guard idle'} · ${s.build?`build ${s.build}`:s.version}`;out('guardOut',s)}catch(e){$('status').textContent='Offline'}}
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')});
 
 const MODEL_HINTS={
@@ -134,9 +134,19 @@ function renderPipeline(session){
  }
  renderCustomerResult(session);
 }
-async function runModelScan(path,model){
+async function runModelScan(path,model,file=null){
  $('modelSteps').innerHTML=''; resetCustomerResult('Starting secure analysis…');
- const started=await api('/api/model-scan/start','POST',{path,model});
+ let started;
+ if(file){
+   const response=await fetch(`/api/model-scan/upload?model=${encodeURIComponent(model)}&name=${encodeURIComponent(file.name)}`,{
+     method:'POST',headers:{'content-type':'application/octet-stream','x-malguard-local-upload':'1'},body:file,
+   });
+   started=await response.json();
+   if(!response.ok)throw new Error(started.code||'LOCAL_FILE_UPLOAD_FAILED');
+ }else{
+   started=await api('/api/model-scan/start','POST',{path,model});
+ }
+ if(!started.session)throw new Error(started.code||'SCAN_NOT_STARTED');
  const id=started.session.id;
  if(model!=='standard') renderPipeline(started.session);
  for(let i=0;i<600;i++){
@@ -148,16 +158,21 @@ async function runModelScan(path,model){
  throw new Error('Model scan status polling timed out');
 }
 
+$('scanFile').onchange=()=>{if($('scanFile').files.length)$('scanPath').value='';};
+$('scanPath').oninput=()=>{if($('scanPath').value.trim())$('scanFile').value='';};
 $('scanBtn').onclick=async()=>{
- const p=$('scanPath').value;
+ const file=$('scanFile').files[0]||null;
+ const p=$('scanPath').value.trim().replace(/^"(.*)"$/,'$1');
  const model=currentModel();
- if(!p.trim()){
-   setScanSummary('Choose a file path to begin scanning.','neutral');
+ if(!file&&!p){
+   setScanSummary('Choose a file from this PC to begin scanning.','neutral');
    return;
  }
+ if(file&&file.size>64*1024*1024){setScanSummary('Choose a file smaller than 64 MB.','setup');return;}
+ $('scanBtn').disabled=true;
  setScanSummary('MalGuard is scanning the file securely…','neutral');
  try{
-   const session=await runModelScan(p,model);
+   const session=await runModelScan(p,model,file);
    const result=session&&session.finalResult?session.finalResult:null;
    if(model!=='standard')renderCustomerResult(session);
    if(sandboxSetupRequired(result)){
@@ -169,10 +184,12 @@ $('scanBtn').onclick=async()=>{
      setScanSummary(`${copy.title}. ${copy.message}`,copy.tone);
    }
  }catch(e){
-   setScanSummary('MalGuard could not finish this scan. The file was not marked safe and no unsafe fallback was used.','setup');
+   setScanSummary(e.message==='UPLOAD_EMPTY'?'Choose a non-empty file.':e.message==='UPLOAD_TOO_LARGE'?'Choose a file smaller than 64 MB.':'MalGuard could not finish this scan. The file was not marked safe and no unsafe fallback was used.','setup');
    const diagnostics=$('modelDiagnostics');
    const diagnosticsOut=$('modelDiagnosticsOut');
    if(diagnostics&&diagnosticsOut){diagnostics.hidden=false;diagnosticsOut.textContent=JSON.stringify({code:'MODEL_SCAN_UI_ERROR',message:e.message},null,2);}
+ }finally{
+   $('scanBtn').disabled=false;
  }
 };
 async function loadThreatStatus(){out('threatOut',await api('/api/threat-intel/status'))}
