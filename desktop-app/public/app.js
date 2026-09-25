@@ -11,7 +11,7 @@ async function status(){try{const s=await api('/api/status');$('status').textCon
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')});
 
 const MODEL_HINTS={
- standard:'Standard: local GTA plugin scan + synthetic GTA context. Optional metadata-only MalGuard AI analysis.',
+ standard:'Standard: hardened local analysis for GTA plugins, Lua/C# scripts and ZIP mod packages + synthetic GTA context + MalGuard AI evidence.',
  plus:'Plus: deep local analysis + synthetic GTA context + optional disposable isolated GTA simulation and MalGuard AI evidence analysis.',
  pro:'Pro: verified local behavioral analysis when possible + GTA simulation + optional isolated cloud simulation and MalGuard AI evidence analysis.',
 };
@@ -55,7 +55,7 @@ function setScanSummary(text,tone='neutral'){
  }
  box.append(document.createTextNode(text));
 }
-function standardSupportsFile(name){return /\.(asi|dll)$/i.test(name||'')}
+function standardSupportsFile(name){return /\.(asi|dll|lua|cs|zip)$/i.test(name||'')}
 function scanFailureMessage(code){
  if(code==='UPLOAD_NAME_INVALID')return 'The file name cannot be processed. Rename it and try again.';
  if(code==='UPLOAD_EMPTY')return 'The selected file is empty. Choose a different file.';
