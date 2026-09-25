@@ -27,6 +27,7 @@ for (const required of [
   'desktop-app/gta-simulation/simulation-engine.js',
   'desktop-app/gta-simulation/ai-evidence-bridge.js',
   'desktop-app/gta-simulation/cloud-gta-simulation-client.js',
+  'desktop-app/gta-simulation/malguard-cloud-ai-provider.js',
   'desktop-app/threat-intel/credential-store.js',
   'desktop-guard/windows-agent/agent.js',
 ]) {
