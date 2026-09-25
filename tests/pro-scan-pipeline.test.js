@@ -80,7 +80,7 @@ function executedResult(verdict, extra = {}) {
  let standardMode = null;
  let standardSandboxCalls = 0;
  const standardManager = new ModelScanPipelineManager({
-   scanner:{scanPath:async(_p,mode)=>{standardMode=mode;return {finalVerdict:'safe',contentSha256:'a'.repeat(64)}}},
+   scanner:{scanPath:async(_p,mode)=>{standardMode=mode;return {finalVerdict:'safe',contentSha256:'a'.repeat(64),sourceIdentity:{sha256:'a'.repeat(64),revalidated:true},scriptAnalysis:{supported:true,verdict:'safe',errorCode:null}}}},
    sandbox:sandboxMock({analyzeUntrustedSample:async()=>{standardSandboxCalls++;return executedResult('safe')}}),
  });
  const standard=await waitFor(standardManager,standardManager.start('/tmp/safe.lua','standard').id);
