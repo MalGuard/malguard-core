@@ -223,7 +223,6 @@ class ModelScanPipelineManager {
     session.updatedAt = this.now();
     await this._attachGtaSimulationAndAiEvidence(session);
     if (session.state !== 'failed') {
-      session.state = 'completed';
       session.updatedAt = this.now();
     }
   }
@@ -330,7 +329,6 @@ class ModelScanPipelineManager {
       coverage: clone(coverage),
       localResult: clone(local),
     };
-    session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${verdict.toUpperCase()}`, { verdict, model: 'standard' });
   }
 
@@ -432,7 +430,6 @@ class ModelScanPipelineManager {
       ...(cloudInspectionResult ? { cloudInspectionResult: clone(cloudInspectionResult) } : {}),
       ...(gtaCloudSimulationResult ? { gtaCloudSimulationResult: clone(gtaCloudSimulationResult) } : {}),
     };
-    session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()} (deep static fallback)`, {
       verdict: finalVerdict,
       model,
@@ -489,7 +486,6 @@ class ModelScanPipelineManager {
         sandboxRequested: false,
         localResult: clone(local),
       };
-      session.state = 'completed';
       this._emit(session, 'final_verdict', 'completed', `Final verdict: ${localVerdict.toUpperCase()}`, { verdict: localVerdict, model: 'plus' });
       return;
     }
@@ -547,7 +543,6 @@ class ModelScanPipelineManager {
       localResult: clone(local),
       sandboxResult: clone(sandboxResult),
     };
-    session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()}`, {
       verdict: finalVerdict,
       model: 'plus',
@@ -594,7 +589,6 @@ class ModelScanPipelineManager {
         sandboxCompleted: false,
         preflight: clone(preflight || { ok: false, code: 'SANDBOX_PREFLIGHT_FAILED' }),
       };
-      session.state = 'completed';
       this._emit(session, 'final_verdict', 'completed', 'Final verdict: INCONCLUSIVE', {
         verdict: 'inconclusive', model: 'pro', sandboxStarted: false, sampleExecutionStarted: false, sandboxCompleted: false,
       });
@@ -653,7 +647,6 @@ class ModelScanPipelineManager {
       preflight: clone(preflight),
       sandboxResult: clone(sandboxResult),
     };
-    session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()}`, {
       verdict: finalVerdict, model: 'pro', sandboxStarted: true, sampleExecutionStarted: true, sandboxCompleted: true,
     });
