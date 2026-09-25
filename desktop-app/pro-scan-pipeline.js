@@ -214,7 +214,18 @@ class ModelScanPipelineManager {
     if (session.model === 'standard') await this._runStandard(session);
     else if (session.model === 'plus') await this._runPlus(session);
     else await this._runPro(session);
+
+    // A model-specific scan may have produced its base verdict already, but the
+    // session is not externally complete until synthetic GTA context and AI
+    // evidence have either completed or failed closed. This prevents polling
+    // clients from observing a "completed" session before AI correlation lands.
+    session.state = 'finalizing';
+    session.updatedAt = this.now();
     await this._attachGtaSimulationAndAiEvidence(session);
+    if (session.state !== 'failed') {
+      session.state = 'completed';
+      session.updatedAt = this.now();
+    }
   }
 
   async _attachGtaSimulationAndAiEvidence(session) {
