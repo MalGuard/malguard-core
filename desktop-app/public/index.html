@@ -34,8 +34,8 @@
         <span id="modelHint" class="muted">Standard hardened multi-layer local protection.</span>
       </div>
       <label id="cloudFallbackOption" class="cloud-fallback-option" hidden>
-        <input id="cloudFallback" type="checkbox">
-        <span><strong>Use disposable GTA Cloud Simulation if local behavioral isolation is unavailable</strong><small>Opt-in for Plus/Pro. ASI/DLL plugins are staged inside a fresh synthetic GTA filesystem with deny-all networking. The sample is not executed in this simulation phase, and the environment is destroyed after the job.</small></span>
+        <input id="cloudFallback" type="checkbox" checked>
+        <span><strong>Use MalGuard Cloud Isolation if local behavioral isolation is unavailable</strong><small>Enabled by default for Plus/Pro. ASI/DLL plugins are staged inside a fresh synthetic GTA filesystem with deny-all networking. The sample is not executed in this simulation phase, and the environment is destroyed after the job.</small></span>
       </label>
       <label id="aiEvidenceOption" class="cloud-fallback-option">
         <input id="aiEvidence" type="checkbox" checked>
@@ -91,7 +91,7 @@
       </details>
 
       <h2>Hybrid Isolation</h2>
-      <p class="muted">Plus and Pro use verified local Windows Sandbox for behavioral execution. If local isolation is unavailable, MalGuard can optionally continue with disposable Cloud Inspection: a fresh ephemeral sandbox with deny-all networking that is destroyed after the job. Cloud Inspection does not execute Windows samples and never turns incomplete evidence into a SAFE verdict.</p>
+      <p class="muted">Plus and Pro prefer verified local behavioral isolation when available. If local isolation is unavailable, MalGuard automatically continues with disposable Cloud Inspection: a fresh ephemeral sandbox with deny-all networking that is destroyed after the job. Cloud Inspection does not execute Windows samples and never turns incomplete evidence into a SAFE verdict.</p>
       <p class="muted">Standard local scanning works offline. Behavioral execution stays fail-closed unless a local execution backend passes certification.</p>
       <button id="finalSandboxTest">Re-check real Sandbox execution</button>
       <p id="finalSandboxSummary" class="health-card health-checking">Real Sandbox execution has not been verified yet.</p>
