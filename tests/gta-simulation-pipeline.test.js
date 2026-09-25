@@ -20,6 +20,7 @@ function baseScanner(verdict) {
       finalVerdict: verdict,
       mode,
       contentSha256: 'a'.repeat(64),
+      sourceIdentity: { sha256: 'a'.repeat(64), revalidated: true },
       detectorResult: { modType: 'plugin', route: 'ENGINE', confidence: 'high', suspiciousPackaging: false },
       threatIntel: { status: 'disabled' },
     }),
@@ -79,8 +80,10 @@ function sandbox({ unsupportedPlugin = false } = {}) {
     gtaSimulation,
     aiEvidence: realAiBridge,
   });
-  const aiStandard = await waitFor(aiManager, aiManager.start('/tmp/ai-test.asi', 'standard', { allowAiEvidence: true }).id);
+  const aiStart = aiManager.start('/tmp/ai-test.asi', 'standard', { allowAiEvidence: true });
+  const aiStandard = await waitFor(aiManager, aiStart.id);
   assert.equal(aiCalls, 1);
+  assert.equal(aiStandard.state, 'completed', 'session must not become completed before AI evidence correlation finishes');
   assert.equal(aiStandard.finalResult.verdict, 'inconclusive', 'AI low-risk advice must never promote an inconclusive scan to SAFE');
   assert.equal(aiStandard.finalResult.aiEvidence.status, 'completed');
   assert.equal(aiStandard.finalResult.aiEvidence.risk, 'low');
