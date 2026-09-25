@@ -1,0 +1,125 @@
+name: TSH Main - Maximum Multi-Engine 5-Stage
+
+on:
+  push:
+    branches:
+      - feature/maximum-multi-engine-tsh5
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-1-core:
+    name: "TSH 1/5 - Core Static Detection"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+      - name: Verify syntax
+        run: |
+          node --check tests/tsh-main-5stage.js
+          node --check desktop-app/multi-engine/multi-engine-scanner.js
+          node --check desktop-app/scanner-bridge.js
+          node --check desktop-app/fusion/evidence-fusion-engine.js
+          node --check desktop-app/pro-scan-pipeline.js
+      - name: Run TSH Stage 1
+        run: node tests/tsh-main-5stage.js stage1
+
+  stage-2-multi-engine:
+    name: "TSH 2/5 - Real Multi-Engine & Fusion"
+    needs: stage-1-core
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+      - name: Stage pinned YARA-X, capa and FLOSS
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\tools\stage-multi-engine-tools.ps1
+      - name: Run TSH Stage 2
+        shell: pwsh
+        env:
+          MALGUARD_TSH_LIVE_MULTI_ENGINE: '1'
+        run: node tests/tsh-main-5stage.js stage2
+
+  stage-3-isolation:
+    name: "TSH 3/5 - Isolation, Sandbox & Runtime Defense"
+    needs: stage-2-multi-engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+      - name: Run TSH Stage 3
+        run: node tests/tsh-main-5stage.js stage3
+
+  stage-4-product:
+    name: "TSH 4/5 - Product, API, UI & Package Integrity"
+    needs: stage-3-isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+      - name: Run TSH Stage 4
+        run: node tests/tsh-main-5stage.js stage4
+      - name: Verify product readiness
+        run: node tools/verify-product-readiness.js
+
+  stage-5-adversarial:
+    name: "TSH 5/5 - Adversarial, Fuzz & Final Torture"
+    needs: stage-4-product
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+      - name: Re-stage pinned independent engines
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\tools\stage-multi-engine-tools.ps1
+      - name: Run TSH Stage 5
+        shell: pwsh
+        env:
+          MALGUARD_TSH_LIVE_MULTI_ENGINE: '1'
+        run: node tests/tsh-main-5stage.js stage5
+      - name: Final live benign Windows PE multi-engine proof
+        shell: pwsh
+        env:
+          MALGUARD_TSH_LIVE_MULTI_ENGINE: '1'
+        run: node tests/multi-engine-live-windows.test.js
