@@ -46,10 +46,11 @@ function request(port, endpoint, body, headers = {}) {
     for (let attempt = 0; attempt < 200; attempt++) {
       const response = await fetch(`http://127.0.0.1:${port}/api/model-scan/status?id=${encodeURIComponent(id)}`);
       session = (await response.json()).session;
-      if (['completed', 'failed'].includes(session.state)) break; // terminal states are exposed only after upload cleanup
+      if (['completed', 'failed'].includes(session.state) && session.cleanupPending !== true) break; // terminal states are exposed only after upload cleanup
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     assert.equal(session.state, 'completed');
+    assert.notEqual(session.cleanupPending, true, 'upload cleanup must finish before the test accepts completion');
     assert.equal(session.model, 'standard');
     for (let attempt = 0; attempt < 100; attempt++) {
       if (!fs.existsSync(session.filePath)) break;
