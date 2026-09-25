@@ -9,7 +9,7 @@ const { IsolationBackendRouter } = require('./isolation-backend-router.js');
 
 const SANDBOX_VERSION = '0.6.1';
 const MAX_SAMPLE_BYTES = 64 * 1024 * 1024;
-const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js']);
+const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.asi', '.dll']);
 
 class SandboxController {
   constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null, isolationBackend = null, autoCertify = false } = {}) {
