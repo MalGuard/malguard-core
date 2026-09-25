@@ -13,6 +13,8 @@ const { RuntimeGameProcessGuard } = require('../desktop-guard/windows-agent/runt
 const { SandboxController } = require('./sandbox/sandbox-controller.js');
 const { IsolationBackendRouter } = require('./sandbox/isolation-backend-router.js');
 const { CloudEphemeralInspectionClient } = require('./sandbox/cloud-ephemeral-inspection.js');
+const { GtaSimulationEngine } = require('./gta-simulation/simulation-engine.js');
+const { AiEvidenceBridge } = require('./gta-simulation/ai-evidence-bridge.js');
 const { EmbeddedValidationLab } = require('./sandbox/embedded-validation-lab.js');
 const { IncidentStore } = require('../desktop-guard/windows-agent/incident-store.js');
 const { SettingsStore } = require('./settings-store.js');
@@ -46,7 +48,9 @@ const sandbox = new SandboxController({
 });
 const validationLab = new EmbeddedValidationLab({ windowsBackend: sandbox.windowsBackend });
 const cloudInspection = new CloudEphemeralInspectionClient();
-const modelPipeline = new ModelScanPipelineManager({ scanner, sandbox, cloudInspection });
+const gtaSimulation = new GtaSimulationEngine();
+const aiEvidence = new AiEvidenceBridge();
+const modelPipeline = new ModelScanPipelineManager({ scanner, sandbox, cloudInspection, gtaSimulation, aiEvidence });
 const entitlementGate = new EntitlementGate();
 const errorReporter = new LocalErrorReporter();
 
@@ -139,7 +143,7 @@ async function handler(req, res) {
         : sandboxCertification.state === 'running'
           ? 'isolation-backend-self-certifying'
           : 'fail-closed-until-isolation-backend-certified';
-      return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, build: BUILD, supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', cloudInspection: { available: cloudInspection.available(), mode: 'opt-in-ephemeral-inspection-only' }, guardConfigured: config.watchRoots.length > 0, watching: protection.completeProtection === true, realtimeProtection: protection, runtimeProcessProtection: protection.runtimeProcessProtection, guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode, sandboxCertification, threatIntel: await threatIntel.status() });
+      return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, build: BUILD, supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', cloudInspection: { available: cloudInspection.available(), mode: 'opt-in-ephemeral-inspection-only' }, gtaSimulation: gtaSimulation.capabilities(), aiEvidence: aiEvidence.capabilities(), guardConfigured: config.watchRoots.length > 0, watching: protection.completeProtection === true, realtimeProtection: protection, runtimeProcessProtection: protection.runtimeProcessProtection, guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode, sandboxCertification, threatIntel: await threatIntel.status() });
     }
     if (req.method === 'GET' && url.pathname === '/api/entitlement/status') return json(res, 200, { ok: true, entitlement: entitlementGate.status() });
     if (req.method === 'GET' && url.pathname === '/api/threat-intel/status') return json(res, 200, { ok: true, status: await threatIntel.status() });
@@ -259,4 +263,4 @@ if (require.main === module) {
   }).catch(async error => { await recordRuntimeError(error, { area: 'startup' }); console.error(`MalGuard startup failed: ${safeText(error.code || error.name || 'INTERNAL_ERROR', 128)}`); process.exit(1); });
 }
 
-module.exports = { startServer, handler, scanner, sandbox, validationLab, cloudInspection, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }), getRealtimeProtectionStatus: () => protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, state:'stopped' }, getRuntimeProcessProtectionStatus: () => runtimeProcessGuard ? runtimeProcessGuard.getCachedStatus() : { ok:false, active:false, healthy:false, state:'stopped' } };
+module.exports = { startServer, handler, scanner, sandbox, validationLab, cloudInspection, gtaSimulation, aiEvidence, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }), getRealtimeProtectionStatus: () => protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, state:'stopped' }, getRuntimeProcessProtectionStatus: () => runtimeProcessGuard ? runtimeProcessGuard.getCachedStatus() : { ok:false, active:false, healthy:false, state:'stopped' } };
