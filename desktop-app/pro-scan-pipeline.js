@@ -102,7 +102,7 @@ class ModelScanPipelineManager {
     return event;
   }
 
-  start(filePath, model = 'plus', { onFinish = null, allowCloudFallback = false } = {}) {
+  start(filePath, model = 'plus', { onFinish = null, allowCloudFallback = false, allowAiEvidence = false } = {}) {
     if (typeof filePath !== 'string' || !filePath.trim()) {
       const error = new Error('scan path is required');
       error.code = 'PATH_REQUIRED';
@@ -135,6 +135,7 @@ class ModelScanPipelineManager {
       gtaSimulationResult: null,
       aiEvidenceResult: null,
       allowCloudFallback: allowCloudFallback === true,
+      allowAiEvidence: allowAiEvidence === true,
       finalResult: null,
       error: null,
     };
@@ -206,38 +207,57 @@ class ModelScanPipelineManager {
     }
 
     if (this.aiEvidence) {
-      try {
-        this._emit(session, 'ai_evidence', 'running', 'Preparing bounded evidence for the AI analysis interface');
-        const ai = await this.aiEvidence.analyze({
-          model: session.model,
-          simulation: { local: session.gtaSimulationResult, isolated: session.gtaCloudSimulationResult },
-          localResult: session.localResult,
-        });
-        session.aiEvidenceResult = clone(ai);
-        session.finalResult.aiEvidence = clone(ai);
-        this._emit(session, 'ai_evidence', ai && ai.available === false ? 'blocked' : (ai && ai.ok === true ? 'completed' : 'blocked'),
-          ai && ai.available === false
-            ? 'AI evidence interface is connected; no inference provider is packaged yet'
-            : ai && ai.ok === true
-              ? 'AI evidence analysis completed'
-              : 'AI evidence analysis failed closed', {
-            available: !!(ai && ai.available === true),
-            status: ai && ai.status || null,
-            onlineLearning: !!(ai && ai.onlineLearning === true),
-            autoRemediation: !!(ai && ai.autoRemediation === true),
-          });
-      } catch (error) {
-        const failure = {
-          ok: false,
-          available: false,
-          status: 'bridge_error',
-          code: error && error.code || 'AI_EVIDENCE_BRIDGE_FAILED',
+      if (session.allowAiEvidence !== true) {
+        const capabilities = typeof this.aiEvidence.capabilities === 'function' ? this.aiEvidence.capabilities() : { available: false };
+        const skipped = {
+          ok: true,
+          available: capabilities.available === true,
+          status: 'not_requested',
           onlineLearning: false,
+          modelWeightsMutableDuringScan: false,
           autoRemediation: false,
         };
-        session.aiEvidenceResult = failure;
-        session.finalResult.aiEvidence = failure;
-        this._emit(session, 'ai_evidence', 'blocked', 'AI evidence bridge failed closed', failure);
+        session.aiEvidenceResult = skipped;
+        session.finalResult.aiEvidence = skipped;
+        this._emit(session, 'ai_evidence', 'warning', 'MalGuard AI evidence analysis is available but was not requested', {
+          available: skipped.available,
+          status: skipped.status,
+          fileBytesShared: false,
+        });
+      } else {
+        try {
+          this._emit(session, 'ai_evidence', 'running', 'Sending bounded metadata-only evidence to MalGuard AI');
+          const ai = await this.aiEvidence.analyze({
+            model: session.model,
+            simulation: { local: session.gtaSimulationResult, isolated: session.gtaCloudSimulationResult },
+            localResult: session.localResult,
+          });
+          session.aiEvidenceResult = clone(ai);
+          session.finalResult.aiEvidence = clone(ai);
+          this._emit(session, 'ai_evidence', ai && ai.ok === true ? 'completed' : 'blocked',
+            ai && ai.ok === true
+              ? 'MalGuard AI evidence analysis completed'
+              : 'MalGuard AI evidence analysis failed closed', {
+              available: !!(ai && ai.available === true),
+              status: ai && ai.status || null,
+              risk: ai && ai.risk || null,
+              onlineLearning: !!(ai && ai.onlineLearning === true),
+              autoRemediation: !!(ai && ai.autoRemediation === true),
+              fileBytesShared: false,
+            });
+        } catch (error) {
+          const failure = {
+            ok: false,
+            available: false,
+            status: 'bridge_error',
+            code: error && error.code || 'AI_EVIDENCE_BRIDGE_FAILED',
+            onlineLearning: false,
+            autoRemediation: false,
+          };
+          session.aiEvidenceResult = failure;
+          session.finalResult.aiEvidence = failure;
+          this._emit(session, 'ai_evidence', 'blocked', 'MalGuard AI evidence bridge failed closed', failure);
+        }
       }
     }
   }
