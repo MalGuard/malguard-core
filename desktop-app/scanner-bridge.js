@@ -5,6 +5,7 @@ const path = require('path');
 const vm = require('vm');
 const { webcrypto, createHash } = require('crypto');
 const { performance } = require('perf_hooks');
+const { MultiEngineScanner } = require('./multi-engine/multi-engine-scanner.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const TRANSIENT_IO_CODES = new Set(['EBUSY', 'ETXTBSY', 'EAGAIN']);
@@ -103,6 +104,7 @@ function load(context, filename) {
 class ScannerBridge {
   constructor(options = {}) {
     this.threatIntel = options.threatIntel || null;
+    this.multiEngine = options.multiEngine || new MultiEngineScanner();
     this.context = makeContext();
     for (const file of [
       'malguard-contract.js',
@@ -134,6 +136,27 @@ class ScannerBridge {
     }
     result = JSON.parse(JSON.stringify(result));
     result.contentSha256 = contentSha256;
+    let independent;
+    try {
+      independent = this.multiEngine.scanBuffer(name, inputBytes, { mode });
+    } catch (error) {
+      independent = {
+        schemaVersion: '2.0',
+        verdict: 'inconclusive',
+        code: error && error.code || 'MULTI_ENGINE_BRIDGE_ERROR',
+        engines: {},
+        coverage: { complete: false, requiredForSafe: false },
+      };
+    }
+    result.multiEngine = independent;
+    if (independent && independent.verdict === 'malicious') {
+      result.finalVerdict = 'malicious';
+    } else if (independent && independent.verdict === 'suspicious' && result.finalVerdict !== 'malicious') {
+      result.finalVerdict = 'suspicious';
+    } else if (result.finalVerdict === 'safe' && independent && independent.coverage && independent.coverage.requiredForSafe === true && independent.coverage.complete !== true) {
+      result.finalVerdict = 'inconclusive';
+      result.multiEngineCoverageGate = 'incomplete';
+    }
     return this._applyThreatIntel(result, contentSha256);
   }
 
@@ -170,6 +193,10 @@ class ScannerBridge {
       });
     }
     return result;
+  }
+
+  multiEngineCapabilities() {
+    return this.multiEngine.capabilities();
   }
 
   async scanPath(filePath, mode = 'pro') {
