@@ -53,6 +53,7 @@ function sandbox({ unsupportedPlugin = false } = {}) {
   });
   const standard = await waitFor(standardManager, standardManager.start('/tmp/test.asi', 'standard').id);
   assert.equal(standard.finalResult.verdict, 'safe', 'simulation must not rewrite Standard verdict');
+  assert.equal(standard.finalResult.localResult.mode, 'pro', 'Standard should use the hardened multi-layer scanner engine');
   assert.equal(standard.finalResult.gtaSimulation.ok, true);
   assert.equal(standard.finalResult.gtaSimulation.model, 'standard');
   assert.equal(standard.finalResult.gtaSimulation.verdictPolicy.canPromoteSafe, false);

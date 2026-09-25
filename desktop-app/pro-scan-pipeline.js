@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const path = require('path');
 
-const PIPELINE_VERSION = '1.5.1';
+const PIPELINE_VERSION = '1.6.0';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
@@ -270,11 +270,11 @@ class ModelScanPipelineManager {
   }
 
   async _runStandard(session) {
-    this._emit(session, 'standard_scan', 'running', 'Running Standard local scan');
-    const local = await this.scanner.scanPath(session.filePath, 'free');
+    this._emit(session, 'standard_scan', 'running', 'Running hardened Standard multi-layer local scan');
+    const local = await this.scanner.scanPath(session.filePath, 'pro');
     session.localResult = clone(local);
     const verdict = normalizeVerdict(local && local.finalVerdict);
-    this._emit(session, 'standard_scan', 'completed', 'Standard scan completed', {
+    this._emit(session, 'standard_scan', 'completed', 'Hardened Standard multi-layer scan completed', {
       verdict,
       sha256: local && local.contentSha256 ? local.contentSha256 : (local && local.sourceIdentity ? local.sourceIdentity.sha256 : null),
     });

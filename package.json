@@ -1,6 +1,6 @@
 {
   "name": "malguard-core",
-  "version": "0.8.0-beta.3",
+  "version": "0.8.0-beta.4",
   "private": true,
   "license": "MIT",
   "description": "MalGuard open-source defensive game security core and local control service",
