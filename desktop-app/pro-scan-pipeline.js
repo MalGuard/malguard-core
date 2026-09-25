@@ -223,6 +223,7 @@ class ModelScanPipelineManager {
     session.updatedAt = this.now();
     await this._attachGtaSimulationAndAiEvidence(session);
     if (session.state !== 'failed') {
+      session.state = 'completed';
       session.updatedAt = this.now();
     }
   }
