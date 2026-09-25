@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const path = require('path');
 
-const PIPELINE_VERSION = '1.5.0';
+const PIPELINE_VERSION = '1.5.1';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
@@ -302,7 +302,8 @@ class ModelScanPipelineManager {
 
     let cloudInspectionResult = null;
     let gtaCloudSimulationResult = null;
-    if (session.allowCloudFallback === true && pluginDirectExecutionUnsupported && this.gtaCloudSimulation) {
+    const gtaPlugin = GTA_PLUGIN_EXTENSIONS.has(path.extname(session.filePath).toLowerCase());
+    if (session.allowCloudFallback === true && gtaPlugin && this.gtaCloudSimulation) {
       this._emit(session, 'gta_cloud_simulation', 'running', 'Creating a disposable isolated GTA simulation environment', {
         execution: 'no-sample-execution',
         retention: 'destroy-after-run',
