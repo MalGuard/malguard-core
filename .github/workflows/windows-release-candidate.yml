@@ -215,6 +215,14 @@ jobs:
             Write-Host ("PE architecture PASS: {0} = 0x{1:X4}" -f $file,$actual)
           }
 
+      - name: Prove independent engines execute on benign release binary
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node -e "const {runExternalEngines}=require('./desktop-app/multiengine/external-engine-runner.js'); (async()=>{const r=await runExternalEngines('desktop-app/bin/MalGuard.exe'); console.log(JSON.stringify(r,null,2)); for(const n of ['yara_x','capa']){const e=r.engines.find(x=>x.name===n); if(!e||e.status==='unavailable'||e.status==='error') throw new Error(n+' did not execute');}})().catch(e=>{console.error(e);process.exit(1)})"
+          if ($LASTEXITCODE -ne 0) { throw 'independent engine smoke test failed' }
+
       - name: Run Sandbox and release hardening regressions
         shell: pwsh
         run: |
