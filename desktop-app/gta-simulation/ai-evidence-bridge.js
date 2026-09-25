@@ -1,6 +1,6 @@
 'use strict';
 
-const AI_EVIDENCE_SCHEMA_VERSION = '1.0.0';
+const AI_EVIDENCE_SCHEMA_VERSION = '1.1.0';
 const ALLOWED_ACTIONS = new Set([
   'keep_blocked',
   'quarantine_sample',
@@ -59,8 +59,18 @@ class AiEvidenceBridge {
       scanner: localResult && typeof localResult === 'object'
         ? {
             finalVerdict: localResult.finalVerdict || 'inconclusive',
-            hardeningError: localResult.hardeningError || null,
+            hardeningError: boundedString(localResult.hardeningError || '', 240),
             threatIntelStatus: localResult.threatIntel && localResult.threatIntel.status || null,
+            threatIntelSource: localResult.threatIntel && localResult.threatIntel.source || null,
+            detector: localResult.detectorResult && typeof localResult.detectorResult === 'object' ? {
+              modType: boundedString(localResult.detectorResult.modType || '', 80),
+              route: boundedString(localResult.detectorResult.route || '', 80),
+              confidence: boundedString(localResult.detectorResult.confidence || '', 40),
+              suspiciousPackaging: localResult.detectorResult.suspiciousPackaging === true,
+            } : null,
+            archiveVerdict: localResult.archiveInspection && localResult.archiveInspection.finalVerdict || null,
+            scriptVerdict: localResult.scriptAnalysis && localResult.scriptAnalysis.finalVerdict || null,
+            multiLayer: localResult.multiLayer === true,
           }
         : null,
     };
