@@ -81,6 +81,7 @@ const tests=[
  'local-file-upload.test.js',
  'model-selection-ui.test.js',
  'scanner-feedback-ui.test.js',
+ 'tsh.test.js',
 ];
 for(const test of tests){
  const started=Date.now();
