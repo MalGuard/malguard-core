@@ -21,7 +21,7 @@ const {
 } = require('../desktop-app/gta-simulation/ai-evidence-bridge.js');
 const { ScannerBridge } = require('../desktop-app/scanner-bridge.js');
 
-const VALID_VERDICTS = new Set(['safe', 'suspicious', 'malicious', 'inconclusive']);
+const VALID_VERDICTS = new Set(['safe', 'suspicious', 'malicious', 'inconclusive', 'invalid']);
 const CORPUS = path.join(__dirname, 'corpus');
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -299,9 +299,10 @@ function sandboxMock(overrides = {}) {
       }
       const result = await bridgeScanner.scanBuffer('tsh-' + i + path.extname(name), bytes, 'pro');
       assert(result && typeof result === 'object');
-      assert(VALID_VERDICTS.has(result.finalVerdict), 'TSH mutation produced invalid verdict');
+      assert(VALID_VERDICTS.has(result.finalVerdict), 'TSH mutation produced an unknown verdict token');
+      if (result.hardeningError) assert.notEqual(result.finalVerdict, 'safe', 'TSH hardening failure must never emit SAFE');
       mutatedScans++;
-      checks += 2;
+      checks += result.hardeningError ? 3 : 2;
     }
   }
   assert.equal(mutatedScans, 256);
