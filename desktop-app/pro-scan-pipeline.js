@@ -135,7 +135,7 @@ class ModelScanPipelineManager {
       gtaSimulationResult: null,
       aiEvidenceResult: null,
       allowCloudFallback: allowCloudFallback === true,
-      allowAiEvidence: allowAiEvidence === true,
+      allowAiEvidence: allowAiEvidence !== false,
       finalResult: null,
       error: null,
     };
@@ -207,7 +207,7 @@ class ModelScanPipelineManager {
     }
 
     if (this.aiEvidence) {
-      if (session.allowAiEvidence !== true) {
+      if (session.allowAiEvidence === false) {
         const capabilities = typeof this.aiEvidence.capabilities === 'function' ? this.aiEvidence.capabilities() : { available: false };
         const skipped = {
           ok: true,
@@ -219,7 +219,7 @@ class ModelScanPipelineManager {
         };
         session.aiEvidenceResult = skipped;
         session.finalResult.aiEvidence = skipped;
-        this._emit(session, 'ai_evidence', 'warning', 'MalGuard AI evidence analysis is available but was not requested', {
+        this._emit(session, 'ai_evidence', 'warning', 'MalGuard AI evidence analysis was explicitly disabled for this scan', {
           available: skipped.available,
           status: skipped.status,
           fileBytesShared: false,
