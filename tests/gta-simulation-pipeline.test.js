@@ -129,6 +129,36 @@ function sandbox({ unsupportedPlugin = false } = {}) {
   assert.equal(pro.finalResult.aiEvidence.available, false);
   assert(pro.events.some(event => event.phase === 'gta_cloud_simulation' && event.status === 'completed'));
 
+  let outageGtaCloudCalls = 0;
+  let outageGenericCloudCalls = 0;
+  const outageManager = new ModelScanPipelineManager({
+    scanner: baseScanner('safe'),
+    sandbox: sandbox(),
+    cloudInspection: { inspect: async () => { outageGenericCloudCalls++; return { ok: true }; } },
+    gtaCloudSimulation: {
+      simulate: async () => {
+        outageGtaCloudCalls++;
+        return {
+          ok: true,
+          mode: 'cloud_gta_simulation',
+          sampleExecutionAttempted: false,
+          sampleExecutionStarted: false,
+          report: { treeReady: true, sampleExecutionAttempted: false, sampleExecutionStarted: false },
+          isolation: { ephemeral: true, networkPolicy: 'deny-all', hostFallback: false, destroyAfterRun: true, syntheticGameEnvironment: true },
+        };
+      },
+    },
+    gtaSimulation,
+    aiEvidence,
+  });
+  const outage = await waitFor(outageManager, outageManager.start('/tmp/outage-test.asi', 'pro', { allowCloudFallback: true }).id);
+  assert.equal(outage.finalResult.reasonCode, 'NO_ISOLATION_BACKEND_AVAILABLE');
+  assert.equal(outage.finalResult.pluginDirectExecutionUnsupported, false, 'local outage is distinct from unsupported plugin execution');
+  assert.equal(outageGtaCloudCalls, 1, 'GTA plugin must route to cloud GTA simulation after a local sandbox outage');
+  assert.equal(outageGenericCloudCalls, 0, 'GTA plugin outage fallback must not use generic cloud inspection when GTA simulation is available');
+  assert.equal(outage.finalResult.gtaCloudSimulationCompleted, true);
+  assert(outage.events.some(event => event.phase === 'gta_cloud_simulation' && event.status === 'completed'));
+
   console.log('✓ GTA Simulation integration: Standard, Plus and Pro all receive synthetic context without changing verdict safety PASS');
 })().catch(error => {
   console.error(error.stack || error);
