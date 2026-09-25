@@ -33,6 +33,7 @@ const STAGES = Object.freeze({
       'malguard-cloud-ai-provider.test.js',
       'pro-scan-pipeline.test.js',
       'fusion-engine.test.js',
+      'multiengine-fusion.test.js',
     ],
   },
   stage2: {
