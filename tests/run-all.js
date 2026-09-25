@@ -54,6 +54,8 @@ const tests=[
  'ai-evidence-bridge.test.js',
  'malguard-cloud-ai-provider.test.js',
  'gta-simulation-pipeline.test.js',
+ 'gta-plugin-certified-routing.test.js',
+ 'gta-plugin-sandbox-loader.test.js',
  'sandbox-first-run-certification.test.js',
  'virtual-windows-validation-lab.test.js',
  'embedded-validation-lab.test.js',
