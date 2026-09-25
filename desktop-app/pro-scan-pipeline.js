@@ -59,13 +59,14 @@ function deepStaticFallbackVerdict(localResult) {
 }
 
 class ModelScanPipelineManager {
-  constructor({ scanner, sandbox, cloudInspection = null, gtaSimulation = null, aiEvidence = null, now = () => Date.now(), ttlMs = DEFAULT_TTL_MS, maxSessions = 32 } = {}) {
+  constructor({ scanner, sandbox, cloudInspection = null, gtaCloudSimulation = null, gtaSimulation = null, aiEvidence = null, now = () => Date.now(), ttlMs = DEFAULT_TTL_MS, maxSessions = 32 } = {}) {
     if (!scanner || typeof scanner.scanPath !== 'function') throw new TypeError('scanner.scanPath is required');
     if (!sandbox || typeof sandbox.analyzeUntrustedSample !== 'function') throw new TypeError('sandbox.analyzeUntrustedSample is required');
     if (typeof sandbox.preflightSample !== 'function') throw new TypeError('sandbox.preflightSample is required');
     this.scanner = scanner;
     this.sandbox = sandbox;
     this.cloudInspection = cloudInspection && typeof cloudInspection.inspect === 'function' ? cloudInspection : null;
+    this.gtaCloudSimulation = gtaCloudSimulation && typeof gtaCloudSimulation.simulate === 'function' ? gtaCloudSimulation : null;
     this.gtaSimulation = gtaSimulation && typeof gtaSimulation.analyze === 'function' ? gtaSimulation : null;
     this.aiEvidence = aiEvidence && typeof aiEvidence.analyze === 'function' ? aiEvidence : null;
     this.now = now;
@@ -130,6 +131,7 @@ class ModelScanPipelineManager {
       preflight: null,
       sandboxResult: null,
       cloudInspectionResult: null,
+      gtaCloudSimulationResult: null,
       gtaSimulationResult: null,
       aiEvidenceResult: null,
       allowCloudFallback: allowCloudFallback === true,
@@ -208,7 +210,7 @@ class ModelScanPipelineManager {
         this._emit(session, 'ai_evidence', 'running', 'Preparing bounded evidence for the AI analysis interface');
         const ai = await this.aiEvidence.analyze({
           model: session.model,
-          simulation: session.gtaSimulationResult,
+          simulation: { local: session.gtaSimulationResult, isolated: session.gtaCloudSimulationResult },
           localResult: session.localResult,
         });
         session.aiEvidenceResult = clone(ai);
@@ -272,7 +274,29 @@ class ModelScanPipelineManager {
     const finalVerdict = deepStaticFallbackVerdict(local);
 
     let cloudInspectionResult = null;
-    if (session.allowCloudFallback === true && this.cloudInspection) {
+    let gtaCloudSimulationResult = null;
+    if (session.allowCloudFallback === true && pluginDirectExecutionUnsupported && this.gtaCloudSimulation) {
+      this._emit(session, 'gta_cloud_simulation', 'running', 'Creating a disposable isolated GTA simulation environment', {
+        execution: 'no-sample-execution',
+        retention: 'destroy-after-run',
+      });
+      gtaCloudSimulationResult = await this.gtaCloudSimulation.simulate(session.filePath);
+      session.gtaCloudSimulationResult = clone(gtaCloudSimulationResult);
+      cloudInspectionResult = gtaCloudSimulationResult;
+      session.cloudInspectionResult = clone(gtaCloudSimulationResult);
+      if (gtaCloudSimulationResult && gtaCloudSimulationResult.ok === true) {
+        this._emit(session, 'gta_cloud_simulation', 'completed', 'Disposable isolated GTA simulation completed; environment destroyed after the job', {
+          treeReady: !!(gtaCloudSimulationResult.report && gtaCloudSimulationResult.report.treeReady),
+          sampleExecutionAttempted: false,
+          destroyAfterRun: true,
+        });
+      } else {
+        this._emit(session, 'gta_cloud_simulation', 'blocked', 'Isolated GTA simulation was unavailable; local fail-closed result preserved', {
+          code: gtaCloudSimulationResult && gtaCloudSimulationResult.code || 'GTA_CLOUD_SIMULATION_UNAVAILABLE',
+          sampleExecutionAttempted: false,
+        });
+      }
+    } else if (session.allowCloudFallback === true && this.cloudInspection) {
       this._emit(session, 'cloud_ephemeral_inspection', 'running', 'Uploading a bounded copy for disposable cloud inspection', {
         execution: 'inspection-only',
         retention: 'destroy-after-run',
@@ -327,11 +351,13 @@ class ModelScanPipelineManager {
       pluginDirectExecutionUnsupported: pluginDirectExecutionUnsupported === true,
       cloudFallbackRequested: session.allowCloudFallback === true,
       cloudInspectionCompleted: !!(cloudInspectionResult && cloudInspectionResult.ok === true),
+      gtaCloudSimulationCompleted: !!(gtaCloudSimulationResult && gtaCloudSimulationResult.ok === true),
       reasonCode: reasonCode || 'SANDBOX_UNAVAILABLE',
       localResult: clone(local),
       ...(preflight ? { preflight: clone(preflight) } : {}),
       ...(sandboxResult ? { sandboxResult: clone(sandboxResult) } : {}),
       ...(cloudInspectionResult ? { cloudInspectionResult: clone(cloudInspectionResult) } : {}),
+      ...(gtaCloudSimulationResult ? { gtaCloudSimulationResult: clone(gtaCloudSimulationResult) } : {}),
     };
     session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()} (deep static fallback)`, {
@@ -343,6 +369,7 @@ class ModelScanPipelineManager {
       sandboxCompleted: false,
       pluginDirectExecutionUnsupported: pluginDirectExecutionUnsupported === true,
       cloudInspectionCompleted: !!(cloudInspectionResult && cloudInspectionResult.ok === true),
+      gtaCloudSimulationCompleted: !!(gtaCloudSimulationResult && gtaCloudSimulationResult.ok === true),
     });
   }
 
