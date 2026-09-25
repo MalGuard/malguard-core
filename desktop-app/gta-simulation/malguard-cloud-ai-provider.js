@@ -2,6 +2,7 @@
 
 const DEFAULT_ENDPOINT = 'https://malware-ai-gray.vercel.app/api/chat';
 const DEFAULT_TIMEOUT_MS = 15000;
+const MAX_RESPONSE_BYTES = 128 * 1024;
 
 const MODEL_MAP = Object.freeze({
   standard: 'fast',
@@ -167,7 +168,19 @@ class MalGuardCloudAiProvider {
         error.code = 'AI_EVIDENCE_HTTP_FAILED';
         throw error;
       }
-      const data = await response.json();
+      const rawBody = await response.text();
+      if (Buffer.byteLength(rawBody, 'utf8') > MAX_RESPONSE_BYTES) {
+        const error = new Error('AI evidence response too large');
+        error.code = 'AI_EVIDENCE_RESPONSE_TOO_LARGE';
+        throw error;
+      }
+      let data;
+      try { data = JSON.parse(rawBody); }
+      catch (_) {
+        const error = new Error('AI evidence response was not valid JSON');
+        error.code = 'AI_EVIDENCE_RESPONSE_INVALID_JSON';
+        throw error;
+      }
       const answer = typeof data.text === 'string' && data.text.trim()
         ? data.text
         : typeof data.response === 'string'
@@ -189,6 +202,7 @@ module.exports = {
   MalGuardCloudAiProvider,
   DEFAULT_ENDPOINT,
   DEFAULT_TIMEOUT_MS,
+  MAX_RESPONSE_BYTES,
   MODEL_MAP,
   compactEvidence,
   parseJsonAnswer,
