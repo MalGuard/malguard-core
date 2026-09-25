@@ -99,7 +99,7 @@ function sandbox({ unsupportedPlugin = false } = {}) {
   let genericCloudCalls = 0;
   const proManager = new ModelScanPipelineManager({
     scanner: baseScanner('safe'),
-    sandbox: sandbox({ unsupportedPlugin: true }),
+    sandbox: sandbox(),
     cloudInspection: { inspect: async () => { genericCloudCalls++; return { ok: true }; } },
     gtaCloudSimulation: {
       simulate: async () => {
@@ -119,7 +119,7 @@ function sandbox({ unsupportedPlugin = false } = {}) {
   });
   const pro = await waitFor(proManager, proManager.start('/tmp/test.asi', 'pro', { allowCloudFallback: true }).id);
   assert.equal(pro.finalResult.verdict, 'inconclusive', 'non-executing Pro plugin fallback must remain fail-closed');
-  assert.equal(pro.finalResult.pluginDirectExecutionUnsupported, true);
+  assert.equal(pro.finalResult.pluginDirectExecutionUnsupported, true, 'ASI fallback must stay on GTA simulation path when certified Windows execution is unavailable');
   assert.equal(gtaCloudCalls, 1, 'GTA plugin fallback should use the isolated GTA simulation service');
   assert.equal(genericCloudCalls, 0, 'GTA plugin fallback should not duplicate the upload with generic cloud inspection');
   assert.equal(pro.finalResult.gtaCloudSimulationCompleted, true);
