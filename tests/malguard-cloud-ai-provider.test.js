@@ -20,7 +20,23 @@ const {
     scanner: {
       finalVerdict: 'suspicious',
       hardeningError: null,
-      threatIntelStatus: 'unavailable',
+      threatIntel: {
+        status: 'known_malicious',
+        source: 'cache',
+        signature: 'Test.Signature',
+        fileType: 'dll',
+        tags: ['gta-mod','test'],
+      },
+      detector: { modType:'plugin', route:'ENGINE', confidence:'high', suspiciousPackaging:false },
+      engine: {
+        verdict:'suspicious', score:61, confidence:'high', rulesStatus:'official', peValid:true,
+        riskFloorApplied:'suspicious', gtaContextDetected:true,
+        evidence:[{rule:'IMP-TEST',category:'process_injection',severity:'high',confidence:'high',weight:20}],
+        pe:{is64:true,numberOfSections:6,namedImportCount:24,ordinalImportCount:0,tlsPresent:false,overlayPresent:false},
+      },
+      script: null,
+      archive: null,
+      multiLayer: { verdict:'suspicious', decisionReason:'rule_evidence', conflict:false, gates:[{gate:'rule_evidence',result:'SUSPICIOUS'}] },
       contentSha256: 'f'.repeat(64),
       path: 'C:\\Secret\\menu.asi',
     },
@@ -54,6 +70,10 @@ const {
   assert(!compactJson.includes('C:\\Secret'), 'full paths must not enter AI evidence');
   assert(!compactJson.includes('f'.repeat(64)), 'SHA-256 must not enter AI evidence');
   assert(!Object.prototype.hasOwnProperty.call(compact.scanner, 'contentSha256'));
+  assert.equal(compact.scanner.threatIntel.status, 'known_malicious');
+  assert.equal(compact.scanner.detector.modType, 'plugin');
+  assert.equal(compact.scanner.engine.evidence[0].category, 'process_injection');
+  assert.equal(compact.scanner.multiLayer.gates[0].result, 'SUSPICIOUS');
   assert.equal(compact.gtaSimulation.extension, '.asi');
   assert.equal(compact.isolatedSimulation.destroyAfterRun, true);
 
@@ -88,7 +108,12 @@ const {
     scanner: {
       finalVerdict: 'suspicious',
       hardeningError: null,
-      threatIntelStatus: 'unavailable',
+      threatIntel: { status: 'unavailable', source: 'live', signature: null, fileType: null, tags: [] },
+      detector: { modType:'plugin', route:'ENGINE', confidence:'high', suspiciousPackaging:false },
+      engine: { verdict:'suspicious', score:58, confidence:'medium', rulesStatus:'official', peValid:true, evidence:[], pe:null },
+      script: null,
+      archive: null,
+      multiLayer: null,
     },
     simulation: {
       local: {
