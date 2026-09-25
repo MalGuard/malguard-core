@@ -71,18 +71,39 @@ function sandbox({ unsupportedPlugin = false } = {}) {
   assert.equal(plus.finalResult.gtaSimulation.remediationPlan.hostMutationAllowed, false);
   assert.equal(plus.finalResult.aiEvidence.onlineLearning, false);
 
+  let gtaCloudCalls = 0;
+  let genericCloudCalls = 0;
   const proManager = new ModelScanPipelineManager({
     scanner: baseScanner('safe'),
     sandbox: sandbox({ unsupportedPlugin: true }),
+    cloudInspection: { inspect: async () => { genericCloudCalls++; return { ok: true }; } },
+    gtaCloudSimulation: {
+      simulate: async () => {
+        gtaCloudCalls++;
+        return {
+          ok: true,
+          mode: 'cloud_gta_simulation',
+          sampleExecutionAttempted: false,
+          sampleExecutionStarted: false,
+          report: { treeReady: true, sampleExecutionAttempted: false, sampleExecutionStarted: false },
+          isolation: { ephemeral: true, networkPolicy: 'deny-all', hostFallback: false, destroyAfterRun: true, syntheticGameEnvironment: true },
+        };
+      },
+    },
     gtaSimulation,
     aiEvidence,
   });
-  const pro = await waitFor(proManager, proManager.start('/tmp/test.asi', 'pro').id);
+  const pro = await waitFor(proManager, proManager.start('/tmp/test.asi', 'pro', { allowCloudFallback: true }).id);
   assert.equal(pro.finalResult.verdict, 'inconclusive', 'non-executing Pro plugin fallback must remain fail-closed');
   assert.equal(pro.finalResult.pluginDirectExecutionUnsupported, true);
+  assert.equal(gtaCloudCalls, 1, 'GTA plugin fallback should use the isolated GTA simulation service');
+  assert.equal(genericCloudCalls, 0, 'GTA plugin fallback should not duplicate the upload with generic cloud inspection');
+  assert.equal(pro.finalResult.gtaCloudSimulationCompleted, true);
+  assert.equal(pro.finalResult.gtaCloudSimulationResult.sampleExecutionAttempted, false);
   assert.equal(pro.finalResult.gtaSimulation.model, 'pro');
   assert.equal(pro.finalResult.gtaSimulation.sampleProfile.directExecutionAttempted, false);
   assert.equal(pro.finalResult.aiEvidence.available, false);
+  assert(pro.events.some(event => event.phase === 'gta_cloud_simulation' && event.status === 'completed'));
 
   console.log('✓ GTA Simulation integration: Standard, Plus and Pro all receive synthetic context without changing verdict safety PASS');
 })().catch(error => {
