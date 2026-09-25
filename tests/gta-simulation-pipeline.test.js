@@ -20,6 +20,7 @@ function baseScanner(verdict) {
       finalVerdict: verdict,
       mode,
       contentSha256: 'a'.repeat(64),
+      sourceIdentity: { sha256: 'a'.repeat(64), revalidated: true },
       detectorResult: { modType: 'plugin', route: 'ENGINE', confidence: 'high', suspiciousPackaging: false },
       threatIntel: { status: 'disabled' },
     }),
@@ -61,12 +62,14 @@ function sandbox({ unsupportedPlugin = false } = {}) {
   assert(standard.events.some(event => event.phase === 'gta_simulation' && event.status === 'completed'));
 
   let aiCalls = 0;
+  let capturedAiEvidence = null;
   const realAiBridge = new AiEvidenceBridge({
     provider: {
       name: 'test-malguard-ai',
       available: () => true,
-      analyzeEvidence: async () => {
+      analyzeEvidence: async evidence => {
         aiCalls++;
+        capturedAiEvidence = evidence;
         return { risk: 'low', summary: 'No strong malicious evidence in the bounded metadata.', recommendedActions: ['review_evidence'] };
       },
     },
@@ -77,11 +80,16 @@ function sandbox({ unsupportedPlugin = false } = {}) {
     gtaSimulation,
     aiEvidence: realAiBridge,
   });
-  const aiStandard = await waitFor(aiManager, aiManager.start('/tmp/ai-test.asi', 'standard', { allowAiEvidence: true }).id);
+  const aiStart = aiManager.start('/tmp/ai-test.asi', 'standard', { allowAiEvidence: true });
+  const aiStandard = await waitFor(aiManager, aiStart.id);
   assert.equal(aiCalls, 1);
+  assert.equal(aiStandard.state, 'completed', 'session must not become completed before AI evidence correlation finishes');
   assert.equal(aiStandard.finalResult.verdict, 'inconclusive', 'AI low-risk advice must never promote an inconclusive scan to SAFE');
   assert.equal(aiStandard.finalResult.aiEvidence.status, 'completed');
   assert.equal(aiStandard.finalResult.aiEvidence.risk, 'low');
+  assert.equal(capturedAiEvidence.scanner.detector.modType, 'plugin');
+  assert.equal(capturedAiEvidence.scanner.detector.confidence, 'high');
+  assert.equal(capturedAiEvidence.scanner.threatIntel.status, 'disabled');
   assert(aiStandard.events.some(event => event.phase === 'ai_evidence' && event.status === 'completed'));
 
   const plusManager = new ModelScanPipelineManager({

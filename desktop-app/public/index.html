@@ -34,8 +34,8 @@
         <span id="modelHint" class="muted">Standard hardened multi-layer local protection.</span>
       </div>
       <label id="cloudFallbackOption" class="cloud-fallback-option" hidden>
-        <input id="cloudFallback" type="checkbox">
-        <span><strong>Use disposable GTA Cloud Simulation if local behavioral isolation is unavailable</strong><small>Opt-in for Plus/Pro. ASI/DLL plugins are staged inside a fresh synthetic GTA filesystem with deny-all networking. The sample is not executed in this simulation phase, and the environment is destroyed after the job.</small></span>
+        <input id="cloudFallback" type="checkbox" checked>
+        <span><strong>Use disposable GTA Cloud Simulation if local behavioral isolation is unavailable</strong><small>Enabled by default for Plus/Pro when internet is available. ASI/DLL plugins are staged inside a fresh synthetic GTA filesystem with deny-all networking. The sample is not executed in this simulation phase, and the environment is destroyed after the job.</small></span>
       </label>
       <label id="aiEvidenceOption" class="cloud-fallback-option">
         <input id="aiEvidence" type="checkbox" checked>
@@ -47,7 +47,7 @@
         <summary>Scan diagnostics</summary>
         <pre id="modelDiagnosticsOut">No diagnostic data yet.</pre>
       </details>
-      <p class="muted">Standard uses the hardened multi-layer local engine for GTA mod .asi and .dll files. ZIP packages and scripts need Plus or Pro when available. PDF files are outside GTA Guard scanning. Files up to 64 MB. Temporary local copies are removed after scanning.</p>
+      <p class="muted">Standard uses the hardened multi-layer local engine for GTA .asi/.dll plugins, .lua/.cs scripts and supported .zip mod packages. PDF files and unsupported archive formats remain outside Standard coverage. Files up to 64 MB. Temporary local copies are removed after scanning.</p>
       <details class="diagnostics"><summary>Advanced: enter a full file path instead</summary><input id="scanPath" aria-label="Full path to a file on this PC" placeholder="C:\Games\GTA V\mods\example.asi"></details>
       <div id="modelFlow">
         <h3 id="modelFlowTitle">Analysis flow</h3>

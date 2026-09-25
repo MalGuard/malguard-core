@@ -66,15 +66,16 @@ async function waitSession(port,id){
     assert.equal(ent.body.entitlement.plan,'pro');
 
     const safeFile = path.join(__dirname,'corpus','benign-config-read.lua');
-    let started = await request(port,'POST','/api/model-scan/start',{path:safeFile,model:'standard'});
+    let started = await request(port,'POST','/api/model-scan/start',{path:safeFile,model:'standard',aiEvidence:false});
     assert.equal(started.status,202);
     assert.equal(started.body.entitlement.plan,'pro');
     let session=await waitSession(port,started.body.session.id);
     assert.equal(session.model,'standard');
     assert.equal(session.finalResult.sandboxRequested,false);
+    assert.equal(session.finalResult.aiEvidence.status,'not_requested');
 
     const suspiciousFile = path.join(__dirname,'corpus','suspicious-cs-powershell.cs');
-    started = await request(port,'POST','/api/model-scan/start',{path:suspiciousFile,model:'plus'});
+    started = await request(port,'POST','/api/model-scan/start',{path:suspiciousFile,model:'plus',aiEvidence:false});
     assert.equal(started.status,202);
     assert.equal(started.body.entitlement.plan,'pro');
     session=await waitSession(port,started.body.session.id);
@@ -85,7 +86,7 @@ async function waitSession(port,id){
 
     const jsFile=path.join(tempDir,'sample.js');
     await fs.promises.writeFile(jsFile,'console.log("sandbox probe fixture");\n');
-    started = await request(port,'POST','/api/model-scan/start',{path:jsFile,model:'pro'});
+    started = await request(port,'POST','/api/model-scan/start',{path:jsFile,model:'pro',aiEvidence:false});
     assert.equal(started.status,202);
     assert.equal(started.body.entitlement.plan,'pro');
     session=await waitSession(port,started.body.session.id);
@@ -100,7 +101,7 @@ async function waitSession(port,id){
     assert.equal(invalid.status,400);
     assert.equal(invalid.body.code,'INVALID_MODEL');
 
-    const legacy=await request(port,'POST','/api/pro-scan/start',{path:safeFile});
+    const legacy=await request(port,'POST','/api/pro-scan/start',{path:safeFile,aiEvidence:false});
     assert.equal(legacy.status,202);
     assert.equal(legacy.body.deprecated,true);
     assert.equal(legacy.body.mappedModel,'plus');

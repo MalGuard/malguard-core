@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const path = require('path');
 
-const PIPELINE_VERSION = '1.6.0';
+const PIPELINE_VERSION = '1.7.0';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
@@ -56,6 +56,36 @@ function deepStaticFallbackVerdict(localResult) {
   if (verdict === 'malicious' || verdict === 'suspicious') return verdict;
   // Without dynamic execution, fallback analysis never upgrades a sample to SAFE.
   return 'inconclusive';
+}
+
+function standardVerdictWithCoverage(localResult) {
+  const verdict = normalizeVerdict(localResult && localResult.finalVerdict);
+  const coverageIssues = [];
+  if (verdict !== 'safe') return { verdict, coverageIssues, fullCoverage: verdict !== 'inconclusive' };
+
+  if (!localResult || typeof localResult !== 'object') coverageIssues.push('scanner_result_missing');
+  if (localResult && localResult.hardeningError) coverageIssues.push('hardening_error');
+  if (!localResult || !localResult.sourceIdentity || localResult.sourceIdentity.revalidated !== true) {
+    coverageIssues.push('source_identity_not_revalidated');
+  }
+
+  const engine = localResult && localResult.engineResult;
+  if (engine && engine.rulesStatus && engine.rulesStatus !== 'official') coverageIssues.push('rules_not_official');
+  if (engine && engine.peValid !== true) coverageIssues.push('pe_not_fully_validated');
+
+  const script = localResult && localResult.scriptAnalysis;
+  if (script && (script.supported !== true || script.errorCode)) coverageIssues.push('script_analysis_incomplete');
+
+  const archive = localResult && localResult.archiveInspection;
+  if (archive && (archive.inspectionSucceeded !== true || archive.inspectionStatus === 'completed_partial_timeout')) {
+    coverageIssues.push('archive_analysis_incomplete');
+  }
+
+  return {
+    verdict: coverageIssues.length ? 'inconclusive' : 'safe',
+    coverageIssues,
+    fullCoverage: coverageIssues.length === 0,
+  };
 }
 
 class ModelScanPipelineManager {
@@ -184,7 +214,18 @@ class ModelScanPipelineManager {
     if (session.model === 'standard') await this._runStandard(session);
     else if (session.model === 'plus') await this._runPlus(session);
     else await this._runPro(session);
+
+    // A model-specific scan may have produced its base verdict already, but the
+    // session is not externally complete until synthetic GTA context and AI
+    // evidence have either completed or failed closed. This prevents polling
+    // clients from observing a "completed" session before AI correlation lands.
+    session.state = 'finalizing';
+    session.updatedAt = this.now();
     await this._attachGtaSimulationAndAiEvidence(session);
+    if (session.state !== 'failed') {
+      session.state = 'completed';
+      session.updatedAt = this.now();
+    }
   }
 
   async _attachGtaSimulationAndAiEvidence(session) {
@@ -273,19 +314,22 @@ class ModelScanPipelineManager {
     this._emit(session, 'standard_scan', 'running', 'Running hardened Standard multi-layer local scan');
     const local = await this.scanner.scanPath(session.filePath, 'pro');
     session.localResult = clone(local);
-    const verdict = normalizeVerdict(local && local.finalVerdict);
+    const coverage = standardVerdictWithCoverage(local);
+    const verdict = coverage.verdict;
     this._emit(session, 'standard_scan', 'completed', 'Hardened Standard multi-layer scan completed', {
       verdict,
+      fullCoverage: coverage.fullCoverage,
+      coverageIssues: coverage.coverageIssues,
       sha256: local && local.contentSha256 ? local.contentSha256 : (local && local.sourceIdentity ? local.sourceIdentity.sha256 : null),
     });
     session.finalResult = {
       model: 'standard',
       verdict,
-      completionState: 'complete',
+      completionState: coverage.fullCoverage ? 'complete' : 'complete_with_coverage_limits',
       sandboxRequested: false,
+      coverage: clone(coverage),
       localResult: clone(local),
     };
-    session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${verdict.toUpperCase()}`, { verdict, model: 'standard' });
   }
 
@@ -387,7 +431,6 @@ class ModelScanPipelineManager {
       ...(cloudInspectionResult ? { cloudInspectionResult: clone(cloudInspectionResult) } : {}),
       ...(gtaCloudSimulationResult ? { gtaCloudSimulationResult: clone(gtaCloudSimulationResult) } : {}),
     };
-    session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()} (deep static fallback)`, {
       verdict: finalVerdict,
       model,
@@ -444,7 +487,6 @@ class ModelScanPipelineManager {
         sandboxRequested: false,
         localResult: clone(local),
       };
-      session.state = 'completed';
       this._emit(session, 'final_verdict', 'completed', `Final verdict: ${localVerdict.toUpperCase()}`, { verdict: localVerdict, model: 'plus' });
       return;
     }
@@ -502,7 +544,6 @@ class ModelScanPipelineManager {
       localResult: clone(local),
       sandboxResult: clone(sandboxResult),
     };
-    session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()}`, {
       verdict: finalVerdict,
       model: 'plus',
@@ -549,7 +590,6 @@ class ModelScanPipelineManager {
         sandboxCompleted: false,
         preflight: clone(preflight || { ok: false, code: 'SANDBOX_PREFLIGHT_FAILED' }),
       };
-      session.state = 'completed';
       this._emit(session, 'final_verdict', 'completed', 'Final verdict: INCONCLUSIVE', {
         verdict: 'inconclusive', model: 'pro', sandboxStarted: false, sampleExecutionStarted: false, sandboxCompleted: false,
       });
@@ -608,7 +648,6 @@ class ModelScanPipelineManager {
       preflight: clone(preflight),
       sandboxResult: clone(sandboxResult),
     };
-    session.state = 'completed';
     this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()}`, {
       verdict: finalVerdict, model: 'pro', sandboxStarted: true, sampleExecutionStarted: true, sandboxCompleted: true,
     });
@@ -633,5 +672,6 @@ module.exports = {
   mergeSandboxVerdict,
   directSandboxVerdict,
   deepStaticFallbackVerdict,
+  standardVerdictWithCoverage,
   GTA_PLUGIN_EXTENSIONS,
 };

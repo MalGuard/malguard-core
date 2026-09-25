@@ -40,6 +40,7 @@ const tests=[
  'cloud-sandbox-vercel-runner.test.js',
  'cloud-sandbox-self-test-api.test.js',
  'cloud-sandbox-safe-execution.test.js',
+ 'cloud-sandbox-file-inspection.test.js',
  'cloud-sandbox-benign-upload-execution.test.js',
  'cloud-sandbox-benign-behavior-telemetry.test.js',
  'cloud-ephemeral-inspection-client.test.js',
@@ -52,6 +53,7 @@ const tests=[
  'gta-guard-sandbox-routing.test.js',
  'gta-simulation-engine.test.js',
  'ai-evidence-bridge.test.js',
+ 'malguard-cloud-ai-provider.test.js',
  'gta-simulation-pipeline.test.js',
  'gta-plugin-sandbox-loader.test.js',
  'sandbox-first-run-certification.test.js',
@@ -79,6 +81,7 @@ const tests=[
  'local-file-upload.test.js',
  'model-selection-ui.test.js',
  'scanner-feedback-ui.test.js',
+ 'tsh.test.js',
 ];
 for(const test of tests){
  const started=Date.now();

@@ -9,6 +9,7 @@ const {
   mergeSandboxVerdict,
   directSandboxVerdict,
   deepStaticFallbackVerdict,
+  standardVerdictWithCoverage,
 } = require('../desktop-app/pro-scan-pipeline.js');
 
 function waitFor(manager, id, timeoutMs = 2000) {
@@ -69,12 +70,17 @@ function executedResult(verdict, extra = {}) {
  assert.equal(deepStaticFallbackVerdict({finalVerdict:'malicious'}),'malicious');
  assert.equal(deepStaticFallbackVerdict({finalVerdict:'suspicious'}),'suspicious');
  assert.equal(deepStaticFallbackVerdict({finalVerdict:'safe'}),'inconclusive','static fallback must not claim SAFE without dynamic execution');
+ assert.deepEqual(standardVerdictWithCoverage({finalVerdict:'safe',sourceIdentity:{revalidated:true},engineResult:{rulesStatus:'official',peValid:true}}),{verdict:'safe',coverageIssues:[],fullCoverage:true});
+ const degradedStandard=standardVerdictWithCoverage({finalVerdict:'safe',sourceIdentity:{revalidated:false},engineResult:{rulesStatus:'fallback',peValid:true}});
+ assert.equal(degradedStandard.verdict,'inconclusive','Standard must not claim SAFE when identity/rules coverage is degraded');
+ assert(degradedStandard.coverageIssues.includes('source_identity_not_revalidated'));
+ assert(degradedStandard.coverageIssues.includes('rules_not_official'));
 
  // Standard uses the hardened multi-layer core but never uses Sandbox.
  let standardMode = null;
  let standardSandboxCalls = 0;
  const standardManager = new ModelScanPipelineManager({
-   scanner:{scanPath:async(_p,mode)=>{standardMode=mode;return {finalVerdict:'safe',contentSha256:'a'.repeat(64)}}},
+   scanner:{scanPath:async(_p,mode)=>{standardMode=mode;return {finalVerdict:'safe',contentSha256:'a'.repeat(64),sourceIdentity:{sha256:'a'.repeat(64),revalidated:true},scriptAnalysis:{supported:true,verdict:'safe',errorCode:null}}}},
    sandbox:sandboxMock({analyzeUntrustedSample:async()=>{standardSandboxCalls++;return executedResult('safe')}}),
  });
  const standard=await waitFor(standardManager,standardManager.start('/tmp/safe.lua','standard').id);
@@ -83,6 +89,29 @@ function executedResult(verdict, extra = {}) {
  assert.equal(standard.finalResult.sandboxRequested,false);
  assert.equal(standardMode,'pro');
  assert.equal(standardSandboxCalls,0);
+
+
+// Completion-state race regression: a slow AI provider must keep the public
+// session non-terminal until evidence attachment finishes.
+{
+ let releaseAi;
+ const slowAi = {
+   analyze: () => new Promise(resolve => { releaseAi = () => resolve({ok:true,status:'completed',risk:'low',summary:'bounded'}); }),
+ };
+ const manager = new ModelScanPipelineManager({
+   scanner:{scanPath:async()=>({finalVerdict:'safe',contentSha256:'9'.repeat(64),sourceIdentity:{sha256:'9'.repeat(64),revalidated:true},scriptAnalysis:{supported:true,verdict:'safe',errorCode:null}})},
+   sandbox:sandboxMock(),
+   aiEvidence:slowAi,
+ });
+ const started=manager.start('/tmp/slow.lua','standard',{allowAiEvidence:true});
+ for(let i=0;i<100 && typeof releaseAi!=='function';i++) await new Promise(r=>setTimeout(r,1));
+ const mid=manager.snapshot(started.id);
+ assert.notEqual(mid.state,'completed','session must not expose completed before AI evidence attachment finishes');
+ releaseAi();
+ const done=await waitFor(manager,started.id);
+ assert.equal(done.state,'completed');
+ assert.equal(done.finalResult.aiEvidence.status,'completed');
+}
 
  // Plus performs deep analysis first, then uses the same evidence as a no-execution fallback if Sandbox is unavailable.
  let plusMode = null;

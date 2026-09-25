@@ -11,9 +11,9 @@ async function status(){try{const s=await api('/api/status');$('status').textCon
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')});
 
 const MODEL_HINTS={
- standard:'Standard: local GTA plugin scan + synthetic GTA context. Optional metadata-only MalGuard AI analysis.',
- plus:'Plus: deep local analysis + synthetic GTA context + optional disposable isolated GTA simulation and MalGuard AI evidence analysis.',
- pro:'Pro: verified local behavioral analysis when possible + GTA simulation + optional isolated cloud simulation and MalGuard AI evidence analysis.',
+ standard:'Standard: hardened local analysis for GTA plugins, Lua/C# scripts and ZIP mod packages + synthetic GTA context + MalGuard AI evidence.',
+ plus:'Plus: deep local analysis + synthetic GTA context + disposable isolated GTA fallback and MalGuard AI evidence analysis when internet is available.',
+ pro:'Pro: verified local behavioral analysis when possible + GTA simulation + isolated cloud fallback and MalGuard AI evidence analysis when internet is available.',
 };
 const VERDICT_COPY={
  safe:{label:'Safe',tone:'safe',title:'No threat detected',message:'MalGuard completed the selected analysis and found no malicious behavior in the available evidence.'},
@@ -27,7 +27,7 @@ function aiEvidenceEnabled(){const box=$('aiEvidence');return !!(box&&box.checke
 function updateModelUi(){
  const model=currentModel();
  $('modelHint').textContent=MODEL_HINTS[model]||'';
- const cloudOption=$('cloudFallbackOption');if(cloudOption)cloudOption.hidden=model==='standard';
+ const cloudOption=$('cloudFallbackOption');if(cloudOption)cloudOption.hidden=model==='standard'; if(cloudOption&&model!=='standard'){const box=$('cloudFallback');if(box)box.checked=true;}
  $('modelFlow').hidden=false;
  $('modelFlowTitle').textContent=model==='pro'?'Pro secure analysis + GTA simulation':model==='plus'?'Plus deep analysis + GTA simulation':'Standard local analysis + GTA simulation';
  $('modelSteps').innerHTML='';
@@ -55,7 +55,7 @@ function setScanSummary(text,tone='neutral'){
  }
  box.append(document.createTextNode(text));
 }
-function standardSupportsFile(name){return /\.(asi|dll)$/i.test(name||'')}
+function standardSupportsFile(name){return /\.(asi|dll|lua|cs|zip)$/i.test(name||'')}
 function scanFailureMessage(code){
  if(code==='UPLOAD_NAME_INVALID')return 'The file name cannot be processed. Rename it and try again.';
  if(code==='UPLOAD_EMPTY')return 'The selected file is empty. Choose a different file.';
@@ -219,7 +219,7 @@ $('scanBtn').onclick=async()=>{
    return;
  }
  if(model==='standard'&&!standardSupportsFile(file?file.name:p)){
-   setScanSummary('Standard scans .asi and .dll GTA mod files only. ZIP packages and scripts require Plus or Pro when available; PDF files are not supported. No scan was run.','unsupported');
+   setScanSummary('Standard scans supported GTA .asi/.dll plugins, .lua/.cs scripts and .zip mod packages. This file type is outside Standard coverage, so no scan was run.','unsupported');
    return;
  }
  if(file&&file.size>64*1024*1024){setScanSummary(scanFailureMessage('UPLOAD_TOO_LARGE'),'error');return;}
@@ -239,7 +239,7 @@ $('scanBtn').onclick=async()=>{
        ?'GTA plugin inspected locally and in a disposable cloud environment. Direct plugin execution was not performed, so the result remains fail-closed.'
        :'GTA plugin inspected with non-executing fallback analysis. Direct plugin execution was not performed, so MalGuard did not claim a SAFE result.','inconclusive');
    }else if(sandboxSetupRequired(result)){
-     setScanSummary('File kept protected. Secure Sandbox setup is required before isolated execution can run on this PC.','setup');
+     setScanSummary(result&&result.cloudInspectionCompleted===true?'Cloud isolated analysis completed. Local behavioral execution was unavailable, so MalGuard preserved a fail-closed verdict.':'File kept protected. Local behavioral isolation was unavailable; MalGuard completed every available defensive fallback and did not mark the file safe.','setup');
    }else if(result&&result.completionState==='preflight_failed_closed'){
      setScanSummary('File kept protected because MalGuard could not prepare it safely for isolated execution.','setup');
    }else if(result&&result.verdict==='inconclusive'){
