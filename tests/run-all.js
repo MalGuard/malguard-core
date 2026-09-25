@@ -53,6 +53,7 @@ const tests=[
  'gta-simulation-engine.test.js',
  'ai-evidence-bridge.test.js',
  'gta-simulation-pipeline.test.js',
+ 'gta-plugin-sandbox-loader.test.js',
  'sandbox-first-run-certification.test.js',
  'virtual-windows-validation-lab.test.js',
  'embedded-validation-lab.test.js',
