@@ -26,6 +26,9 @@ on:
       - 'tools/build-portable-package.js'
       - 'tools/build-windows-installer.ps1'
       - 'tools/windows-node-runtime-lock.json'
+      - 'tools/stage-multi-engine-tools.ps1'
+      - 'desktop-app/multi-engine/**'
+      - 'tests/multi-engine-*.test.js'
       - 'tools/verify-release-candidate.js'
       - 'tools/sign-release-candidate.js'
       - 'tools/verify-signed-release.js'
@@ -109,6 +112,21 @@ jobs:
           Copy-Item -LiteralPath $license.FullName -Destination (Join-Path $target 'NODE-LICENSE.txt') -Force
           Write-Host "Pinned Node runtime staged: $($lock.nodeVersion) / ${{ matrix.arch }} / $actual"
 
+      - name: Stage pinned independent analysis engines
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & pwsh -NoLogo -NoProfile -NonInteractive -File .\tools\stage-multi-engine-tools.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Multi-engine staging failed: $LASTEXITCODE" }
+
+      - name: Real multi-engine benign PE smoke
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        env:
+          MALGUARD_TSH_LIVE_MULTI_ENGINE: '1'
+        run: node tests/multi-engine-live-windows.test.js
+
+
       - name: Build native MalGuard launcher
         shell: pwsh
         run: |
@@ -151,7 +169,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($file in @('desktop-app/bin/MalGuard.exe','desktop-app/runtime/node.exe','desktop-app/runtime/NODE-LICENSE.txt','desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe')) {
+          foreach ($file in @('desktop-app/bin/MalGuard.exe','desktop-app/runtime/node.exe','desktop-app/runtime/NODE-LICENSE.txt','desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe','desktop-app/multi-engine/bin/ENGINE-BUNDLE.json','desktop-app/multi-engine/bin/yr.exe','desktop-app/multi-engine/bin/capa.exe','desktop-app/multi-engine/bin/floss.exe')) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "release staging missing: $file" }
             $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
             Write-Host "$file SHA-256: $hash"
@@ -197,6 +215,7 @@ jobs:
         shell: pwsh
         env:
           MALGUARD_SOURCE_COMMIT: ${{ github.sha }}
+          MALGUARD_REQUIRE_MULTI_ENGINE_BUNDLE: '1'
         run: |
           $ErrorActionPreference = 'Stop'
           node tools/build-portable-package.js
@@ -209,7 +228,7 @@ jobs:
           $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
           $root = Join-Path (Get-Location) "dist/malguard-desktop-$version"
           $sums = Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Raw
-          foreach ($file in @('desktop-app/bin/MalGuard.exe','desktop-app/runtime/node.exe','desktop-app/runtime/NODE-LICENSE.txt','desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe')) {
+          foreach ($file in @('desktop-app/bin/MalGuard.exe','desktop-app/runtime/node.exe','desktop-app/runtime/NODE-LICENSE.txt','desktop-app/sandbox/bin/MalGuardSandboxContainmentProbe.exe','desktop-app/multi-engine/bin/ENGINE-BUNDLE.json','desktop-app/multi-engine/bin/yr.exe','desktop-app/multi-engine/bin/capa.exe','desktop-app/multi-engine/bin/floss.exe')) {
             $target = Join-Path $root ($file -replace '/', '\')
             if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "packaged runtime missing: $file" }
             $escaped = [regex]::Escape($file)
@@ -288,7 +307,7 @@ jobs:
           try {
             & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installScript
             if ($LASTEXITCODE -ne 0) { throw "Install script failed with exit code $LASTEXITCODE" }
-            foreach ($relative in @('PACKAGE-MANIFEST.json','SHA256SUMS.txt','app.js','desktop-app/server.js','desktop-app/local-scan-upload.js','desktop-app/runtime/node.exe')) {
+            foreach ($relative in @('PACKAGE-MANIFEST.json','SHA256SUMS.txt','app.js','desktop-app/server.js','desktop-app/local-scan-upload.js','desktop-app/runtime/node.exe','desktop-app/multi-engine/bin/ENGINE-BUNDLE.json','desktop-app/multi-engine/bin/yr.exe','desktop-app/multi-engine/bin/capa.exe','desktop-app/multi-engine/bin/floss.exe')) {
               if (-not (Test-Path -LiteralPath (Join-Path $installedRoot $relative) -PathType Leaf)) { throw "Installed payload missing: $relative" }
             }
             $shell = New-Object -ComObject WScript.Shell
