@@ -28,7 +28,43 @@ function compactEvidence(evidence) {
     scanner: scanner ? {
       finalVerdict: boundedString(scanner.finalVerdict, 32),
       hardeningError: boundedString(scanner.hardeningError, 128),
-      threatIntelStatus: boundedString(scanner.threatIntelStatus, 64),
+      threatIntel: scanner.threatIntel && typeof scanner.threatIntel === 'object' ? {
+        status: boundedString(scanner.threatIntel.status, 64),
+        source: boundedString(scanner.threatIntel.source, 32),
+        signature: boundedString(scanner.threatIntel.signature, 120),
+        fileType: boundedString(scanner.threatIntel.fileType, 48),
+        tags: Array.isArray(scanner.threatIntel.tags)
+          ? scanner.threatIntel.tags.map(v => boundedString(v, 48)).filter(Boolean).slice(0, 12)
+          : [],
+      } : null,
+      detector: scanner.detector && typeof scanner.detector === 'object' ? {
+        modType: boundedString(scanner.detector.modType, 80),
+        route: boundedString(scanner.detector.route, 80),
+        confidence: boundedString(scanner.detector.confidence, 40),
+        suspiciousPackaging: scanner.detector.suspiciousPackaging === true,
+      } : null,
+      engine: scanner.engine && typeof scanner.engine === 'object' ? {
+        verdict: boundedString(scanner.engine.verdict, 32),
+        score: Number.isFinite(scanner.engine.score) ? scanner.engine.score : null,
+        confidence: boundedString(scanner.engine.confidence, 24),
+        rulesStatus: boundedString(scanner.engine.rulesStatus, 32),
+        peValid: scanner.engine.peValid === true,
+        riskFloorApplied: boundedString(scanner.engine.riskFloorApplied, 32),
+        gtaContextDetected: scanner.engine.gtaContextDetected === true,
+        evidence: Array.isArray(scanner.engine.evidence)
+          ? scanner.engine.evidence.slice(0, 32).map(item => ({
+              rule: boundedString(item && item.rule, 80),
+              category: boundedString(item && item.category, 80),
+              severity: boundedString(item && item.severity, 24),
+              confidence: boundedString(item && item.confidence, 24),
+              weight: Number.isFinite(item && item.weight) ? item.weight : null,
+            }))
+          : [],
+        pe: scanner.engine.pe && typeof scanner.engine.pe === 'object' ? scanner.engine.pe : null,
+      } : null,
+      script: scanner.script && typeof scanner.script === 'object' ? scanner.script : null,
+      archive: scanner.archive && typeof scanner.archive === 'object' ? scanner.archive : null,
+      multiLayer: scanner.multiLayer && typeof scanner.multiLayer === 'object' ? scanner.multiLayer : null,
     } : null,
     gtaSimulation: local ? {
       depth: boundedString(local.depth, 80),
