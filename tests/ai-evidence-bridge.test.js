@@ -44,7 +44,19 @@ const {
 
   const result = await bridge.analyze({
     model: 'pro',
-    simulation: { ok: true, verdictPolicy: { canPromoteSafe: false } },
+    simulation: {
+      local: {
+        depth: 'profile-only',
+        sampleProfile: { extension: '.asi', modType: 'plugin', gtaPluginCandidate: true, directExecutionAttempted: false },
+        evidence: { scannerVerdict: 'suspicious', contentSha256: 'e'.repeat(64), signals: ['scanner_suspicious'] },
+        privatePath: 'C:\\Secret\\hidden.asi',
+      },
+      isolated: {
+        ok: true, mode: 'cloud_gta_simulation', sampleExecutionAttempted: false, sampleExecutionStarted: false,
+        report: { treeReady: true, sha256: 'd'.repeat(64), fileName: 'hidden.asi' },
+        isolation: { ephemeral: true, networkPolicy: 'deny-all', hostFallback: false, destroyAfterRun: true, syntheticGameEnvironment: true },
+      },
+    },
     localResult: {
       finalVerdict: 'suspicious',
       hardeningError: null,
@@ -77,8 +89,14 @@ const {
   assert.equal(seen.scanner.engine.evidence[0].category, 'process_injection');
   assert.equal(seen.scanner.engine.pe.numberOfSections, 5);
   assert.equal(seen.scanner.multiLayer.gates[0].result, 'SUSPICIOUS');
-  assert(!JSON.stringify(seen).includes('contentSha256'));
-  assert(!JSON.stringify(seen).includes('path'));
+  const seenJson = JSON.stringify(seen);
+  assert(!seenJson.includes('contentSha256'));
+  assert(!seenJson.includes('e'.repeat(64)), 'local simulation SHA must not cross the AI provider boundary');
+  assert(!seenJson.includes('d'.repeat(64)), 'isolated report SHA must not cross the AI provider boundary');
+  assert(!seenJson.includes('C:\\Secret'), 'local path must not cross the AI provider boundary');
+  assert(!seenJson.includes('hidden.asi'), 'isolated filename must not cross the AI provider boundary');
+  assert.equal(seen.simulation.local.sampleProfile.extension, '.asi');
+  assert.equal(seen.simulation.isolated.isolation.networkPolicy, 'deny-all');
 
   console.log('✓ AI evidence bridge: provider boundary, action allowlist, no online learning and no auto-remediation PASS');
 })().catch(error => {
