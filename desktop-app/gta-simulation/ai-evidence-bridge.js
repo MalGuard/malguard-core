@@ -124,6 +124,53 @@ function buildScannerEvidence(localResult) {
   };
 }
 
+function buildSimulationEvidence(simulation) {
+  if (!simulation || typeof simulation !== 'object') return null;
+  const local = simulation.local && typeof simulation.local === 'object' ? simulation.local : null;
+  const isolated = simulation.isolated && typeof simulation.isolated === 'object' ? simulation.isolated : null;
+  return {
+    local: local ? {
+      depth: boundedString(local.depth || '', 80),
+      sampleProfile: local.sampleProfile && typeof local.sampleProfile === 'object' ? {
+        extension: boundedString(local.sampleProfile.extension || '', 24),
+        modType: boundedString(local.sampleProfile.modType || '', 64),
+        gtaPluginCandidate: local.sampleProfile.gtaPluginCandidate === true,
+        directExecutionAttempted: local.sampleProfile.directExecutionAttempted === true,
+      } : null,
+      evidence: local.evidence && typeof local.evidence === 'object' ? {
+        scannerVerdict: boundedString(local.evidence.scannerVerdict || '', 32),
+        modType: boundedString(local.evidence.modType || '', 64),
+        detectorRoute: boundedString(local.evidence.detectorRoute || '', 64),
+        detectorConfidence: boundedString(local.evidence.detectorConfidence || '', 32),
+        suspiciousPackaging: local.evidence.suspiciousPackaging === true,
+        threatIntelStatus: boundedString(local.evidence.threatIntelStatus || '', 64),
+        hardeningError: boundedString(local.evidence.hardeningError || '', 128),
+        signals: Array.isArray(local.evidence.signals)
+          ? local.evidence.signals.slice(0, 24).map(v => boundedString(String(v || ''), 80)).filter(Boolean)
+          : [],
+      } : null,
+    } : null,
+    isolated: isolated ? {
+      ok: isolated.ok === true,
+      mode: boundedString(isolated.mode || '', 80),
+      sampleExecutionAttempted: isolated.sampleExecutionAttempted === true,
+      sampleExecutionStarted: isolated.sampleExecutionStarted === true,
+      report: isolated.report && typeof isolated.report === 'object' ? {
+        treeReady: isolated.report.treeReady === true,
+        sampleExecutionAttempted: isolated.report.sampleExecutionAttempted === true,
+        sampleExecutionStarted: isolated.report.sampleExecutionStarted === true,
+      } : null,
+      isolation: isolated.isolation && typeof isolated.isolation === 'object' ? {
+        ephemeral: isolated.isolation.ephemeral === true,
+        networkPolicy: boundedString(isolated.isolation.networkPolicy || '', 64),
+        hostFallback: isolated.isolation.hostFallback === true,
+        destroyAfterRun: isolated.isolation.destroyAfterRun === true,
+        syntheticGameEnvironment: isolated.isolation.syntheticGameEnvironment === true,
+      } : null,
+    } : null,
+  };
+}
+
 function normalizeActions(actions) {
   if (!Array.isArray(actions)) return [];
   return [...new Set(actions.filter(action => ALLOWED_ACTIONS.has(action)))].slice(0, 8);
@@ -165,7 +212,7 @@ class AiEvidenceBridge {
     const evidence = {
       schemaVersion: AI_EVIDENCE_SCHEMA_VERSION,
       model,
-      simulation: simulation && typeof simulation === 'object' ? simulation : null,
+      simulation: buildSimulationEvidence(simulation),
       scanner: buildScannerEvidence(localResult),
     };
 
@@ -246,4 +293,5 @@ module.exports = {
   ALLOWED_ACTIONS,
   normalizeProviderResult,
   buildScannerEvidence,
+  buildSimulationEvidence,
 };
