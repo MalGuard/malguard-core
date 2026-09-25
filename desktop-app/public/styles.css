@@ -8,3 +8,6 @@
 
 
 .cloud-fallback-option{display:flex;gap:10px;align-items:flex-start;margin:10px 0 14px;padding:12px 14px;border:1px solid #29445c;border-radius:12px;background:#08121c}.cloud-fallback-option input{flex:none;min-width:0;width:18px;height:18px;margin-top:2px}.cloud-fallback-option span{display:grid;gap:4px}.cloud-fallback-option strong{font-size:13px}.cloud-fallback-option small{color:#8fa7bd;line-height:1.45}.cloud-fallback-option[hidden]{display:none}
+
+.engine-results{margin-top:12px;padding:10px 12px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.035)}
+.engine-result-row{margin-top:6px;font-size:13px;opacity:.9}
