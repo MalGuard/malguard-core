@@ -59,13 +59,15 @@ function deepStaticFallbackVerdict(localResult) {
 }
 
 class ModelScanPipelineManager {
-  constructor({ scanner, sandbox, cloudInspection = null, now = () => Date.now(), ttlMs = DEFAULT_TTL_MS, maxSessions = 32 } = {}) {
+  constructor({ scanner, sandbox, cloudInspection = null, gtaSimulation = null, aiEvidence = null, now = () => Date.now(), ttlMs = DEFAULT_TTL_MS, maxSessions = 32 } = {}) {
     if (!scanner || typeof scanner.scanPath !== 'function') throw new TypeError('scanner.scanPath is required');
     if (!sandbox || typeof sandbox.analyzeUntrustedSample !== 'function') throw new TypeError('sandbox.analyzeUntrustedSample is required');
     if (typeof sandbox.preflightSample !== 'function') throw new TypeError('sandbox.preflightSample is required');
     this.scanner = scanner;
     this.sandbox = sandbox;
     this.cloudInspection = cloudInspection && typeof cloudInspection.inspect === 'function' ? cloudInspection : null;
+    this.gtaSimulation = gtaSimulation && typeof gtaSimulation.analyze === 'function' ? gtaSimulation : null;
+    this.aiEvidence = aiEvidence && typeof aiEvidence.analyze === 'function' ? aiEvidence : null;
     this.now = now;
     this.ttlMs = Math.max(30_000, Number(ttlMs) || DEFAULT_TTL_MS);
     this.maxSessions = Math.max(4, Number(maxSessions) || 32);
@@ -128,6 +130,8 @@ class ModelScanPipelineManager {
       preflight: null,
       sandboxResult: null,
       cloudInspectionResult: null,
+      gtaSimulationResult: null,
+      aiEvidenceResult: null,
       allowCloudFallback: allowCloudFallback === true,
       finalResult: null,
       error: null,
@@ -167,9 +171,73 @@ class ModelScanPipelineManager {
 
   async _run(session) {
     session.state = 'running';
-    if (session.model === 'standard') return this._runStandard(session);
-    if (session.model === 'plus') return this._runPlus(session);
-    return this._runPro(session);
+    if (session.model === 'standard') await this._runStandard(session);
+    else if (session.model === 'plus') await this._runPlus(session);
+    else await this._runPro(session);
+    await this._attachGtaSimulationAndAiEvidence(session);
+  }
+
+  async _attachGtaSimulationAndAiEvidence(session) {
+    if (!session || !session.finalResult) return;
+
+    if (this.gtaSimulation) {
+      try {
+        this._emit(session, 'gta_simulation', 'running', 'Building synthetic GTA runtime context from scan evidence');
+        const simulation = await Promise.resolve(this.gtaSimulation.analyze({
+          filePath: session.filePath,
+          localResult: session.localResult,
+          model: session.model,
+        }));
+        session.gtaSimulationResult = clone(simulation);
+        session.finalResult.gtaSimulation = clone(simulation);
+        this._emit(session, 'gta_simulation', 'completed', 'Synthetic GTA runtime context completed without executing the sample', {
+          depth: simulation && simulation.depth || null,
+          directExecutionAttempted: !!(simulation && simulation.sampleProfile && simulation.sampleProfile.directExecutionAttempted),
+          canPromoteSafe: !!(simulation && simulation.verdictPolicy && simulation.verdictPolicy.canPromoteSafe),
+        });
+      } catch (error) {
+        const failure = { ok: false, code: error && error.code || 'GTA_SIMULATION_FAILED' };
+        session.gtaSimulationResult = failure;
+        session.finalResult.gtaSimulation = failure;
+        this._emit(session, 'gta_simulation', 'blocked', 'Synthetic GTA runtime context failed closed', failure);
+      }
+    }
+
+    if (this.aiEvidence) {
+      try {
+        this._emit(session, 'ai_evidence', 'running', 'Preparing bounded evidence for the AI analysis interface');
+        const ai = await this.aiEvidence.analyze({
+          model: session.model,
+          simulation: session.gtaSimulationResult,
+          localResult: session.localResult,
+        });
+        session.aiEvidenceResult = clone(ai);
+        session.finalResult.aiEvidence = clone(ai);
+        this._emit(session, 'ai_evidence', ai && ai.available === false ? 'blocked' : (ai && ai.ok === true ? 'completed' : 'blocked'),
+          ai && ai.available === false
+            ? 'AI evidence interface is connected; no inference provider is packaged yet'
+            : ai && ai.ok === true
+              ? 'AI evidence analysis completed'
+              : 'AI evidence analysis failed closed', {
+            available: !!(ai && ai.available === true),
+            status: ai && ai.status || null,
+            onlineLearning: !!(ai && ai.onlineLearning === true),
+            autoRemediation: !!(ai && ai.autoRemediation === true),
+          });
+      } catch (error) {
+        const failure = {
+          ok: false,
+          available: false,
+          status: 'bridge_error',
+          code: error && error.code || 'AI_EVIDENCE_BRIDGE_FAILED',
+          onlineLearning: false,
+          autoRemediation: false,
+        };
+        session.aiEvidenceResult = failure;
+        session.finalResult.aiEvidence = failure;
+        this._emit(session, 'ai_evidence', 'blocked', 'AI evidence bridge failed closed', failure);
+      }
+    }
   }
 
   async _runStandard(session) {
