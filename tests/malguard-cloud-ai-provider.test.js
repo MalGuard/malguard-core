@@ -4,6 +4,7 @@ const assert = require('assert');
 const {
   MalGuardCloudAiProvider,
   DEFAULT_ENDPOINT,
+  MAX_RESPONSE_BYTES,
   MODEL_MAP,
   compactEvidence,
   parseJsonAnswer,
@@ -95,7 +96,7 @@ const {
       return {
         ok: true,
         status: 200,
-        json: async () => ({
+        text: async () => JSON.stringify({
           model: 'strong',
           text: '{"risk":"high","summary":"Keep the plugin blocked pending verified runtime evidence.","recommendedActions":["keep_blocked","review_evidence"]}',
         }),
@@ -145,6 +146,23 @@ const {
   assert(!prompt.includes('C:\\Secret'));
   assert(!/[a-f0-9]{64}/.test(prompt), 'AI prompt must not contain SHA-256');
   assert.equal(request.body.clientContext.privacy, 'bounded-metadata-no-file-bytes');
+  const oversized = new MalGuardCloudAiProvider({
+    endpoint: 'https://ai.example.test/api/chat',
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => 'x'.repeat(MAX_RESPONSE_BYTES + 1) }),
+  });
+  await assert.rejects(
+    oversized.analyzeEvidence({ model:'standard', scanner:null, simulation:null }),
+    error => error && error.code === 'AI_EVIDENCE_RESPONSE_TOO_LARGE'
+  );
+
+  const invalidJson = new MalGuardCloudAiProvider({
+    endpoint: 'https://ai.example.test/api/chat',
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => '<html>not-json</html>' }),
+  });
+  await assert.rejects(
+    invalidJson.analyzeEvidence({ model:'standard', scanner:null, simulation:null }),
+    error => error && error.code === 'AI_EVIDENCE_RESPONSE_INVALID_JSON'
+  );
 
   console.log('✓ MalGuard AI provider: real chat endpoint contract, model mapping, bounded metadata privacy and defensive JSON output PASS');
 })().catch(error => {
