@@ -58,6 +58,14 @@ function localStaticCoverage(localResult) {
     layers.push({ name: 'archive_analyzer', status: archiveIssues.length ? 'degraded' : 'complete' });
   }
 
+  const multi = localResult.multiEngine;
+  if (multi && multi.coverage && multi.coverage.requiredForSafe === true) {
+    const complete = multi.coverage.complete === true;
+    if (!complete) issues.push('independent_multi_engine_incomplete');
+    else primaryAnalyzersCompleted++;
+    layers.push({ name: 'independent_multi_engine', status: complete ? 'complete' : 'degraded' });
+  }
+
   if (primaryAnalyzersCompleted === 0) issues.push('no_primary_static_analyzer_completed');
 
   return {
@@ -88,16 +96,20 @@ function fuseEvidence({
 
   const intelMalicious = intel.status === 'known_malicious';
   const intelSuspicious = intel.status === 'known_suspicious' || intel.status === 'suspicious';
+  const multi = localResult && localResult.multiEngine && typeof localResult.multiEngine === 'object' ? localResult.multiEngine : null;
+  const multiVerdict = normalizeVerdict(multi && multi.verdict);
+  const multiMalicious = multiVerdict === 'malicious';
+  const multiSuspicious = multiVerdict === 'suspicious';
 
   let verdict = 'inconclusive';
   let basis = 'insufficient_evidence';
 
-  if (intelMalicious || localVerdict === 'malicious' || (behavioralProven && behavioralVerdict === 'malicious')) {
+  if (intelMalicious || multiMalicious || localVerdict === 'malicious' || (behavioralProven && behavioralVerdict === 'malicious')) {
     verdict = 'malicious';
-    basis = intelMalicious ? 'exact_reputation_or_threat_intel' : behavioralVerdict === 'malicious' ? 'behavioral_malicious_evidence' : 'local_malicious_evidence';
-  } else if (intelSuspicious || localVerdict === 'suspicious' || (behavioralProven && behavioralVerdict === 'suspicious')) {
+    basis = intelMalicious ? 'exact_reputation_or_threat_intel' : multiMalicious ? 'independent_engine_malicious_evidence' : behavioralVerdict === 'malicious' ? 'behavioral_malicious_evidence' : 'local_malicious_evidence';
+  } else if (intelSuspicious || multiSuspicious || localVerdict === 'suspicious' || (behavioralProven && behavioralVerdict === 'suspicious')) {
     verdict = 'suspicious';
-    basis = behavioralVerdict === 'suspicious' ? 'behavioral_suspicious_evidence' : 'local_or_reputation_suspicious_evidence';
+    basis = behavioralVerdict === 'suspicious' ? 'behavioral_suspicious_evidence' : multiSuspicious ? 'independent_engine_suspicious_evidence' : 'local_or_reputation_suspicious_evidence';
   } else if (behavioralProven && behavioralVerdict === 'safe' && sandboxResult.releaseGrade === true) {
     verdict = 'safe';
     basis = 'behavioral_release_grade';
@@ -146,6 +158,18 @@ function fuseEvidence({
     layers: {
       localScanner: { verdict: localVerdict, present: !!localResult },
       threatIntelligence: { status: String(intel.status || 'unknown'), maliciousExactMatch: intelMalicious },
+      independentMultiEngine: {
+        present: !!multi,
+        verdict: multiVerdict,
+        coverageComplete: !!(multi && multi.coverage && multi.coverage.complete === true),
+        requiredForSafe: !!(multi && multi.coverage && multi.coverage.requiredForSafe === true),
+        engines: multi && multi.engines ? {
+          yaraX: multi.engines.yaraX && { status: multi.engines.yaraX.status, verdict: multi.engines.yaraX.verdict },
+          capa: multi.engines.capa && { status: multi.engines.capa.status, verdict: multi.engines.capa.verdict },
+          floss: multi.engines.floss && { status: multi.engines.floss.status, verdict: multi.engines.floss.verdict },
+          defender: multi.engines.defender && { status: multi.engines.defender.status, verdict: multi.engines.defender.verdict },
+        } : {},
+      },
       behavioral: {
         proven: behavioralProven,
         verdict: behavioralVerdict,
