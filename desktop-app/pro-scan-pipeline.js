@@ -2,8 +2,9 @@
 
 const crypto = require('crypto');
 const path = require('path');
+const { FUSION_ENGINE_VERSION, fuseEvidence } = require('./fusion/evidence-fusion-engine.js');
 
-const PIPELINE_VERSION = '1.7.0';
+const PIPELINE_VERSION = '1.8.0';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
@@ -52,10 +53,7 @@ function directSandboxVerdict(sandboxResult) {
 }
 
 function deepStaticFallbackVerdict(localResult) {
-  const verdict = normalizeVerdict(localResult && localResult.finalVerdict);
-  if (verdict === 'malicious' || verdict === 'suspicious') return verdict;
-  // Without dynamic execution, fallback analysis never upgrades a sample to SAFE.
-  return 'inconclusive';
+  return fuseEvidence({ localResult, model: 'pro' }).verdict;
 }
 
 function standardVerdictWithCoverage(localResult) {
@@ -308,6 +306,19 @@ class ModelScanPipelineManager {
         }
       }
     }
+
+    if (session.finalResult && session.finalResult.fallbackUsed === true) {
+      const fusion = fuseEvidence({
+        localResult: session.localResult,
+        sandboxResult: session.sandboxResult,
+        cloudInspectionResult: session.cloudInspectionResult,
+        aiEvidenceResult: session.aiEvidenceResult,
+        model: session.model,
+      });
+      session.finalResult.fusionEngineVersion = FUSION_ENGINE_VERSION;
+      session.finalResult.fusion = clone(fusion);
+      session.finalResult.verdict = fusion.verdict;
+    }
   }
 
   async _runStandard(session) {
@@ -334,7 +345,7 @@ class ModelScanPipelineManager {
   }
 
   async _runDeepStaticFallback(session, { model, reasonCode, existingLocal = null, preflight = null, sandboxResult = null, sandboxStarted = false, sampleExecutionStarted = false, pluginDirectExecutionUnsupported = false } = {}) {
-    this._emit(session, 'fallback_analysis', 'running', 'Local behavioral Sandbox unavailable; running deep non-executing fallback analysis', {
+    this._emit(session, 'fallback_analysis', 'running', 'Local behavioral Sandbox unavailable; running MalGuard Fusion deep analysis without executing the sample', {
       reasonCode: reasonCode || 'SANDBOX_UNAVAILABLE',
       executionMode: 'no_dynamic_execution',
       cloudFallbackRequested: session.allowCloudFallback === true,
@@ -342,8 +353,6 @@ class ModelScanPipelineManager {
 
     const local = existingLocal || await this.scanner.scanPath(session.filePath, 'pro');
     session.localResult = clone(local);
-    const finalVerdict = deepStaticFallbackVerdict(local);
-
     let cloudInspectionResult = null;
     let gtaCloudSimulationResult = null;
     const gtaPlugin = GTA_PLUGIN_EXTENSIONS.has(path.extname(session.filePath).toLowerCase());
@@ -389,6 +398,15 @@ class ModelScanPipelineManager {
       }
     }
 
+    const fusion = fuseEvidence({
+      localResult: local,
+      sandboxResult,
+      cloudInspectionResult,
+      aiEvidenceResult: session.aiEvidenceResult,
+      model,
+    });
+    const finalVerdict = fusion.verdict;
+
     if (local && local.archiveInspection) {
       this._emit(session, 'fallback_archive_analysis', 'completed', 'Fallback archive inspection completed', {
         verdict: local.archiveInspection.finalVerdict || null,
@@ -404,8 +422,11 @@ class ModelScanPipelineManager {
       status: intel.status || 'unknown',
       source: intel.source || null,
     });
-    this._emit(session, 'fallback_analysis', 'completed', 'Deep fallback analysis completed without executing the sample', {
+    this._emit(session, 'fallback_analysis', 'completed', 'MalGuard Fusion analysis completed without executing the sample', {
       verdict: finalVerdict,
+      riskScore: fusion.riskScore,
+      assurance: fusion.assurance,
+      safeBasis: fusion.safeClaim.basis,
       limitation: 'dynamic behavior unavailable',
     });
 
@@ -425,13 +446,15 @@ class ModelScanPipelineManager {
       cloudInspectionCompleted: !!(cloudInspectionResult && cloudInspectionResult.ok === true),
       gtaCloudSimulationCompleted: !!(gtaCloudSimulationResult && gtaCloudSimulationResult.ok === true),
       reasonCode: reasonCode || 'SANDBOX_UNAVAILABLE',
+      fusionEngineVersion: FUSION_ENGINE_VERSION,
+      fusion: clone(fusion),
       localResult: clone(local),
       ...(preflight ? { preflight: clone(preflight) } : {}),
       ...(sandboxResult ? { sandboxResult: clone(sandboxResult) } : {}),
       ...(cloudInspectionResult ? { cloudInspectionResult: clone(cloudInspectionResult) } : {}),
       ...(gtaCloudSimulationResult ? { gtaCloudSimulationResult: clone(gtaCloudSimulationResult) } : {}),
     };
-    this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()} (deep static fallback)`, {
+    this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()} (MalGuard Fusion static fallback)`, {
       verdict: finalVerdict,
       model,
       fallbackUsed: true,

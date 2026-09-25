@@ -1,0 +1,72 @@
+name: MalGuard THS Fusion 3-Stage
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ths-stage-1-unit:
+    name: THS 1 - Unit and Static Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Syntax check Fusion and pipeline
+        run: |
+          node --check desktop-app/fusion/evidence-fusion-engine.js
+          node --check desktop-app/pro-scan-pipeline.js
+      - name: Run THS Stage 1
+        run: node tests/fusion-engine.test.js
+
+  ths-stage-2-integration:
+    name: THS 2 - Integration and Regression
+    needs: ths-stage-1-unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Run Fusion integration
+        run: node tests/ths-stage2-integration.test.js
+      - name: Run pipeline regressions
+        run: |
+          node tests/pro-scan-pipeline.test.js
+          node tests/gta-simulation-pipeline.test.js
+
+  ths-stage-3-adversarial:
+    name: THS 3 - Adversarial and Fail-Closed
+    needs: ths-stage-2-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Run THS adversarial Fusion matrix
+        run: node tests/ths-stage3-adversarial.test.js
+      - name: Run legacy TSH and parser fuzz regressions
+        run: |
+          node tests/tsh.test.js
+          node tests/malformed-fuzz.test.js
+          node tests/pe-fuzz.test.js
