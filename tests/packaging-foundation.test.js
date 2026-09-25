@@ -24,6 +24,8 @@ for (const required of [
   'rules.json',
   'app.js',
   'desktop-app/server.js',
+  'desktop-app/gta-simulation/simulation-engine.js',
+  'desktop-app/gta-simulation/ai-evidence-bridge.js',
   'desktop-app/threat-intel/credential-store.js',
   'desktop-guard/windows-agent/agent.js',
 ]) {
