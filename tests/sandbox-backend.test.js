@@ -45,6 +45,13 @@ const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller
     assert.equal(preflight.revalidated, true);
     assert.match(preflight.sha256, /^[a-f0-9]{64}$/);
 
+    const pluginPath = path.join(tempDir, 'synthetic.asi');
+    await fs.promises.writeFile(pluginPath, Buffer.from('MZ synthetic GTA plugin preflight fixture'));
+    const pluginPreflight = await controller.preflightSample(pluginPath);
+    assert.equal(pluginPreflight.ok, true, 'ASI plugins must reach the certified Windows Sandbox loader path');
+    assert.equal(pluginPreflight.extension, '.asi');
+    assert.equal(pluginPreflight.revalidated, true);
+
     const denied = await controller.analyzeUntrustedSample(samplePath);
     assert.equal(denied.ok, false);
     assert.equal(denied.verdict, 'inconclusive');
