@@ -9,7 +9,8 @@ const { IsolationBackendRouter } = require('./isolation-backend-router.js');
 
 const SANDBOX_VERSION = '0.6.1';
 const MAX_SAMPLE_BYTES = 64 * 1024 * 1024;
-const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js']);
+const GTA_PLUGIN_EXTENSIONS = new Set(['.asi', '.dll']);
+const SUPPORTED_EXTENSIONS = new Set(['.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js', ...GTA_PLUGIN_EXTENSIONS]);
 
 class SandboxController {
   constructor({ timeoutMs = 2500, memoryMb = 48, windowsBackend = null, isolationBackend = null, autoCertify = false } = {}) {
@@ -323,6 +324,77 @@ class SandboxController {
       };
     }
 
+    const pluginExtension = GTA_PLUGIN_EXTENSIONS.has(preflight.extension);
+    if (pluginExtension) {
+      const directWindowsBackend = this.windowsBackend && this.windowsBackend.windowsSandboxBackend
+        ? this.windowsBackend.windowsSandboxBackend
+        : this.windowsBackend;
+      const windowsCapabilities = directWindowsBackend && typeof directWindowsBackend.capabilities === 'function'
+        ? await directWindowsBackend.capabilities()
+        : null;
+      const windowsSelected = certification.selectedBackend === 'windows-sandbox'
+        || (!this.windowsBackend.windowsSandboxBackend && windowsCapabilities && windowsCapabilities.backend === 'windows-sandbox');
+
+      if (!windowsSelected || !windowsCapabilities || windowsCapabilities.releaseGrade !== true) {
+        return {
+          ok: false,
+          sandboxVersion: SANDBOX_VERSION,
+          verdict: 'inconclusive',
+          code: 'GTA_PLUGIN_WINDOWS_SANDBOX_REQUIRED',
+          preflight,
+          backend: windowsCapabilities,
+          certification: this.certificationStatus(),
+          sandboxLaunched: false,
+          sampleExecutionStarted: false,
+          note: 'GTA ASI/DLL behavioral loading is permitted only inside a release-grade Windows Sandbox. Other isolation backends may inspect or simulate the plugin but cannot load it.',
+        };
+      }
+
+      const pluginResult = await directWindowsBackend.analyze(preflight.path, preflight);
+      if (pluginResult && typeof pluginResult === 'object') {
+        pluginResult.preflight = preflight;
+        pluginResult.certification = this.certificationStatus();
+        pluginResult.gtaPluginExecution = {
+          loader: 'windows-sandbox-child-loader',
+          backend: 'windows-sandbox',
+          syntheticGameEnvironment: true,
+          hostFallback: false,
+        };
+        const execution = pluginResult.telemetry && pluginResult.telemetry.execution;
+        pluginResult.sampleExecutionStarted = !!(execution && execution.started === true);
+        pluginResult.sandboxLaunched = pluginResult.ok === true && pluginResult.sampleExecutionStarted === true;
+        if (pluginResult.ok === true && (!execution || execution.attempted !== true)) {
+          return {
+            ok: false,
+            sandboxVersion: SANDBOX_VERSION,
+            verdict: 'inconclusive',
+            code: 'GTA_PLUGIN_EXECUTION_NOT_ATTEMPTED',
+            preflight,
+            backend: windowsCapabilities,
+            certification: this.certificationStatus(),
+            telemetry: pluginResult.telemetry || null,
+            sandboxLaunched: false,
+            sampleExecutionStarted: false,
+          };
+        }
+        if (pluginResult.ok === true && execution.started !== true) {
+          return {
+            ok: false,
+            sandboxVersion: SANDBOX_VERSION,
+            verdict: 'inconclusive',
+            code: 'GTA_PLUGIN_EXECUTION_NOT_STARTED',
+            preflight,
+            backend: windowsCapabilities,
+            certification: this.certificationStatus(),
+            telemetry: pluginResult.telemetry || null,
+            sandboxLaunched: false,
+            sampleExecutionStarted: false,
+          };
+        }
+      }
+      return pluginResult;
+    }
+
     const capabilities = await this.windowsBackend.capabilities();
     if (capabilities.releaseGrade !== true) {
       const routed = capabilities && capabilities.backend === 'malguard-isolation-router';
@@ -381,4 +453,4 @@ class SandboxController {
   }
 }
 
-module.exports = { SandboxController, SANDBOX_VERSION, MAX_SAMPLE_BYTES, SUPPORTED_EXTENSIONS };
+module.exports = { SandboxController, SANDBOX_VERSION, MAX_SAMPLE_BYTES, SUPPORTED_EXTENSIONS, GTA_PLUGIN_EXTENSIONS };
