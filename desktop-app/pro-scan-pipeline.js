@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const path = require('path');
 
-const PIPELINE_VERSION = '1.4.0';
+const PIPELINE_VERSION = '1.5.0';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
