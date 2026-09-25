@@ -282,7 +282,7 @@ class WindowsSandboxBackend {
 
   async _prepareSession(samplePath, expectedIdentity = null) {
     const ext = path.extname(samplePath).toLowerCase();
-    const allowed = new Set(['.exe','.com','.scr','.bat','.cmd','.ps1','.vbs','.js']);
+    const allowed = new Set(['.exe','.com','.scr','.bat','.cmd','.ps1','.vbs','.js','.asi','.dll']);
     if (!allowed.has(ext)) {
       const error = new Error('sample type is not supported by the behavioral backend');
       error.code = 'SANDBOX_SAMPLE_TYPE_UNSUPPORTED';
