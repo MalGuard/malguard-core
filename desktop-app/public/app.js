@@ -11,9 +11,9 @@ async function status(){try{const s=await api('/api/status');$('status').textCon
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')});
 
 const MODEL_HINTS={
- standard:'Standard: GTA mod .asi and .dll files only.',
- plus:'Plus: deep local analysis, verified local Sandbox execution when available, and optional disposable Cloud Inspection fallback.',
- pro:'Pro: direct verified local behavioral analysis, with optional disposable Cloud Inspection if local execution cannot certify.',
+ standard:'Standard: local GTA plugin scan + synthetic GTA context. Optional metadata-only MalGuard AI analysis.',
+ plus:'Plus: deep local analysis + synthetic GTA context + optional disposable isolated GTA simulation and MalGuard AI evidence analysis.',
+ pro:'Pro: verified local behavioral analysis when possible + GTA simulation + optional isolated cloud simulation and MalGuard AI evidence analysis.',
 };
 const VERDICT_COPY={
  safe:{label:'Safe',tone:'safe',title:'No threat detected',message:'MalGuard completed the selected analysis and found no malicious behavior in the available evidence.'},
@@ -23,16 +23,15 @@ const VERDICT_COPY={
 };
 function currentModel(){return $('scanModel').value}
 function cloudFallbackEnabled(){const box=$('cloudFallback');return currentModel()!=='standard'&&!!(box&&box.checked)}
+function aiEvidenceEnabled(){const box=$('aiEvidence');return !!(box&&box.checked)}
 function updateModelUi(){
  const model=currentModel();
  $('modelHint').textContent=MODEL_HINTS[model]||'';
  const cloudOption=$('cloudFallbackOption');if(cloudOption)cloudOption.hidden=model==='standard';
- $('modelFlow').hidden=model==='standard';
- $('modelFlowTitle').textContent=model==='pro'?'Pro secure analysis':'Plus deep analysis';
- if(model!=='standard'){
-   $('modelSteps').innerHTML='';
-   resetCustomerResult(model==='pro'?'Ready for isolated behavioral analysis.':'Ready for deep analysis.');
- }
+ $('modelFlow').hidden=false;
+ $('modelFlowTitle').textContent=model==='pro'?'Pro secure analysis + GTA simulation':model==='plus'?'Plus deep analysis + GTA simulation':'Standard local analysis + GTA simulation';
+ $('modelSteps').innerHTML='';
+ resetCustomerResult(model==='pro'?'Ready for isolated behavioral analysis and GTA simulation.':model==='plus'?'Ready for deep analysis and GTA simulation.':'Ready for local analysis and GTA simulation.');
 }
 $('scanModel').onchange=updateModelUi;
 
@@ -77,6 +76,9 @@ function friendlyPhase(event){
  if(phase==='threat_intelligence')return 'Threat-intelligence check completed';
  if(phase==='sandbox_decision')return status==='warning'?'Additional isolated analysis selected':'Sandbox decision completed';
  if(phase==='preflight')return status==='completed'?'File prepared for isolated analysis':status==='blocked'?'File could not be prepared safely':'Preparing file for isolated analysis';
+ if(phase==='gta_simulation')return status==='completed'?'Synthetic GTA context completed':status==='blocked'?'GTA simulation context unavailable':'Building synthetic GTA context';
+ if(phase==='gta_cloud_simulation')return status==='completed'?'Disposable isolated GTA simulation completed':status==='blocked'?'Isolated GTA simulation unavailable':'Running disposable isolated GTA simulation';
+ if(phase==='ai_evidence')return status==='completed'?'MalGuard AI evidence analysis completed':status==='warning'?'MalGuard AI analysis not requested':status==='blocked'?'MalGuard AI analysis unavailable':'Running MalGuard AI evidence analysis';
  if(phase==='cloud_ephemeral_inspection')return status==='completed'?'Disposable Cloud Inspection completed':status==='blocked'?'Cloud Inspection unavailable':'Running disposable Cloud Inspection';
  if(phase==='sandbox_analysis'){
    if(status==='blocked')return 'Local behavioral Sandbox unavailable';
@@ -88,6 +90,9 @@ function friendlyPhase(event){
 }
 function friendlyMeta(event){
  const status=event&&event.status;
+ if(event&&event.phase==='ai_evidence'&&status==='warning')return 'Optional · not requested';
+ if(event&&event.phase==='ai_evidence'&&status==='completed')return 'Metadata only · advisory';
+ if(event&&event.phase==='gta_cloud_simulation'&&status==='completed')return 'Destroyed after job';
  if(status==='completed')return 'Completed';
  if(status==='running')return 'In progress';
  if(status==='blocked')return 'Protected';
@@ -141,6 +146,20 @@ function renderCustomerResult(session){
  header.append(title,badge);
  const message=document.createElement('p');message.className='result-message';message.textContent=copy.message;
  box.append(header,message);
+ const ai=result.aiEvidence;
+ if(ai&&ai.status==='completed'){
+   const aiNote=document.createElement('p');
+   aiNote.className='result-note';
+   const risk=String(ai.risk||'unknown').toUpperCase();
+   aiNote.textContent='MalGuard AI · '+risk+(ai.summary?' · '+ai.summary:'')+' AI advice is advisory and does not change the security verdict.';
+   box.append(aiNote);
+ }
+ if(result.gtaCloudSimulationCompleted===true){
+   const simNote=document.createElement('p');
+   simNote.className='result-note';
+   simNote.textContent='Disposable GTA simulation environment completed and was destroyed after the job. The plugin was staged but not executed in this simulation phase.';
+   box.append(simNote);
+ }
  if(setupRequired){
    const note=document.createElement('p');note.className='result-note';note.textContent=result.cloudInspectionCompleted===true?'Cloud Inspection is inspection-only and cannot replace verified Windows behavioral execution for a SAFE verdict.':'Plus and Pro stay fail-closed until this device passes a real local behavioral isolation check.';
    const actions=document.createElement('div');actions.className='result-actions';
@@ -165,24 +184,25 @@ function renderPipeline(session){
 }
 async function runModelScan(path,model,file=null){
  const useCloud=cloudFallbackEnabled();
+ const useAi=aiEvidenceEnabled();
  $('modelSteps').innerHTML=''; resetCustomerResult('Starting secure analysis…');
  let started;
  if(file){
-   const response=await fetch(`/api/model-scan/upload?model=${encodeURIComponent(model)}&name=${encodeURIComponent(file.name)}&cloudFallback=${useCloud?'1':'0'}`,{
+   const response=await fetch(`/api/model-scan/upload?model=${encodeURIComponent(model)}&name=${encodeURIComponent(file.name)}&cloudFallback=${useCloud?'1':'0'}&aiEvidence=${useAi?'1':'0'}`,{
      method:'POST',headers:{'content-type':'application/octet-stream','x-malguard-local-upload':'1'},body:file,
    });
    started=await response.json();
    if(!response.ok)throw new Error(started.code||'LOCAL_FILE_UPLOAD_FAILED');
  }else{
-   started=await api('/api/model-scan/start','POST',{path,model,cloudFallback:useCloud});
+   started=await api('/api/model-scan/start','POST',{path,model,cloudFallback:useCloud,aiEvidence:useAi});
  }
  if(!started.session)throw new Error(started.code||'SCAN_NOT_STARTED');
  const id=started.session.id;
- if(model!=='standard') renderPipeline(started.session);
+ renderPipeline(started.session);
  for(let i=0;i<600;i++){
    await new Promise(r=>setTimeout(r,250));
    const d=await api(`/api/model-scan/status?id=${encodeURIComponent(id)}`);
-   if(model!=='standard') renderPipeline(d.session);
+   renderPipeline(d.session);
    if(d.session.state==='completed'||d.session.state==='failed') return d.session;
  }
  throw new Error('Model scan status polling timed out');
@@ -209,7 +229,7 @@ $('scanBtn').onclick=async()=>{
  try{
    const session=await runModelScan(p,model,file);
    const result=session&&session.finalResult?session.finalResult:null;
-   if(model!=='standard')renderCustomerResult(session);
+   renderCustomerResult(session);
    if(session.state==='failed'){
      setScanSummary(scanFailureMessage(session.error&&session.error.code),'error');
      $('modelDiagnostics').hidden=false;

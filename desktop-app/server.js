@@ -16,6 +16,7 @@ const { CloudEphemeralInspectionClient } = require('./sandbox/cloud-ephemeral-in
 const { GtaSimulationEngine } = require('./gta-simulation/simulation-engine.js');
 const { CloudGtaSimulationClient } = require('./gta-simulation/cloud-gta-simulation-client.js');
 const { AiEvidenceBridge } = require('./gta-simulation/ai-evidence-bridge.js');
+const { MalGuardCloudAiProvider } = require('./gta-simulation/malguard-cloud-ai-provider.js');
 const { EmbeddedValidationLab } = require('./sandbox/embedded-validation-lab.js');
 const { IncidentStore } = require('../desktop-guard/windows-agent/incident-store.js');
 const { SettingsStore } = require('./settings-store.js');
@@ -51,7 +52,8 @@ const validationLab = new EmbeddedValidationLab({ windowsBackend: sandbox.window
 const cloudInspection = new CloudEphemeralInspectionClient();
 const gtaSimulation = new GtaSimulationEngine();
 const gtaCloudSimulation = new CloudGtaSimulationClient();
-const aiEvidence = new AiEvidenceBridge();
+const malguardAiProvider = new MalGuardCloudAiProvider();
+const aiEvidence = new AiEvidenceBridge({ provider: malguardAiProvider, timeoutMs: 15000 });
 const modelPipeline = new ModelScanPipelineManager({ scanner, sandbox, cloudInspection, gtaCloudSimulation, gtaSimulation, aiEvidence });
 const entitlementGate = new EntitlementGate();
 const errorReporter = new LocalErrorReporter();
@@ -171,8 +173,10 @@ async function handler(req, res) {
       try {
         upload = await stageScanUpload(req, name);
         const allowCloudFallback = url.searchParams.get('cloudFallback') === '1';
+        const allowAiEvidence = url.searchParams.get('aiEvidence') === '1';
         const session = modelPipeline.start(upload.path, model, {
           allowCloudFallback,
+          allowAiEvidence,
           onFinish: async () => {
             try { await discardScanUpload(upload); }
             finally { activeStagedScans--; }
@@ -191,7 +195,7 @@ async function handler(req, res) {
         throw error;
       }
     }
-    if (req.method === 'POST' && url.pathname === '/api/model-scan/start') { const body = await readJson(req); if (typeof body.path !== 'string' || !body.path.trim()) return json(res, 400, { ok: false, code: 'PATH_REQUIRED' }); try { const model = body.model || 'standard'; const entitlement = entitlementGate.requireModel(model); const session = modelPipeline.start(body.path, model, { allowCloudFallback: body.cloudFallback === true }); return json(res, 202, { ok: true, entitlement: { plan: entitlement.plan, source: entitlement.source }, session }); } catch (error) { if (error.code === 'INVALID_MODEL') return json(res, 400, { ok: false, code: error.code, message: error.message }); if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error); throw error; } }
+    if (req.method === 'POST' && url.pathname === '/api/model-scan/start') { const body = await readJson(req); if (typeof body.path !== 'string' || !body.path.trim()) return json(res, 400, { ok: false, code: 'PATH_REQUIRED' }); try { const model = body.model || 'standard'; const entitlement = entitlementGate.requireModel(model); const session = modelPipeline.start(body.path, model, { allowCloudFallback: body.cloudFallback === true, allowAiEvidence: body.aiEvidence === true }); return json(res, 202, { ok: true, entitlement: { plan: entitlement.plan, source: entitlement.source }, session }); } catch (error) { if (error.code === 'INVALID_MODEL') return json(res, 400, { ok: false, code: error.code, message: error.message }); if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error); throw error; } }
     if (req.method === 'GET' && url.pathname === '/api/model-scan/status') { const id = url.searchParams.get('id'); if (!id) return json(res, 400, { ok: false, code: 'SCAN_ID_REQUIRED' }); const session = modelPipeline.snapshot(id); if (!session) return json(res, 404, { ok: false, code: 'MODEL_SCAN_NOT_FOUND' }); return json(res, 200, { ok: true, session }); }
     if (req.method === 'POST' && url.pathname === '/api/pro-scan/start') { const body = await readJson(req); if (typeof body.path !== 'string' || !body.path.trim()) return json(res, 400, { ok: false, code: 'PATH_REQUIRED' }); try { const entitlement = entitlementGate.requireModel('plus'); const session = modelPipeline.start(body.path, 'plus'); return json(res, 202, { ok: true, deprecated: true, mappedModel: 'plus', entitlement: { plan: entitlement.plan, source: entitlement.source }, session }); } catch (error) { if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error); throw error; } }
     if (req.method === 'GET' && url.pathname === '/api/pro-scan/status') { const id = url.searchParams.get('id'); if (!id) return json(res, 400, { ok: false, code: 'SCAN_ID_REQUIRED' }); const session = modelPipeline.snapshot(id); if (!session) return json(res, 404, { ok: false, code: 'PRO_SCAN_NOT_FOUND' }); return json(res, 200, { ok: true, deprecated: true, mappedModel: 'plus', session }); }
@@ -265,4 +269,4 @@ if (require.main === module) {
   }).catch(async error => { await recordRuntimeError(error, { area: 'startup' }); console.error(`MalGuard startup failed: ${safeText(error.code || error.name || 'INTERNAL_ERROR', 128)}`); process.exit(1); });
 }
 
-module.exports = { startServer, handler, scanner, sandbox, validationLab, cloudInspection, gtaSimulation, gtaCloudSimulation, aiEvidence, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }), getRealtimeProtectionStatus: () => protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, state:'stopped' }, getRuntimeProcessProtectionStatus: () => runtimeProcessGuard ? runtimeProcessGuard.getCachedStatus() : { ok:false, active:false, healthy:false, state:'stopped' } };
+module.exports = { startServer, handler, scanner, sandbox, validationLab, cloudInspection, gtaSimulation, gtaCloudSimulation, malguardAiProvider, aiEvidence, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }), getRealtimeProtectionStatus: () => protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, state:'stopped' }, getRuntimeProcessProtectionStatus: () => runtimeProcessGuard ? runtimeProcessGuard.getCachedStatus() : { ok:false, active:false, healthy:false, state:'stopped' } };

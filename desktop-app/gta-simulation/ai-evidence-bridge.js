@@ -39,9 +39,10 @@ class AiEvidenceBridge {
   }
 
   capabilities() {
+    const available = !!(this.provider && (typeof this.provider.available !== 'function' || this.provider.available() === true));
     return {
       schemaVersion: AI_EVIDENCE_SCHEMA_VERSION,
-      available: !!this.provider,
+      available,
       provider: this.provider && this.provider.name ? String(this.provider.name).slice(0, 80) : null,
       onlineLearning: false,
       modelWeightsMutableDuringScan: false,
@@ -64,16 +65,16 @@ class AiEvidenceBridge {
         : null,
     };
 
-    if (!this.provider) {
+    if (!this.provider || (typeof this.provider.available === 'function' && this.provider.available() !== true)) {
       return {
         ok: true,
         available: false,
-        status: 'provider_not_configured',
+        status: this.provider ? 'provider_unavailable' : 'provider_not_configured',
         evidenceSchemaVersion: AI_EVIDENCE_SCHEMA_VERSION,
         onlineLearning: false,
         modelWeightsMutableDuringScan: false,
         autoRemediation: false,
-        note: 'The AI evidence interface is wired into the scan pipeline, but no real AI inference provider is packaged yet.',
+        note: this.provider ? 'The AI evidence provider is configured but unavailable.' : 'The AI evidence interface is wired into the scan pipeline, but no real AI inference provider is packaged yet.',
       };
     }
 
