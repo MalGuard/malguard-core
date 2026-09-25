@@ -90,6 +90,29 @@ function executedResult(verdict, extra = {}) {
  assert.equal(standardMode,'pro');
  assert.equal(standardSandboxCalls,0);
 
+
+// Completion-state race regression: a slow AI provider must keep the public
+// session non-terminal until evidence attachment finishes.
+{
+ let releaseAi;
+ const slowAi = {
+   analyze: () => new Promise(resolve => { releaseAi = () => resolve({ok:true,status:'completed',risk:'low',summary:'bounded'}); }),
+ };
+ const manager = new ModelScanPipelineManager({
+   scanner:{scanPath:async()=>({finalVerdict:'safe',contentSha256:'9'.repeat(64),sourceIdentity:{sha256:'9'.repeat(64),revalidated:true},scriptAnalysis:{supported:true,verdict:'safe',errorCode:null}})},
+   sandbox:sandboxMock(),
+   aiEvidence:slowAi,
+ });
+ const started=manager.start('/tmp/slow.lua','standard',{allowAiEvidence:true});
+ for(let i=0;i<100 && typeof releaseAi!=='function';i++) await new Promise(r=>setTimeout(r,1));
+ const mid=manager.snapshot(started.id);
+ assert.notEqual(mid.state,'completed','session must not expose completed before AI evidence attachment finishes');
+ releaseAi();
+ const done=await waitFor(manager,started.id);
+ assert.equal(done.state,'completed');
+ assert.equal(done.finalResult.aiEvidence.status,'completed');
+}
+
  // Plus performs deep analysis first, then uses the same evidence as a no-execution fallback if Sandbox is unavailable.
  let plusMode = null;
  let plusSandboxCalls = 0;
