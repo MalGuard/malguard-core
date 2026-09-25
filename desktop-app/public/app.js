@@ -12,8 +12,8 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelect
 
 const MODEL_HINTS={
  standard:'Standard: hardened local analysis for GTA plugins, Lua/C# scripts and ZIP mod packages + synthetic GTA context + MalGuard AI evidence.',
- plus:'Plus: deep local analysis + synthetic GTA context + optional disposable isolated GTA simulation and MalGuard AI evidence analysis.',
- pro:'Pro: verified local behavioral analysis when possible + GTA simulation + optional isolated cloud simulation and MalGuard AI evidence analysis.',
+ plus:'Plus: deep local analysis + synthetic GTA context + disposable isolated GTA fallback and MalGuard AI evidence analysis when internet is available.',
+ pro:'Pro: verified local behavioral analysis when possible + GTA simulation + isolated cloud fallback and MalGuard AI evidence analysis when internet is available.',
 };
 const VERDICT_COPY={
  safe:{label:'Safe',tone:'safe',title:'No threat detected',message:'MalGuard completed the selected analysis and found no malicious behavior in the available evidence.'},
@@ -219,7 +219,7 @@ $('scanBtn').onclick=async()=>{
    return;
  }
  if(model==='standard'&&!standardSupportsFile(file?file.name:p)){
-   setScanSummary('Standard scans .asi and .dll GTA mod files only. ZIP packages and scripts require Plus or Pro when available; PDF files are not supported. No scan was run.','unsupported');
+   setScanSummary('Standard scans supported GTA .asi/.dll plugins, .lua/.cs scripts and .zip mod packages. This file type is outside Standard coverage, so no scan was run.','unsupported');
    return;
  }
  if(file&&file.size>64*1024*1024){setScanSummary(scanFailureMessage('UPLOAD_TOO_LARGE'),'error');return;}
