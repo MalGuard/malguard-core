@@ -11,7 +11,8 @@ const ALLOWED_RISKS = new Set(['low', 'medium', 'high', 'unknown']);
 
 function boundedString(value, max) {
   if (typeof value !== 'string') return null;
-  return value.length <= max ? value : value.slice(0, max);
+  const normalized = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  return normalized.length <= max ? normalized : normalized.slice(0, max);
 }
 
 function boundedNumber(value, min, max) {
