@@ -43,11 +43,20 @@ function element(id) {
   };
   vm.runInNewContext(js, { document, fetch, setTimeout, console });
   get('scanModel').value = 'standard';
-  get('scanFile').files = [{ name: 'GTA-Guard-Safe-Test-Mod.zip', size: 514 }];
+
+  get('scanFile').files = [{ name: 'notes.pdf', size: 514 }];
   await get('scanBtn').onclick();
   assert.equal(get('scanOut').className, 'scan-summary result-unsupported');
-  assert.match(get('scanOut').textContent, /ZIP packages/);
-  assert(!requests.some(url => url.startsWith('/api/model-scan/upload')), 'unsupported file should not be uploaded as a completed scan');
+  assert(!requests.some(url => url.startsWith('/api/model-scan/upload')), 'unsupported PDF must not be uploaded');
+
+  get('scanFile').files = [{ name: 'GTA-Guard-Safe-Test-Mod.zip', size: 514 }];
+  await get('scanBtn').onclick();
+  assert.equal(get('scanOut').className, 'scan-summary result-error', 'supported ZIP should enter the Standard upload path; synthetic network failure then surfaces as an error');
+  assert(requests.some(url => url.includes('name=GTA-Guard-Safe-Test-Mod.zip')), 'Standard ZIP package must reach the scan upload API');
+
+  get('scanFile').files = [{ name: 'synthetic.lua', size: 32 }];
+  await get('scanBtn').onclick();
+  assert(requests.some(url => url.includes('name=synthetic.lua')), 'Standard Lua script must reach the scan upload API');
 
   get('scanFile').files = [{ name: 'synthetic.asi', size: 8 }];
   await get('scanBtn').onclick();
@@ -55,6 +64,6 @@ function element(id) {
   assert.equal(get('scanOut').role, 'alert');
   assert.match(get('scanOut').textContent, /Scan failed/);
   assert.equal(get('modelDiagnostics').hidden, false, 'Standard errors must expose a diagnostic code');
-  assert(requests.some(url => url.startsWith('/api/model-scan/upload')));
-  console.log('✓ Scanner feedback: unsupported ZIP never uploaded as Standard, real failure red beside picker, Standard diagnostics visible');
+  assert(requests.some(url => url.includes('name=synthetic.asi')));
+  console.log('✓ Scanner feedback: Standard accepts supported ZIP/Lua/ASI inputs, rejects PDF, and exposes upload failures beside the picker');
 })().catch(error => { console.error(error); process.exitCode = 1; });
