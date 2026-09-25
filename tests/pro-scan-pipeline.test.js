@@ -9,6 +9,7 @@ const {
   mergeSandboxVerdict,
   directSandboxVerdict,
   deepStaticFallbackVerdict,
+  standardVerdictWithCoverage,
 } = require('../desktop-app/pro-scan-pipeline.js');
 
 function waitFor(manager, id, timeoutMs = 2000) {
@@ -69,6 +70,11 @@ function executedResult(verdict, extra = {}) {
  assert.equal(deepStaticFallbackVerdict({finalVerdict:'malicious'}),'malicious');
  assert.equal(deepStaticFallbackVerdict({finalVerdict:'suspicious'}),'suspicious');
  assert.equal(deepStaticFallbackVerdict({finalVerdict:'safe'}),'inconclusive','static fallback must not claim SAFE without dynamic execution');
+ assert.deepEqual(standardVerdictWithCoverage({finalVerdict:'safe',sourceIdentity:{revalidated:true},engineResult:{rulesStatus:'official',peValid:true}}),{verdict:'safe',coverageIssues:[],fullCoverage:true});
+ const degradedStandard=standardVerdictWithCoverage({finalVerdict:'safe',sourceIdentity:{revalidated:false},engineResult:{rulesStatus:'fallback',peValid:true}});
+ assert.equal(degradedStandard.verdict,'inconclusive','Standard must not claim SAFE when identity/rules coverage is degraded');
+ assert(degradedStandard.coverageIssues.includes('source_identity_not_revalidated'));
+ assert(degradedStandard.coverageIssues.includes('rules_not_official'));
 
  // Standard uses the hardened multi-layer core but never uses Sandbox.
  let standardMode = null;
