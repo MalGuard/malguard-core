@@ -1,0 +1,112 @@
+name: TSH Main - Full Program 3-Stage
+
+on:
+  push:
+    branches:
+      - feature/fusion-engine-ths
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-1-core-detection:
+    name: "TSH 1/3 - Core Detection & File Intelligence"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+
+      - name: Verify JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check tests/tsh-main-3stage.js
+          node --check desktop-app/fusion/evidence-fusion-engine.js
+          node --check desktop-app/pro-scan-pipeline.js
+
+      - name: Run TSH Stage 1
+        run: node tests/tsh-main-3stage.js stage1
+
+  stage-2-isolation-runtime:
+    name: "TSH 2/3 - Isolation, Sandbox & Runtime Defense"
+    needs: stage-1-core-detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+
+      - name: Run TSH Stage 2
+        run: node tests/tsh-main-3stage.js stage2
+
+  stage-3-product-release:
+    name: "TSH 3/3 - Product, UI/API & Release Integrity"
+    needs: stage-2-isolation-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+
+      - name: Run TSH Stage 3
+        run: node tests/tsh-main-3stage.js stage3
+
+      - name: Verify 100% product readiness gate
+        run: node tools/verify-product-readiness.js
+
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+          elif command -v google-chrome-stable >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v google-chrome-stable)" >> "$GITHUB_ENV"
+          elif command -v chromium >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v chromium)" >> "$GITHUB_ENV"
+          elif command -v chromium-browser >/dev/null 2>&1; then
+            echo "CHROME_PATH=$(command -v chromium-browser)" >> "$GITHUB_ENV"
+          else
+            echo "No Chrome/Chromium executable found" >&2
+            exit 1
+          fi
+
+      - name: Run live Chromium acceptance
+        run: node tests/chromium-live-validation.js
+
+      - name: Build portable release candidate for verification only
+        run: node tools/build-portable-package.js
+
+      - name: Verify release candidate gate
+        run: node tools/verify-release-candidate.js
+
+      - name: Final TSH declaration
+        run: |
+          echo "TSH MAIN 3-STAGE PASS"
+          echo "Stage 1: Core Detection and File Intelligence"
+          echo "Stage 2: Isolation, Sandbox and Runtime Defense"
+          echo "Stage 3: Product, UI/API, Packaging and Release Integrity"
+          echo "No merge or release performed."
