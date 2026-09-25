@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.0.0",
+  "policy": "pinned-official-release-assets",
+  "engines": {
+    "yaraX": {
+      "version": "1.20.0",
+      "source": "VirusTotal/yara-x",
+      "license": "BSD-3-Clause",
+      "archive": "yara-x-v1.20.0-x86_64-pc-windows-msvc.zip",
+      "url": "https://github.com/VirusTotal/yara-x/releases/download/v1.20.0/yara-x-v1.20.0-x86_64-pc-windows-msvc.zip",
+      "sha256": "b1e2840bac593aea353d2b2b341f5a862c9d61c0c406d9abbbad9e1fa35163a1",
+      "executable": "yr.exe"
+    },
+    "capa": {
+      "version": "9.4.0",
+      "source": "mandiant/capa",
+      "license": "Apache-2.0",
+      "archive": "capa-v9.4.0-windows.zip",
+      "url": "https://github.com/mandiant/capa/releases/download/v9.4.0/capa-v9.4.0-windows.zip",
+      "sha256": "670ab1a58b81f59cb57533bf4021ac1e7033fbe9b5d5cc180f796976081e3bb5",
+      "executable": "capa.exe"
+    },
+    "floss": {
+      "version": "3.1.1",
+      "source": "mandiant/flare-floss",
+      "license": "Apache-2.0",
+      "archive": "floss-v3.1.1-windows.zip",
+      "url": "https://github.com/mandiant/flare-floss/releases/download/v3.1.1/floss-v3.1.1-windows.zip",
+      "sha256": "6c71089b8c629c69424b042769f1565f71adc6cd24b2f8d3713c96fa7fdac2fb",
+      "executable": "floss.exe"
+    }
+  }
+}
