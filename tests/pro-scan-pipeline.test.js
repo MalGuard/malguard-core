@@ -70,7 +70,7 @@ function executedResult(verdict, extra = {}) {
  assert.equal(deepStaticFallbackVerdict({finalVerdict:'suspicious'}),'suspicious');
  assert.equal(deepStaticFallbackVerdict({finalVerdict:'safe'}),'inconclusive','static fallback must not claim SAFE without dynamic execution');
 
- // Standard maps to the lightweight/free core and never uses Sandbox.
+ // Standard uses the hardened multi-layer core but never uses Sandbox.
  let standardMode = null;
  let standardSandboxCalls = 0;
  const standardManager = new ModelScanPipelineManager({
@@ -81,7 +81,7 @@ function executedResult(verdict, extra = {}) {
  assert.equal(standard.finalResult.model,'standard');
  assert.equal(standard.finalResult.verdict,'safe');
  assert.equal(standard.finalResult.sandboxRequested,false);
- assert.equal(standardMode,'free');
+ assert.equal(standardMode,'pro');
  assert.equal(standardSandboxCalls,0);
 
  // Plus performs deep analysis first, then uses the same evidence as a no-execution fallback if Sandbox is unavailable.
