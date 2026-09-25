@@ -22,7 +22,7 @@ const VERDICT_COPY={
  inconclusive:{label:'Unclear',tone:'inconclusive',title:'No safety verdict',message:'The analysis did not establish whether this file is safe. Do not treat it as approved.'},
 };
 function currentModel(){return $('scanModel').value}
-function cloudFallbackEnabled(){const box=$('cloudFallback');return currentModel()!=='standard'&&!!(box&&box.checked)}
+function cloudFallbackEnabled(){const box=$('cloudFallback');return currentModel()!=='standard'&&(!box||box.checked)}
 function aiEvidenceEnabled(){const box=$('aiEvidence');return !!(box&&box.checked)}
 function updateModelUi(){
  const model=currentModel();
@@ -239,7 +239,7 @@ $('scanBtn').onclick=async()=>{
        ?'GTA plugin inspected locally and in a disposable cloud environment. Direct plugin execution was not performed, so the result remains fail-closed.'
        :'GTA plugin inspected with non-executing fallback analysis. Direct plugin execution was not performed, so MalGuard did not claim a SAFE result.','inconclusive');
    }else if(sandboxSetupRequired(result)){
-     setScanSummary('File kept protected. Secure Sandbox setup is required before isolated execution can run on this PC.','setup');
+     setScanSummary(result&&result.cloudInspectionCompleted===true?'Cloud isolation analysis completed. Dynamic execution was not proven, so MalGuard kept the verdict fail-closed.':'File kept protected. No verified isolation backend completed this analysis.','setup');
    }else if(result&&result.completionState==='preflight_failed_closed'){
      setScanSummary('File kept protected because MalGuard could not prepare it safely for isolated execution.','setup');
    }else if(result&&result.verdict==='inconclusive'){
