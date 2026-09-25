@@ -7,6 +7,11 @@ const path = require('path');
 const ENGINE_VERSION = '2.0.0';
 const DEFAULT_TIMEOUT_MS = 45_000;
 const MAX_OUTPUT = 2 * 1024 * 1024;
+const ENGINE_ROOT = path.join(__dirname, '..', 'engines');
+function bundled(relative, fallback) {
+  const candidate = path.join(ENGINE_ROOT, ...relative.split('/'));
+  return fs.existsSync(candidate) ? candidate : fallback;
+}
 
 function bounded(text) {
   const s = String(text || '');
@@ -67,23 +72,23 @@ async function runExternalEngines(filePath, options = {}) {
   const st = await fs.promises.stat(resolved);
   if (!st.isFile()) throw Object.assign(new Error('scan target must be a file'), { code:'NOT_FILE' });
 
-  const yaraRules = options.yaraRules || process.env.MALGUARD_YARAX_RULES || '';
+  const yaraRules = options.yaraRules || process.env.MALGUARD_YARAX_RULES || path.join(__dirname,'rules','malguard.yar');
   const tasks = [];
 
   tasks.push((async()=>{
     if (!yaraRules) return { name:'yara_x', status:'unavailable', reason:'rules_not_configured' };
-    const r=await runProcess(process.env.MALGUARD_YARAX_BIN || 'yr', ['scan','--output-format','jsonl',yaraRules,resolved]);
+    const r=await runProcess(process.env.MALGUARD_YARAX_BIN || bundled('yara-x/yr.exe','yr'), ['scan','--output-format','jsonl',yaraRules,resolved]);
     return { name:'yara_x', status:verdictFromYara(r), available:r.available, exitCode:r.exitCode, evidence:r.stdout ? bounded(r.stdout) : null };
   })());
 
   tasks.push((async()=>{
-    const r=await runProcess(process.env.MALGUARD_CAPA_BIN || 'capa', ['-j',resolved], {timeoutMs:90_000});
+    const r=await runProcess(process.env.MALGUARD_CAPA_BIN || bundled('capa/capa.exe','capa'), ['-j',resolved], {timeoutMs:90_000});
     const json=parseJson(r);
     return { name:'capa', status:!r.available?'unavailable':r.ok?'complete':'error', available:r.available, capabilities:json && json.rules ? Object.keys(json.rules).slice(0,256) : [], evidenceCount:json && json.rules ? Object.keys(json.rules).length : 0 };
   })());
 
   tasks.push((async()=>{
-    const r=await runProcess(process.env.MALGUARD_FLOSS_BIN || 'floss', ['--json',resolved], {timeoutMs:90_000});
+    const r=await runProcess(process.env.MALGUARD_FLOSS_BIN || bundled('floss/floss.exe','floss'), ['--json',resolved], {timeoutMs:90_000});
     const json=parseJson(r);
     const strings=json && json.strings ? json.strings : null;
     const count=strings && typeof strings==='object' ? Object.values(strings).reduce((n,v)=>n+(Array.isArray(v)?v.length:0),0) : 0;
@@ -91,7 +96,7 @@ async function runExternalEngines(filePath, options = {}) {
   })());
 
   tasks.push((async()=>{
-    const r=await runProcess(process.env.MALGUARD_CLAM_BIN || 'clamscan', ['--no-summary','--infected',resolved], {timeoutMs:90_000});
+    const r=await runProcess(process.env.MALGUARD_CLAM_BIN || bundled('clamav/clamscan.exe','clamscan'), ['--no-summary','--infected',resolved], {timeoutMs:90_000});
     return { name:'clamav', status:verdictFromClam(r), available:r.available, exitCode:r.exitCode };
   })());
 
