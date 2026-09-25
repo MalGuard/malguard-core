@@ -11,9 +11,9 @@ async function status(){try{const s=await api('/api/status');$('status').textCon
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')});
 
 const MODEL_HINTS={
- standard:'Standard: hardened local analysis for GTA plugins, Lua/C# scripts and ZIP mod packages + synthetic GTA context + MalGuard AI evidence.',
- plus:'Plus: deep local analysis + synthetic GTA context + disposable isolated GTA fallback and MalGuard AI evidence analysis when internet is available.',
- pro:'Pro: verified local behavioral analysis when possible + GTA simulation + isolated cloud fallback and MalGuard AI evidence analysis when internet is available.',
+ standard:'Standard: MalGuard Core + YARA-X + capa + FLOSS + Microsoft Defender when available + Threat Intel + bounded AI evidence.',
+ plus:'Plus: full local multi-engine analysis + Threat Intel + AI evidence + isolated behavioral fallback when available.',
+ pro:'Pro: maximum local multi-engine analysis first, then verified Sandbox behavior when available, plus GTA simulation, Threat Intel and AI correlation.',
 };
 const VERDICT_COPY={
  safe:{label:'Safe',tone:'safe',title:'No threat detected',message:'MalGuard completed the selected analysis and found no malicious behavior in the available evidence.'},
@@ -74,6 +74,11 @@ function friendlyPhase(event){
  if(phase==='script_analysis')return 'Script analysis completed';
  if(phase==='correlation')return 'Security signals correlated';
  if(phase==='threat_intelligence')return 'Threat-intelligence check completed';
+ if(phase==='multi_engine_scan')return status==='completed'?'Independent multi-engine scan completed':'Independent multi-engine coverage is limited';
+ if(phase==='engine_yarax')return 'YARA-X signature/rule analysis';
+ if(phase==='engine_capa')return 'capa capability analysis';
+ if(phase==='engine_floss')return 'FLOSS deobfuscated-string analysis';
+ if(phase==='engine_defender')return 'Microsoft Defender independent AV scan';
  if(phase==='sandbox_decision')return status==='warning'?'Additional isolated analysis selected':'Sandbox decision completed';
  if(phase==='preflight')return status==='completed'?'File prepared for isolated analysis':status==='blocked'?'File could not be prepared safely':'Preparing file for isolated analysis';
  if(phase==='gta_simulation')return status==='completed'?'Synthetic GTA context completed':status==='blocked'?'GTA simulation context unavailable':'Building synthetic GTA context';
@@ -104,7 +109,7 @@ function pluginDirectExecutionUnsupported(result){
  return !!(result&&result.pluginDirectExecutionUnsupported===true);
 }
 function sandboxSetupRequired(result){
- return !!(result&&!pluginDirectExecutionUnsupported(result)&&(
+ return !!(result&&result.verdict==='inconclusive'&&!pluginDirectExecutionUnsupported(result)&&(
    result.completionState==='sandbox_unavailable_fail_closed'||
    (result.sandboxRequested===true&&result.sandboxCompleted===false&&result.completionState!=='preflight_failed_closed')
  ));
@@ -146,6 +151,25 @@ function renderCustomerResult(session){
  header.append(title,badge);
  const message=document.createElement('p');message.className='result-message';message.textContent=copy.message;
  box.append(header,message);
+ const multi=result.localResult&&result.localResult.multiEngine;
+ if(multi&&multi.engines){
+   const engines=document.createElement('div');engines.className='engine-results';
+   const heading=document.createElement('strong');heading.textContent='Independent engines';engines.append(heading);
+   const names=[['yaraX','YARA-X'],['capa','capa'],['floss','FLOSS'],['defender','Microsoft Defender']];
+   for(const pair of names){
+     const r=multi.engines[pair[0]]||{};
+     const row=document.createElement('div');row.className='engine-result-row';
+     const verdict=String(r.verdict||'inconclusive').toUpperCase();
+     row.textContent=pair[1]+' · '+String(r.status||'unavailable')+' · '+verdict;
+     engines.append(row);
+   }
+   box.append(engines);
+ }
+ if(result.fallbackUsed===true&&result.verdict!=='inconclusive'){
+   const fallback=document.createElement('p');fallback.className='result-note';
+   fallback.textContent='Deep Multi-Engine static verification completed. Behavioral execution was unavailable, but the displayed verdict comes from completed independent static evidence, not from a simulated Sandbox.';
+   box.append(fallback);
+ }
  const ai=result.aiEvidence;
  if(ai&&ai.status==='completed'){
    const aiNote=document.createElement('p');
@@ -234,7 +258,7 @@ $('scanBtn').onclick=async()=>{
      setScanSummary(scanFailureMessage(session.error&&session.error.code),'error');
      $('modelDiagnostics').hidden=false;
      out('modelDiagnosticsOut',{code:session.error&&session.error.code||'SCAN_FAILED',message:session.error&&session.error.message||null});
-   }else if(pluginDirectExecutionUnsupported(result)){
+   }else if(pluginDirectExecutionUnsupported(result)&&result&&result.verdict==='inconclusive'){
      setScanSummary(result.cloudInspectionCompleted===true
        ?'GTA plugin inspected locally and in a disposable cloud environment. Direct plugin execution was not performed, so the result remains fail-closed.'
        :'GTA plugin inspected with non-executing fallback analysis. Direct plugin execution was not performed, so MalGuard did not claim a SAFE result.','inconclusive');
