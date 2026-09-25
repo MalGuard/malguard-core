@@ -51,6 +51,20 @@ if (!fs.existsSync(path.join(OUT, 'desktop-app/integrity/runtime-integrity.js'))
 if (!fs.existsSync(path.join(OUT, 'desktop-app/health/preload.js'))) fail('startup self-heal preload missing');
 if (!fs.existsSync(path.join(OUT, 'desktop-app/health/self-heal.js'))) fail('startup self-heal manager missing');
 
+if (process.env.MALGUARD_REQUIRE_MULTI_ENGINE_BUNDLE === '1') {
+  for (const required of [
+    'desktop-app/multi-engine/bin/ENGINE-BUNDLE.json',
+    'desktop-app/multi-engine/bin/yr.exe',
+    'desktop-app/multi-engine/bin/capa.exe',
+    'desktop-app/multi-engine/bin/floss.exe',
+    'desktop-app/multi-engine/engine-lock.json',
+    'desktop-app/multi-engine/rules/malguard.yar',
+  ]) {
+    if (!fs.existsSync(path.join(OUT, required))) fail('required multi-engine runtime file missing: ' + required);
+  }
+}
+
+
 const runtimePackage = JSON.parse(fs.readFileSync(path.join(OUT, 'package.json'), 'utf8'));
 const expectedStart = 'node --require ./desktop-app/integrity/preload.js --require ./desktop-app/health/preload.js desktop-app/server.js';
 if (!runtimePackage.scripts || runtimePackage.scripts.start !== expectedStart) {
