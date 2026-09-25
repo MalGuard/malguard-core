@@ -154,6 +154,12 @@ function renderCustomerResult(session){
    aiNote.textContent='MalGuard AI · '+risk+(ai.summary?' · '+ai.summary:'')+' AI advice is advisory and does not change the security verdict.';
    box.append(aiNote);
  }
+ if(result&&result.sandboxCompleted===true&&result.sandboxResult&&result.sandboxResult.gtaPluginExecution){
+   const execNote=document.createElement('p');
+   execNote.className='result-note';
+   execNote.textContent='GTA plugin behavioral loading ran only inside the certified Windows Sandbox synthetic game context. No host fallback was used.';
+   box.append(execNote);
+ }
  if(result.gtaCloudSimulationCompleted===true){
    const simNote=document.createElement('p');
    simNote.className='result-note';
