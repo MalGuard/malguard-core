@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { FUSION_ENGINE_VERSION, fuseEvidence } = require('./fusion/evidence-fusion-engine.js');
 
-const PIPELINE_VERSION = '1.8.0';
+const PIPELINE_VERSION = '1.9.0';
 const MAX_EVENTS = 64;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MODELS = Object.freeze(['standard', 'plus', 'pro']);
@@ -78,6 +78,10 @@ function standardVerdictWithCoverage(localResult) {
   if (archive && (archive.inspectionSucceeded !== true || archive.inspectionStatus === 'completed_partial_timeout')) {
     coverageIssues.push('archive_analysis_incomplete');
   }
+  const multi = localResult && localResult.multiEngine;
+  if (multi && multi.coverage && multi.coverage.requiredForSafe === true && multi.coverage.complete !== true) {
+    coverageIssues.push('independent_multi_engine_incomplete');
+  }
 
   return {
     verdict: coverageIssues.length ? 'inconclusive' : 'safe',
@@ -128,6 +132,40 @@ class ModelScanPipelineManager {
     if (session.events.length > MAX_EVENTS) session.events.splice(0, session.events.length - MAX_EVENTS);
     session.updatedAt = this.now();
     return event;
+  }
+
+  _emitMultiEngine(session, local) {
+    const multi = local && local.multiEngine;
+    if (!multi || !multi.engines) {
+      this._emit(session, 'multi_engine_scan', 'warning', 'Independent multi-engine analysis unavailable in this runtime');
+      return;
+    }
+    this._emit(session, 'multi_engine_scan', multi.coverage && multi.coverage.complete ? 'completed' : 'warning',
+      'Independent local engine set finished', {
+        verdict: multi.verdict || 'inconclusive',
+        riskScore: multi.riskScore == null ? null : multi.riskScore,
+        coverageComplete: !!(multi.coverage && multi.coverage.complete),
+        requiredForSafe: !!(multi.coverage && multi.coverage.requiredForSafe),
+      });
+    const map = [
+      ['yaraX','engine_yarax','YARA-X'],
+      ['capa','engine_capa','capa'],
+      ['floss','engine_floss','FLOSS'],
+      ['defender','engine_defender','Microsoft Defender'],
+    ];
+    for (const [key, phase, label] of map) {
+      const result = multi.engines[key];
+      if (!result) continue;
+      const status = result.status === 'complete' ? 'completed'
+        : result.status === 'not_applicable' || result.status === 'unavailable' ? 'warning'
+        : 'blocked';
+      this._emit(session, phase, status, label + ' analysis ' + result.status, {
+        engine: label,
+        status: result.status,
+        verdict: result.verdict || 'inconclusive',
+        elapsedMs: result.elapsedMs == null ? null : result.elapsedMs,
+      });
+    }
   }
 
   start(filePath, model = 'plus', { onFinish = null, allowCloudFallback = false, allowAiEvidence = false } = {}) {
@@ -307,7 +345,7 @@ class ModelScanPipelineManager {
       }
     }
 
-    if (session.finalResult && session.finalResult.fallbackUsed === true) {
+    if (session.finalResult && session.localResult) {
       const fusion = fuseEvidence({
         localResult: session.localResult,
         sandboxResult: session.sandboxResult,
@@ -325,6 +363,7 @@ class ModelScanPipelineManager {
     this._emit(session, 'standard_scan', 'running', 'Running hardened Standard multi-layer local scan');
     const local = await this.scanner.scanPath(session.filePath, 'pro');
     session.localResult = clone(local);
+    this._emitMultiEngine(session, local);
     const coverage = standardVerdictWithCoverage(local);
     const verdict = coverage.verdict;
     this._emit(session, 'standard_scan', 'completed', 'Hardened Standard multi-layer scan completed', {
@@ -353,6 +392,7 @@ class ModelScanPipelineManager {
 
     const local = existingLocal || await this.scanner.scanPath(session.filePath, 'pro');
     session.localResult = clone(local);
+    this._emitMultiEngine(session, local);
     let cloudInspectionResult = null;
     let gtaCloudSimulationResult = null;
     const gtaPlugin = GTA_PLUGIN_EXTENSIONS.has(path.extname(session.filePath).toLowerCase());
@@ -472,6 +512,7 @@ class ModelScanPipelineManager {
     this._emit(session, 'static_scan', 'running', 'Running local deep static analysis');
     const local = await this.scanner.scanPath(session.filePath, 'pro');
     session.localResult = clone(local);
+    this._emitMultiEngine(session, local);
     const localVerdict = normalizeVerdict(local && local.finalVerdict);
     this._emit(session, 'static_scan', 'completed', 'Deep static analysis completed', {
       verdict: localVerdict,
@@ -578,53 +619,60 @@ class ModelScanPipelineManager {
   }
 
   async _runPro(session) {
-    this._emit(session, 'preflight', 'running', 'Validating sample before direct Sandbox handoff');
+    this._emit(session, 'static_scan', 'running', 'Running maximum local multi-engine static analysis before Sandbox');
+    const local = await this.scanner.scanPath(session.filePath, 'pro');
+    session.localResult = clone(local);
+    this._emitMultiEngine(session, local);
+    const localVerdict = normalizeVerdict(local && local.finalVerdict);
+    this._emit(session, 'static_scan', 'completed', 'Maximum local multi-engine static analysis completed', {
+      verdict: localVerdict,
+      coverageComplete: !!(local && local.multiEngine && local.multiEngine.coverage && local.multiEngine.coverage.complete),
+    });
+
+    if (localVerdict === 'malicious') {
+      session.finalResult = {
+        model: 'pro',
+        verdict: 'malicious',
+        completionState: 'complete',
+        sandboxRequested: false,
+        sandboxStarted: false,
+        sampleExecutionStarted: false,
+        sandboxCompleted: false,
+        localResult: clone(local),
+      };
+      this._emit(session, 'sandbox_decision', 'completed', 'Sandbox skipped because independent/local evidence is already malicious');
+      this._emit(session, 'final_verdict', 'completed', 'Final verdict: MALICIOUS', { verdict:'malicious', model:'pro' });
+      return;
+    }
+
+    this._emit(session, 'preflight', 'running', 'Validating sample before isolated behavioral analysis');
     const preflight = await this.sandbox.preflightSample(session.filePath);
     session.preflight = clone(preflight);
     if (!preflight || preflight.ok !== true) {
       const code = preflight && preflight.code ? preflight.code : 'SANDBOX_PREFLIGHT_FAILED';
       const extension = path.extname(session.filePath).toLowerCase();
       const pluginDirectExecutionUnsupported = code === 'SANDBOX_SAMPLE_TYPE_UNSUPPORTED' && GTA_PLUGIN_EXTENSIONS.has(extension);
-
-      if (pluginDirectExecutionUnsupported) {
-        this._emit(session, 'preflight', 'warning', 'GTA plugin cannot be launched directly; switching Pro to non-executing fallback analysis', {
+      this._emit(session, 'preflight', pluginDirectExecutionUnsupported ? 'warning' : 'blocked',
+        'Behavioral preflight unavailable; preserving maximum static multi-engine evidence', {
           code,
           extension,
-          fallback: 'deep_static_no_execution',
+          fallback: 'deep_static_multi_engine_no_execution',
         });
-        return this._runDeepStaticFallback(session, {
-          model: 'pro',
-          reasonCode: code,
-          preflight,
-          pluginDirectExecutionUnsupported: true,
-        });
-      }
-
-      this._emit(session, 'preflight', 'blocked', 'Pro Sandbox preflight failed closed', {
-        code,
-      });
-      session.finalResult = {
+      return this._runDeepStaticFallback(session, {
         model: 'pro',
-        verdict: 'inconclusive',
-        completionState: 'preflight_failed_closed',
-        sandboxRequested: true,
-        sandboxStarted: false,
-        sampleExecutionStarted: false,
-        sandboxCompleted: false,
-        preflight: clone(preflight || { ok: false, code: 'SANDBOX_PREFLIGHT_FAILED' }),
-      };
-      this._emit(session, 'final_verdict', 'completed', 'Final verdict: INCONCLUSIVE', {
-        verdict: 'inconclusive', model: 'pro', sandboxStarted: false, sampleExecutionStarted: false, sandboxCompleted: false,
+        reasonCode: code,
+        existingLocal: local,
+        preflight,
+        pluginDirectExecutionUnsupported,
       });
-      return;
     }
 
-    this._emit(session, 'preflight', 'completed', 'Sample validated for direct Sandbox analysis', {
+    this._emit(session, 'preflight', 'completed', 'Sample validated for isolated behavioral analysis', {
       sha256: preflight.sha256,
       size: preflight.size,
       extension: preflight.extension,
     });
-    this._emit(session, 'sandbox_analysis', 'running', 'Sending sample directly to isolated Sandbox');
+    this._emit(session, 'sandbox_analysis', 'running', 'Sending sample to isolated Sandbox after static multi-engine analysis');
     const sandboxResult = await this.sandbox.analyzeUntrustedSample(session.filePath);
     session.sandboxResult = clone(sandboxResult);
     const sandboxStarted = !!(sandboxResult && sandboxResult.sandboxLaunched === true);
@@ -637,7 +685,7 @@ class ModelScanPipelineManager {
         : sandboxResult && sandboxResult.ok === true
           ? 'SANDBOX_EXECUTION_PROOF_MISSING'
           : 'SANDBOX_UNAVAILABLE';
-      this._emit(session, 'sandbox_analysis', 'blocked', 'Direct Sandbox unavailable; switching Pro to deep static fallback', {
+      this._emit(session, 'sandbox_analysis', 'blocked', 'Behavioral execution unavailable; using completed static multi-engine evidence', {
         code,
         sandboxStarted,
         sampleExecutionStarted,
@@ -645,15 +693,17 @@ class ModelScanPipelineManager {
       return this._runDeepStaticFallback(session, {
         model: 'pro',
         reasonCode: code,
+        existingLocal: local,
         preflight,
-        sandboxResult: sandboxResult || { ok: false, verdict: 'inconclusive' },
+        sandboxResult: sandboxResult || { ok:false, verdict:'inconclusive' },
         sandboxStarted,
         sampleExecutionStarted,
       });
     }
 
-    const finalVerdict = directSandboxVerdict(sandboxResult);
-    this._emit(session, 'sandbox_analysis', 'completed', 'Direct Sandbox behavior analysis completed with real execution proof', {
+    const fusion = fuseEvidence({ localResult: local, sandboxResult, model: 'pro' });
+    const finalVerdict = fusion.verdict;
+    this._emit(session, 'sandbox_analysis', 'completed', 'Isolated behavioral analysis completed with execution proof', {
       verdict: normalizeVerdict(sandboxResult.verdict),
       releaseGrade: sandboxResult.releaseGrade === true,
       backend: sandboxResult.backend && sandboxResult.backend.backend ? sandboxResult.backend.backend : null,
@@ -668,11 +718,18 @@ class ModelScanPipelineManager {
       sandboxStarted: true,
       sampleExecutionStarted: true,
       sandboxCompleted: true,
+      localResult: clone(local),
       preflight: clone(preflight),
       sandboxResult: clone(sandboxResult),
+      fusionEngineVersion: FUSION_ENGINE_VERSION,
+      fusion: clone(fusion),
     };
-    this._emit(session, 'final_verdict', 'completed', `Final verdict: ${finalVerdict.toUpperCase()}`, {
-      verdict: finalVerdict, model: 'pro', sandboxStarted: true, sampleExecutionStarted: true, sandboxCompleted: true,
+    this._emit(session, 'final_verdict', 'completed', 'Final verdict: ' + finalVerdict.toUpperCase(), {
+      verdict: finalVerdict,
+      model: 'pro',
+      sandboxStarted: true,
+      sampleExecutionStarted: true,
+      sandboxCompleted: true,
     });
   }
 }
