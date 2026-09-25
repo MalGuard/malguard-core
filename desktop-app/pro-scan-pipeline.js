@@ -135,7 +135,7 @@ class ModelScanPipelineManager {
       gtaSimulationResult: null,
       aiEvidenceResult: null,
       allowCloudFallback: allowCloudFallback === true,
-      allowAiEvidence: allowAiEvidence === true,
+      allowAiEvidence: allowAiEvidence !== false,
       finalResult: null,
       error: null,
     };
@@ -160,7 +160,13 @@ class ModelScanPipelineManager {
         error: session.error,
       };
     });
-    if (onFinish) void run.finally(() => Promise.resolve().then(onFinish).catch(() => {}));
+    if (onFinish) {
+      session.cleanupPending = true;
+      void run.finally(() => Promise.resolve().then(onFinish).catch(() => {}).finally(() => {
+        session.cleanupPending = false;
+        session.updatedAt = this.now();
+      }));
+    }
     return this.snapshot(id);
   }
 
@@ -168,6 +174,7 @@ class ModelScanPipelineManager {
     const session = this.sessions.get(String(id || ''));
     if (!session) return null;
     const out = clone(session);
+    if (out.cleanupPending === true && ['completed', 'failed'].includes(out.state)) out.state = 'finishing';
     delete out.nextSeq;
     return out;
   }
@@ -207,7 +214,7 @@ class ModelScanPipelineManager {
     }
 
     if (this.aiEvidence) {
-      if (session.allowAiEvidence !== true) {
+      if (session.allowAiEvidence === false) {
         const capabilities = typeof this.aiEvidence.capabilities === 'function' ? this.aiEvidence.capabilities() : { available: false };
         const skipped = {
           ok: true,
@@ -219,7 +226,7 @@ class ModelScanPipelineManager {
         };
         session.aiEvidenceResult = skipped;
         session.finalResult.aiEvidence = skipped;
-        this._emit(session, 'ai_evidence', 'warning', 'MalGuard AI evidence analysis is available but was not requested', {
+        this._emit(session, 'ai_evidence', 'warning', 'MalGuard AI evidence analysis was explicitly disabled for this scan', {
           available: skipped.available,
           status: skipped.status,
           fileBytesShared: false,
