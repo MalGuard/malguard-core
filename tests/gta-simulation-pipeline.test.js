@@ -89,7 +89,7 @@ function sandbox({ unsupportedPlugin = false } = {}) {
   assert.equal(aiStandard.finalResult.aiEvidence.risk, 'low');
   assert.equal(capturedAiEvidence.scanner.detector.modType, 'plugin');
   assert.equal(capturedAiEvidence.scanner.detector.confidence, 'high');
-  assert.equal(capturedAiEvidence.scanner.threatIntelStatus, 'disabled');
+  assert.equal(capturedAiEvidence.scanner.threatIntel.status, 'disabled');
   assert(aiStandard.events.some(event => event.phase === 'ai_evidence' && event.status === 'completed'));
 
   const plusManager = new ModelScanPipelineManager({
