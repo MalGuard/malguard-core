@@ -7,6 +7,9 @@ on:
       - 'desktop-app/update/**'
       - 'desktop-app/integrity/**'
       - 'desktop-app/metrics/**'
+      - 'desktop-app/diagnostics/**'
+      - 'desktop-app/settings-store.js'
+      - 'tests/tsh-telemetry*.js'
       - 'api/install-hardware-report.js'
       - 'tests/compatibility-profile.test.js'
       - 'tests/install-hardware-report-api.test.js'
@@ -240,6 +243,12 @@ jobs:
           node tests/workflow-supply-chain.test.js
           node tests/public-release-policy.test.js
           node tests/windows-installer-source.test.js
+
+      - name: TSH Telemetry Windows consent and scanner acceptance
+        shell: pwsh
+        run: |
+          node --test tests/tsh-telemetry.test.js tests/tsh-telemetry-runtime.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'TSH Telemetry Windows acceptance failed' }
 
       - name: Build sealed Windows runtime package
         shell: pwsh

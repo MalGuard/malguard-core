@@ -14,7 +14,8 @@ const jsFiles = [];
 (function walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(p);
+    // Validate project sources, not third-party ESM distributions installed by npm.
+    if (entry.isDirectory() && !['node_modules', '.git', 'dist'].includes(entry.name)) walk(p);
     else if (entry.isFile() && p.endsWith('.js')) jsFiles.push(p);
   }
 })(ROOT);

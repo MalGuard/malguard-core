@@ -24,6 +24,12 @@ for (const required of [
   'rules.json',
   'app.js',
   'desktop-app/server.js',
+  'desktop-app/diagnostics/telemetry-consent.js',
+  'desktop-app/diagnostics/telemetry-client.js',
+  'desktop-app/diagnostics/telemetry-payload.js',
+  'desktop-app/diagnostics/windows-device.js',
+  'desktop-app/public/privacy-diagnostics.js',
+  'PRIVACY.md',
   'desktop-app/gta-simulation/simulation-engine.js',
   'desktop-app/gta-simulation/ai-evidence-bridge.js',
   'desktop-app/gta-simulation/cloud-gta-simulation-client.js',
@@ -41,6 +47,7 @@ const bridge = spawnSync(process.execPath, ['-e', "new (require('./desktop-app/s
 });
 assert.equal(bridge.status, 0, `packaged scanner startup failed: ${bridge.stderr || bridge.stdout}`);
 
+for (const forbidden of ['backend','api','migrations','node_modules']) assert.ok(!fs.existsSync(path.join(out, forbidden)), 'server/test dependencies must not ship: '+forbidden);
 assert.ok(!fs.existsSync(path.join(out, 'tests')), 'tests must not ship in portable runtime package');
 assert.ok(!fs.existsSync(path.join(out, '.env')), 'environment secret file must not ship');
 assert.ok(!fs.existsSync(path.join(out, 'desktop-app', 'threat-intel', 'abusech-auth.dpapi')), 'DPAPI credential blob must not ship');

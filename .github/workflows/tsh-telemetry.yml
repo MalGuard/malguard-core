@@ -1,0 +1,31 @@
+name: TSH Telemetry
+on:
+  pull_request:
+  push:
+    branches:
+      - feature/opt-in-installation-telemetry
+permissions:
+  contents: read
+jobs:
+  privacy-and-database:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout review source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Consent, API, SQL, outbox, real local scanner acceptance
+        run: node --test tests/tsh-telemetry.test.js tests/tsh-telemetry-runtime.test.js tests/tsh-telemetry-database.test.js
+      - name: Real browser first-launch and privacy settings acceptance
+        run: node tests/tsh-telemetry-browser.js
