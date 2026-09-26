@@ -77,8 +77,8 @@ async function runExternalEngines(filePath, options = {}) {
 
   tasks.push((async()=>{
     if (!yaraRules) return { name:'yara_x', status:'unavailable', reason:'rules_not_configured' };
-    const r=await runProcess(process.env.MALGUARD_YARAX_BIN || bundled('yara-x/yr.exe','yr'), ['scan','--output-format','jsonl',yaraRules,resolved]);
-    return { name:'yara_x', status:verdictFromYara(r), available:r.available, exitCode:r.exitCode, evidence:r.stdout ? bounded(r.stdout) : null };
+    const r=await runProcess(process.env.MALGUARD_YARAX_BIN || bundled('yara-x/yr.exe','yr'), ['scan','--output-format','ndjson',yaraRules,resolved]);
+    return { name:'yara_x', status:verdictFromYara(r), available:r.available, exitCode:r.exitCode, evidence:r.stdout ? bounded(r.stdout) : null, stderr:r.stderr ? bounded(r.stderr) : null };
   })());
 
   tasks.push((async()=>{
