@@ -74,6 +74,22 @@ function makeManager({ preflight, analyze, localResult, aiResult }) {
     assert.equal(snap.finalResult.fusion.layers.independentEngines.completed >= 2, true);
   }
 
+  // 1b. Router reports no isolation backend during preflight: local scan must still run.
+  {
+    const h = makeManager({
+      preflight:{ ok:false, code:'NO_ISOLATION_BACKEND_AVAILABLE' },
+      analyze:{ ok:false, code:'NO_ISOLATION_BACKEND_AVAILABLE' },
+      localResult:strongLocal('safe'),
+      aiResult:{ ok:false, available:false, status:'offline' },
+    });
+    const started = h.manager.start('synthetic-no-backend.dll','pro',{allowCloudFallback:false,allowAiEvidence:true});
+    const snap = await finished(h.manager, started.id);
+    assert.equal(h.calls(), 1);
+    assert.equal(snap.finalResult.fallbackUsed, true);
+    assert.equal(snap.finalResult.verdict, 'safe');
+    assert.equal(snap.finalResult.reasonCode, 'NO_ISOLATION_BACKEND_AVAILABLE');
+  }
+
   // 2. Sandbox passes preflight but disappears before execution: local fallback must still decide.
   {
     const h = makeManager({
