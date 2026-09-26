@@ -44,6 +44,7 @@ const SANDBOX_INFRASTRUCTURE_FALLBACK_CODES = new Set([
   'WINDOWS_SANDBOX_DISABLED',
   'WINDOWS_SANDBOX_NOT_AVAILABLE',
   'NO_ISOLATION_BACKEND_ISOLATION_CERTIFIED',
+  'NO_ISOLATION_BACKEND_AVAILABLE',
   'ISOLATION_BACKEND_UNAVAILABLE',
   'MICROVM_UNAVAILABLE',
   'PORTABLE_VM_UNAVAILABLE',
@@ -53,6 +54,7 @@ function sandboxInfrastructureUnavailable(code) {
   const normalized = String(code || '').trim().toUpperCase();
   if (!normalized) return false;
   if (SANDBOX_INFRASTRUCTURE_FALLBACK_CODES.has(normalized)) return true;
+  if (normalized.startsWith('NO_ISOLATION_BACKEND_')) return true;
   return normalized.startsWith('SANDBOX_BACKEND_') && normalized.endsWith('_UNAVAILABLE');
 }
 
