@@ -115,7 +115,7 @@ function fuseEvidence({
     verdict = 'safe';
     basis = 'behavioral_release_grade';
   } else if (localVerdict === 'safe' && coverage.fullCoverage) {
-    if (model === 'pro' && external.length > 0 && independentCompleted < 2) {
+    if (model === 'pro' && independentCompleted < 2) {
       verdict = 'inconclusive';
       basis = 'insufficient_independent_engine_coverage';
     } else {

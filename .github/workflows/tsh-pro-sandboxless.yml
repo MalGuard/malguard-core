@@ -1,0 +1,44 @@
+name: TSH Pro - Sandboxless Adversarial
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandboxless-linux:
+    name: "TSH Pro · Linux adversarial control"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-pro-sandboxless.test.js
+
+  sandboxless-windows:
+    name: "TSH Pro · Windows adversarial control"
+    needs: sandboxless-linux
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-pro-sandboxless.test.js
+
+  regression:
+    name: "TSH Pro · Existing Fusion and Pro regressions"
+    needs: sandboxless-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/pro-scan-pipeline.test.js
+      - run: node tests/fusion-engine.test.js
+      - run: node tests/multiengine-fusion.test.js
+      - run: node tests/ths-stage3-adversarial.test.js

@@ -33,6 +33,31 @@ function sandboxExecutionProven(sandboxResult) {
     && sandboxResult.sampleExecutionStarted === true);
 }
 
+const SANDBOX_INFRASTRUCTURE_FALLBACK_CODES = new Set([
+  'SANDBOX_UNAVAILABLE',
+  'SANDBOX_NOT_READY',
+  'SANDBOX_DISABLED',
+  'SANDBOX_BACKEND_UNAVAILABLE',
+  'SANDBOX_SELF_TEST_TIMEOUT',
+  'SANDBOX_SELF_TEST_FAILED',
+  'WINDOWS_SANDBOX_UNAVAILABLE',
+  'WINDOWS_SANDBOX_DISABLED',
+  'WINDOWS_SANDBOX_NOT_AVAILABLE',
+  'NO_ISOLATION_BACKEND_ISOLATION_CERTIFIED',
+  'NO_ISOLATION_BACKEND_AVAILABLE',
+  'ISOLATION_BACKEND_UNAVAILABLE',
+  'MICROVM_UNAVAILABLE',
+  'PORTABLE_VM_UNAVAILABLE',
+]);
+
+function sandboxInfrastructureUnavailable(code) {
+  const normalized = String(code || '').trim().toUpperCase();
+  if (!normalized) return false;
+  if (SANDBOX_INFRASTRUCTURE_FALLBACK_CODES.has(normalized)) return true;
+  if (normalized.startsWith('NO_ISOLATION_BACKEND_')) return true;
+  return normalized.startsWith('SANDBOX_BACKEND_') && normalized.endsWith('_UNAVAILABLE');
+}
+
 function mergeSandboxVerdict(localVerdict, sandboxResult) {
   const local = normalizeVerdict(localVerdict);
   if (!sandboxExecutionProven(sandboxResult)) return local;
@@ -585,18 +610,23 @@ class ModelScanPipelineManager {
       const code = preflight && preflight.code ? preflight.code : 'SANDBOX_PREFLIGHT_FAILED';
       const extension = path.extname(session.filePath).toLowerCase();
       const pluginDirectExecutionUnsupported = code === 'SANDBOX_SAMPLE_TYPE_UNSUPPORTED' && GTA_PLUGIN_EXTENSIONS.has(extension);
+      const infrastructureUnavailable = sandboxInfrastructureUnavailable(code);
 
-      if (pluginDirectExecutionUnsupported) {
-        this._emit(session, 'preflight', 'warning', 'GTA plugin cannot be launched directly; switching Pro to non-executing fallback analysis', {
-          code,
-          extension,
-          fallback: 'deep_static_no_execution',
-        });
+      if (pluginDirectExecutionUnsupported || infrastructureUnavailable) {
+        this._emit(session, 'preflight', 'warning',
+          pluginDirectExecutionUnsupported
+            ? 'GTA plugin cannot be launched directly; switching Pro to non-executing fallback analysis'
+            : 'Sandbox infrastructure is unavailable; continuing Pro with deep local Fusion analysis', {
+            code,
+            extension,
+            fallback: 'deep_static_no_execution',
+            infrastructureUnavailable,
+          });
         return this._runDeepStaticFallback(session, {
           model: 'pro',
           reasonCode: code,
           preflight,
-          pluginDirectExecutionUnsupported: true,
+          pluginDirectExecutionUnsupported,
         });
       }
 
@@ -692,6 +722,7 @@ module.exports = {
   normalizeVerdict,
   shouldSandbox,
   sandboxExecutionProven,
+  sandboxInfrastructureUnavailable,
   mergeSandboxVerdict,
   directSandboxVerdict,
   deepStaticFallbackVerdict,
