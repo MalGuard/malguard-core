@@ -77,6 +77,7 @@ const STAGES = Object.freeze({
   stage3: {
     title: 'TSH Stage 3 - Product, API, UI, Packaging and Release Integrity',
     tests: [
+      'version-consistency.test.js',
       'build-validation.test.js',
       'packaging-foundation.test.js',
       'runtime-package-integrity.test.js',
