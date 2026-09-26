@@ -20,8 +20,7 @@ const { MalGuardCloudAiProvider } = require('./gta-simulation/malguard-cloud-ai-
 const { EmbeddedValidationLab } = require('./sandbox/embedded-validation-lab.js');
 const { IncidentStore } = require('../desktop-guard/windows-agent/incident-store.js');
 const { SettingsStore } = require('./settings-store.js');
-const { recordFirstSuccessfulLaunch } = require('./metrics/first-launch-counter.js');
-const { sendCompatibilityInstallReport } = require('./metrics/compatibility-install-report.js');
+const { TelemetryClient } = require('./diagnostics/telemetry-client.js');
 const { ProtectedFolderAclGate } = require('../desktop-guard/windows-agent/acl-protection.js');
 const { ThreatIntelService } = require('./threat-intel/service.js');
 const { ModelScanPipelineManager } = require('./pro-scan-pipeline.js');
@@ -88,12 +87,17 @@ async function serveStatic(urlPath, res) {
 const settingsStore = new SettingsStore(process.env.MALGUARD_SETTINGS_FILE || null);
 function safeConfig() {
   const persisted = settingsStore.loadSync(); const envWatch = process.env.MALGUARD_WATCH_ROOT ? [path.resolve(process.env.MALGUARD_WATCH_ROOT)] : persisted.watchRoots;
-  return settingsStore.validate({ watchRoots: envWatch, quarantineRoot: path.resolve(process.env.MALGUARD_QUARANTINE_ROOT || persisted.quarantineRoot), stagingRoot: path.resolve(process.env.MALGUARD_STAGING_ROOT || persisted.stagingRoot) });
+  return settingsStore.validate({ ...persisted, watchRoots: envWatch, quarantineRoot: path.resolve(process.env.MALGUARD_QUARANTINE_ROOT || persisted.quarantineRoot), stagingRoot: path.resolve(process.env.MALGUARD_STAGING_ROOT || persisted.stagingRoot) });
 }
 let config = safeConfig(); let incidentStore = new IncidentStore(config.quarantineRoot); let agent = null; let managedInstall = null; let aclGate = null; let runtimeProcessGuard = null; let protectionCoordinator = null;
 
+// Diagnostics writes do not stop or restart protection services.
+function saveDiagnosticsSettings(next) { config = settingsStore.saveSync(next); return config; }
+try { config = settingsStore.saveSync(config); } catch (_) { config.diagnostics.enabled = false; }
+const telemetry = new TelemetryClient({readSettings:()=>config,saveSettings:saveDiagnosticsSettings,settingsFile:settingsStore.filePath,version:DESKTOP_VERSION,build:BUILD});
+
 async function applySettings(nextSettings) {
-  const validated = settingsStore.validate(nextSettings);
+  const validated = settingsStore.validate({...nextSettings, diagnostics:config.diagnostics, schemaVersion:config.schemaVersion});
   if (protectionCoordinator) {
     const protection = protectionCoordinator.getCachedStatus();
     if (protection.active || protection.accessGateProtected) {
@@ -104,7 +108,7 @@ async function applySettings(nextSettings) {
     await agent.stopWatching();
   }
   agent = null; managedInstall = null; aclGate = null; runtimeProcessGuard = null; protectionCoordinator = null;
-  const saved = await settingsStore.save(validated); config = saved; incidentStore = new IncidentStore(config.quarantineRoot); return saved;
+  const saved = settingsStore.saveSync({...validated,diagnostics:config.diagnostics}); config = saved; incidentStore = new IncidentStore(config.quarantineRoot); return saved;
 }
 function normalizeVerdict(result) { const v = result && result.finalVerdict; return ['safe', 'suspicious', 'malicious', 'inconclusive'].includes(v) ? v : 'inconclusive'; }
 function entitlementDenied(res, error) { return json(res, 403, { ok: false, code: error.code || 'ENTITLEMENT_REQUIRED', message: error.message, requiredPlan: error.requiredPlan || null, currentPlan: error.currentPlan || 'standard' }); }
@@ -139,6 +143,23 @@ function ensureAgent() {
 async function handler(req, res) {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
   try {
+    if (url.pathname.startsWith('/api/diagnostics/')) {
+      const expectedHost = `${HOST}:${req.socket.localPort}`;
+      if (req.headers.host !== expectedHost || (req.headers.origin && req.headers.origin !== `http://${expectedHost}`) || req.headers['x-malguard-privacy'] !== '1') return json(res,403,{ok:false,code:'LOCAL_PRIVACY_ORIGIN_REJECTED'});
+      if (req.method === 'GET' && url.pathname === '/api/diagnostics/status') return json(res,200,{ok:true,diagnostics:config.diagnostics,status:telemetry.lastResult});
+      if (req.method === 'GET' && url.pathname === '/api/diagnostics/preview') return json(res,200,{ok:true,payload:await telemetry.preview()});
+      if (req.method === 'POST' && url.pathname === '/api/diagnostics/delete') return json(res,200,await telemetry.disableAndDelete());
+      if (req.method === 'POST' && url.pathname === '/api/diagnostics/consent') {
+        const body=await readJson(req,2048);
+        if (Object.keys(body).some(k=>!['enabled','shareRegion','country','region'].includes(k)) || typeof body.enabled!=='boolean' || typeof body.shareRegion!=='boolean') return json(res,400,{ok:false,code:'INVALID_CONSENT'});
+        if (!body.enabled) return json(res,200,await telemetry.disableAndDelete());
+        if (config.diagnostics.deletionPending) return json(res,409,{ok:false,code:'DELETE_PENDING_RETRY_REQUIRED'});
+        telemetry.stop();
+        saveDiagnosticsSettings({...config, diagnostics:{...config.diagnostics,...body,consentUpdatedAt:new Date().toISOString()}});
+        telemetry.start(); return json(res,200,{ok:true,diagnostics:config.diagnostics});
+      }
+      return json(res,404,{ok:false});
+    }
     if (req.method === 'GET' && url.pathname === '/api/status') {
       const protection = protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, accessGateProtected:false, watcherHealthy:false, runtimeProcessHealthy:false, runtimeProcessProtection:null, state:'stopped', reason:null };
       const sandboxCertification = sandbox.certificationStatus();
@@ -255,18 +276,9 @@ if (require.main === module) {
       const result = await protectionCoordinator.start();
       if (!result || result.ok !== true || result.completeProtection !== true || result.runtimeProcessHealthy !== true) { const error = new Error('Real-time protection failed to reach protected runtime healthy state during service startup.'); error.code = result && result.reason ? result.reason : 'SERVICE_GUARD_START_FAILED'; throw error; }
     }
-    void recordFirstSuccessfulLaunch({
-      version: DESKTOP_VERSION,
-      settingsFile: settingsStore.filePath,
-      packageRoot: ROOT,
-    }).catch(() => {});
-    void sendCompatibilityInstallReport({
-      version: DESKTOP_VERSION,
-      settingsFile: settingsStore.filePath,
-      packageRoot: ROOT,
-    }).catch(() => {});
+    telemetry.start();
     console.log(`MalGuard Desktop ${DESKTOP_VERSION} running at http://${HOST}:${PORT}`); console.log('Localhost only. No remote binding.');
   }).catch(async error => { await recordRuntimeError(error, { area: 'startup' }); console.error(`MalGuard startup failed: ${safeText(error.code || error.name || 'INTERNAL_ERROR', 128)}`); process.exit(1); });
 }
 
-module.exports = { startServer, handler, scanner, sandbox, validationLab, cloudInspection, gtaSimulation, gtaCloudSimulation, malguardAiProvider, aiEvidence, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }), getRealtimeProtectionStatus: () => protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, state:'stopped' }, getRuntimeProcessProtectionStatus: () => runtimeProcessGuard ? runtimeProcessGuard.getCachedStatus() : { ok:false, active:false, healthy:false, state:'stopped' } };
+module.exports = { telemetry, startServer, handler, scanner, sandbox, validationLab, cloudInspection, gtaSimulation, gtaCloudSimulation, malguardAiProvider, aiEvidence, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }), getRealtimeProtectionStatus: () => protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, state:'stopped' }, getRuntimeProcessProtectionStatus: () => runtimeProcessGuard ? runtimeProcessGuard.getCachedStatus() : { ok:false, active:false, healthy:false, state:'stopped' } };

@@ -82,57 +82,9 @@ async function writeMarker(file, payload) {
 }
 
 async function sendCompatibilityInstallReport(options = {}) {
-  const disabled = options.disabled === true || process.env.MALGUARD_DISABLE_ANONYMOUS_COMPATIBILITY_REPORT === '1';
-  const ci = options.ci === true ? true : options.ci === false ? false : Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
-  const platform = options.platform || process.platform;
-  const packageRoot = options.packageRoot || path.resolve(__dirname, '..', '..');
-  const settingsFile = options.settingsFile;
-  const fetchImpl = options.fetchImpl || globalThis.fetch;
-
-  if (disabled) return {ok:true,sent:false,reason:'disabled'};
-  if (ci) return {ok:true,sent:false,reason:'ci'};
-  if (platform !== 'win32') return {ok:true,sent:false,reason:'non-windows'};
-  if (!settingsFile) return {ok:false,sent:false,reason:'settings-file-required'};
-
-  if (options.requirePackaged !== false) {
-    try {
-      if (!fs.statSync(path.join(packageRoot, 'PACKAGE-MANIFEST.json')).isFile()) return {ok:true,sent:false,reason:'source-checkout'};
-    } catch (_) {
-      return {ok:true,sent:false,reason:'source-checkout'};
-    }
-  }
-
-  const profile = collectCompatibilityProfile({
-    platform,
-    version:options.version,
-    arch:options.arch || process.arch,
-    osImpl:options.osImpl,
-    language:options.language,
-  });
-  if (!profile || profile.arch === 'unknown' || !profile.version) return {ok:false,sent:false,reason:'invalid-profile'};
-
-  const marker = markerPath(settingsFile, profile.version, profile.arch);
-  if (await exists(marker)) return {ok:true,sent:false,reason:'already-sent'};
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number.isFinite(options.timeoutMs) ? options.timeoutMs : 5000);
-  try {
-    if (typeof fetchImpl !== 'function') throw new Error('fetch unavailable');
-    const response = await fetchImpl(options.endpoint || ENDPOINT, {
-      method:'POST',
-      headers:{'content-type':'application/json'},
-      body:JSON.stringify(profile),
-      redirect:'error',
-      signal:controller.signal,
-    });
-    if (!response || response.ok !== true) return {ok:false,sent:false,reason:'server-rejected'};
-    await writeMarker(marker, {schemaVersion:'1.0',sentAt:Date.now(),version:profile.version,architecture:profile.arch});
-    return {ok:true,sent:true,reason:'sent'};
-  } catch (_) {
-    return {ok:false,sent:false,reason:'network-failed'};
-  } finally {
-    clearTimeout(timer);
-  }
+  // Retired: diagnostics are sent only through TelemetryClient and its central gate.
+  const allowed = options.consent?.canSendDiagnostics() === true;
+  return { ok:true, sent:false, reason:allowed ? 'legacy-retired' : 'consent-required' };
 }
 
 module.exports = {
