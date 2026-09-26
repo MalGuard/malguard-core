@@ -71,6 +71,24 @@ async function runNoSandboxCase(scanner, filePath, label) {
   assert(session.finalResult.fusion && session.finalResult.fusion.layers.independentEngines.completed >= 2,
     label + ': at least two independent engines must complete');
 
+  console.log('TSH_PRO_DIAGNOSTIC ' + JSON.stringify({
+    label,
+    localVerdict: local.finalVerdict,
+    localHardeningError: local.hardeningError || null,
+    coverageFull: session.finalResult.fusion.coverage && session.finalResult.fusion.coverage.fullCoverage,
+    coverageIssues: session.finalResult.fusion.coverage && session.finalResult.fusion.coverage.issues,
+    fusionVerdict: session.finalResult.fusion.verdict,
+    fusionBasis: session.finalResult.fusion.basis,
+    fusionAssurance: session.finalResult.fusion.assurance,
+    independentCompleted: session.finalResult.fusion.layers.independentEngines.completed,
+    engines: session.finalResult.fusion.layers.independentEngines.engines,
+    yara: engines.yara_x.status,
+    capa: engines.capa.status,
+    threatIntel: local.threatIntel && local.threatIntel.status,
+    sandboxStarted: session.finalResult.sandboxStarted,
+    executionStarted: session.finalResult.sampleExecutionStarted,
+  }));
+
   assert.notEqual(session.finalResult.verdict, 'inconclusive',
     label + ': full static + independent engine coverage must not collapse to INCONCLUSIVE merely because Sandbox is absent');
   assert.notEqual(session.finalResult.verdict, 'malicious',
