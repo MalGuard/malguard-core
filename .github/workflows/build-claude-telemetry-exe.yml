@@ -17,6 +17,12 @@ jobs:
     timeout-minutes: 40
 
     steps:
+      - name: Preserve exact repository bytes
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout staging source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
