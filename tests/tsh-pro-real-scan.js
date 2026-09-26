@@ -159,31 +159,47 @@ async function runStarvationCase(scanner, filePath) {
   if (process.platform !== 'win32') {
     throw new Error('TSH Pro real-scan validation must run on Windows');
   }
-  const source = process.argv[2];
-  assert(source && fs.existsSync(source), 'path to a real benign PE fixture is required');
+  const dllSource = process.argv[2];
+  const exeSource = process.argv[3];
+  assert(dllSource && fs.existsSync(dllSource), 'path to a real benign DLL fixture is required');
+  assert(exeSource && fs.existsSync(exeSource), 'path to a real benign EXE control is required');
 
   const temp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'malguard-tsh-pro-'));
   try {
     const asi = path.join(temp, 'tsh-pro-benign.asi');
     const dll = path.join(temp, 'tsh-pro-benign.dll');
-    const exe = path.join(temp, 'tsh-pro-benign.exe');
-    await fs.promises.copyFile(source, asi);
-    await fs.promises.copyFile(source, dll);
-    await fs.promises.copyFile(source, exe);
+    const renamedExeAsAsi = path.join(temp, 'tsh-pro-renamed-exe.asi');
+    await fs.promises.copyFile(dllSource, asi);
+    await fs.promises.copyFile(dllSource, dll);
+    await fs.promises.copyFile(exeSource, renamedExeAsAsi);
 
     const scanner = new ScannerBridge();
 
-    // Hard question #1: GTA plugins cannot be executed directly. Can Pro still scan them?
-    await runNoSandboxCase(scanner, asi, 'ASI / Sandbox unsupported');
-    await runNoSandboxCase(scanner, dll, 'DLL / Sandbox unsupported');
+    // Hard question #1: real benign plugin-shaped PE files must still get a useful static verdict without Sandbox.
+    await runNoSandboxCase(scanner, asi, 'ASI / real benign DLL / Sandbox unsupported');
+    await runNoSandboxCase(scanner, dll, 'DLL / real benign DLL / Sandbox unsupported');
 
-    // Hard question #2: even an executable loses Sandbox. Does Pro still use real local evidence?
-    await runNoSandboxCase(scanner, exe, 'EXE / Sandbox unavailable');
+    // Hard question #2: a renamed EXE must never be promoted to SAFE just because independent engines are clean.
+    const trapManager = new ModelScanPipelineManager({ scanner, sandbox:noSandbox() });
+    const trap = await waitFor(trapManager, trapManager.start(renamedExeAsAsi, 'pro', {
+      allowCloudFallback:false, allowAiEvidence:false,
+    }).id);
+    assert.equal(trap.state, 'completed');
+    assert.notEqual(trap.finalResult.verdict, 'safe',
+      'renamed EXE presented as ASI must not be promoted to SAFE');
+    assert.equal(trap.finalResult.sandboxStarted, false);
+    assert.equal(trap.finalResult.sampleExecutionStarted, false);
+    console.log('TSH_PRO_RENAMED_EXE_CONTROL ' + JSON.stringify({
+      verdict:trap.finalResult.verdict,
+      basis:trap.finalResult.fusion && trap.finalResult.fusion.basis,
+      localVerdict:trap.finalResult.localResult && trap.finalResult.localResult.finalVerdict,
+      sandboxStarted:trap.finalResult.sandboxStarted,
+    }));
 
-    // Hard question #3: prove INCONCLUSIVE is reserved for truly insufficient evidence.
+    // Hard question #3: prove INCONCLUSIVE is reserved for genuinely missing independent evidence.
     await runStarvationCase(scanner, asi);
 
-    console.log('✓ TSH PRO: real Windows scan, real YARA-X+capa, no-Sandbox fallback, and evidence-starvation fail-closed PASS');
+    console.log('✓ TSH PRO: real benign DLL/ASI scan without Sandbox, renamed-EXE trap, real YARA-X+capa, and evidence-starvation fail-closed PASS');
   } finally {
     await fs.promises.rm(temp, { recursive:true, force:true });
   }
