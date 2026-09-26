@@ -2,6 +2,7 @@
 const {spawnSync}=require('child_process');
 const path=require('path');
 const tests=[
+ 'version-consistency.test.js',
  'build-validation.test.js',
  'packaging-foundation.test.js',
  'runtime-package-integrity.test.js',
