@@ -27,3 +27,5 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Consent, API, SQL, outbox, real local scanner acceptance
         run: node --test tests/tsh-telemetry.test.js tests/tsh-telemetry-runtime.test.js tests/tsh-telemetry-database.test.js
+      - name: Real browser first-launch and privacy settings acceptance
+        run: node tests/tsh-telemetry-browser.js
