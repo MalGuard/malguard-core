@@ -1,0 +1,64 @@
+name: Publish TSH Pro Preview
+
+on:
+  push:
+    branches:
+      - test/tsh-pro-real-scan
+    paths:
+      - '.github/workflows/publish-tsh-pro-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish verified TSH Pro Preview
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified installer artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: '10906233703'
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > artifact.zip
+          unzip -q artifact.zip -d artifact
+          find artifact -maxdepth 2 -type f -printf '%p\n'
+
+      - name: Verify installer checksum
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXE="$(find artifact -type f -name 'MalGuard-TSH-Pro-Preview-*-windows-x64.exe' -print -quit)"
+          SUM="$(find artifact -type f -name 'MalGuard-TSH-Pro-Preview-*-windows-x64.exe.sha256' -print -quit)"
+          test -n "$EXE"
+          test -n "$SUM"
+          EXPECTED="$(awk '{print $1}' "$SUM" | tr '[:upper:]' '[:lower:]')"
+          ACTUAL="$(sha256sum "$EXE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')"
+          test "$EXPECTED" = "$ACTUAL"
+          echo "exe=$EXE" >> "$GITHUB_OUTPUT"
+          echo "sum=$SUM" >> "$GITHUB_OUTPUT"
+          echo "sha256=$ACTUAL" >> "$GITHUB_OUTPUT"
+          echo "Verified SHA-256: $ACTUAL"
+
+      - name: Create public prerelease and upload installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: tsh-pro-preview-c3d0d398
+          TARGET_SHA: c3d0d398956607b5a7b1aebc141452f241f0870a
+          EXE: ${{ steps.verify.outputs.exe }}
+          SUM: ${{ steps.verify.outputs.sum }}
+          SHA256: ${{ steps.verify.outputs.sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$EXE" "$SUM" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$EXE" "$SUM"               --repo "$GITHUB_REPOSITORY"               --target "$TARGET_SHA"               --title "GTA Guard TSH Pro Preview · build c3d0d398"               --prerelease               --notes "Verified TSH Pro Windows x64 preview. Built from tested source commit c3d0d398956607b5a7b1aebc141452f241f0870a. TSH Pro no-Sandbox scan PASS, Security CI PASS, installer build PASS, and install/runtime self-test PASS. Unsigned preview; SHA-256: $SHA256"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,tagName,name,isPrerelease
