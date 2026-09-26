@@ -1,0 +1,119 @@
+name: TSH Main - Full Program 10-Stage
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage1:
+    name: "TSH 1/10 · Source & Release Identity"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage1
+
+  stage2:
+    name: "TSH 2/10 · Packaging & Update Hardening"
+    needs: stage1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage2
+
+  stage3:
+    name: "TSH 3/10 · Static Detection & Fuzzing"
+    needs: stage2
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage3
+
+  stage4:
+    name: "TSH 4/10 · Script, Input & Local API"
+    needs: stage3
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage4
+
+  stage5:
+    name: "TSH 5/10 · Multi-Engine Fusion"
+    needs: stage4
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage5
+
+  stage6:
+    name: "TSH 6/10 · AI, Intel & Privacy"
+    needs: stage5
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage6
+
+  stage7:
+    name: "TSH 7/10 · Cloud Sandbox & GTA Simulation"
+    needs: stage6
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage7
+
+  stage8:
+    name: "TSH 8/10 · Isolation Backends & Routing"
+    needs: stage7
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage8
+
+  stage9:
+    name: "TSH 9/10 · Runtime & Native Windows Defense"
+    needs: stage8
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage9
+
+  stage10:
+    name: "TSH 10/10 · Product & Final Readiness"
+    needs: stage9
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '20' }
+      - run: node tests/tsh-main-10stage.js stage10
+      - run: node tools/verify-product-readiness.js
