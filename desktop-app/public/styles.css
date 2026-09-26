@@ -8,3 +8,11 @@
 
 
 .cloud-fallback-option{display:flex;gap:10px;align-items:flex-start;margin:10px 0 14px;padding:12px 14px;border:1px solid #29445c;border-radius:12px;background:#08121c}.cloud-fallback-option input{flex:none;min-width:0;width:18px;height:18px;margin-top:2px}.cloud-fallback-option span{display:grid;gap:4px}.cloud-fallback-option strong{font-size:13px}.cloud-fallback-option small{color:#8fa7bd;line-height:1.45}.cloud-fallback-option[hidden]{display:none}
+
+/* Privacy controls keep the existing theme and remain usable on narrow windows. */
+nav{flex-wrap:wrap}
+#privacy label{display:block;margin:14px 0}
+#privacy input[type=checkbox]{min-width:0;width:18px;height:18px;vertical-align:middle;margin-right:8px;padding:0}
+#privacy input:not([type=checkbox]){display:block;width:100%;min-width:0;margin-top:8px}
+#privacyFirstLaunch .row button{flex:1;min-width:140px}
+#privacyState,#privacyPayload{overflow-wrap:anywhere}

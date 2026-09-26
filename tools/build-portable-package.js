@@ -14,6 +14,7 @@ const SOURCE_COMMIT_RE = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const ROOT_FILES = [
   'LICENSE',
   'SECURITY.md',
+  'PRIVACY.md',
   'VERSION',
   'DESKTOP-VERSION',
   'rules.json',

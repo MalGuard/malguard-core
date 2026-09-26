@@ -5,7 +5,19 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-const SETTINGS_SCHEMA_VERSION = '1.0.0';
+const SETTINGS_SCHEMA_VERSION = '2.0.0';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function diagnosticsDefaults() { return { enabled:false, shareRegion:false, installationId:crypto.randomUUID(), lastUploadAt:null, consentUpdatedAt:null, deletionPending:false, country:null, region:null }; }
+function diagnostics(input) {
+  const d = input || {};
+  return { enabled:d.enabled === true && typeof d.consentUpdatedAt === 'string', shareRegion:d.shareRegion === true,
+    installationId:UUID.test(d.installationId) ? d.installationId : crypto.randomUUID(),
+    lastUploadAt:typeof d.lastUploadAt === 'string' ? d.lastUploadAt : null,
+    consentUpdatedAt:typeof d.consentUpdatedAt === 'string' ? d.consentUpdatedAt : null,
+    deletionPending:d.deletionPending === true,
+    country:typeof d.country === 'string' && /^[A-Z]{2}$/.test(d.country) ? d.country : null,
+    region:typeof d.region === 'string' && /^[\p{L} .'-]{1,64}$/u.test(d.region) ? d.region : null };
+}
 
 function uniquePaths(values) {
   const seen = new Set();
@@ -43,6 +55,7 @@ class SettingsStore {
       quarantineRoot: path.resolve(path.join(home, '.malguard', 'quarantine')),
       stagingRoot: path.resolve(path.join(home, '.malguard', 'staging')),
       updatedAt: 0,
+      diagnostics: diagnosticsDefaults(),
     };
   }
 
@@ -68,6 +81,7 @@ class SettingsStore {
       quarantineRoot,
       stagingRoot,
       updatedAt: Date.now(),
+      diagnostics: diagnostics(input.schemaVersion && input.schemaVersion !== SETTINGS_SCHEMA_VERSION ? null : input.diagnostics),
     };
   }
 
@@ -75,11 +89,24 @@ class SettingsStore {
     try {
       const raw = fs.readFileSync(this.filePath, 'utf8');
       const parsed = JSON.parse(raw);
-      if (parsed.schemaVersion !== SETTINGS_SCHEMA_VERSION) return this.defaults();
-      return this.validate(parsed);
+      if (!['1.0.0', SETTINGS_SCHEMA_VERSION].includes(parsed.schemaVersion)) return this.defaults();
+      const migrated = this.validate(parsed);
+      if (parsed.schemaVersion !== SETTINGS_SCHEMA_VERSION || !UUID.test(parsed.diagnostics?.installationId)) {
+        try { this.saveSync(migrated); } catch (_) { migrated.diagnostics.enabled = false; }
+      }
+      return migrated;
     } catch (_) {
       return this.defaults();
     }
+  }
+
+  saveSync(input) {
+    const validated = this.validate(input);
+    fs.mkdirSync(path.dirname(this.filePath), { recursive:true, mode:0o700 });
+    const temp = `${this.filePath}.${crypto.randomUUID()}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(validated, null, 2), { encoding:'utf8', flag:'wx', mode:0o600 });
+    fs.renameSync(temp, this.filePath);
+    return validated;
   }
 
   async save(input) {

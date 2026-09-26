@@ -16,6 +16,10 @@
     "package:portable": "node tools/build-portable-package.js"
   },
   "dependencies": {
+    "@neondatabase/serverless": "1.1.0",
     "@vercel/sandbox": "3.3.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14"
   }
 }

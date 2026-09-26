@@ -1,0 +1,7 @@
+'use strict';
+function escape(value) { return String(value??'Unknown').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function dashboard({summary,rows,detail,offset=0,distributions=[]}) {
+  const table=data=>'<table>'+data.map(([k,v])=>`<tr><th>${escape(k)}</th><td>${escape(v)}</td></tr>`).join('')+'</table>';
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>MalGuard consented installations</title><body><h1>MalGuard · Consented installations</h1><p>Restricted administrator view. Country/province are optional user-reported values. Device reports are untrusted client claims, not verified identities. Registration time is server time, not installation time.</p>${detail?table(Object.entries(detail)):`${table(Object.entries(summary))}<p>Active means updated within 30 days. Today is UTC.</p><h2>Installations</h2><ul>${rows.map(r=>`<li><a href="?view=dashboard&amp;id=${escape(r.installation_id)}">${escape(r.installation_id)}</a> — ${escape(r.device_model)} · ${escape(r.malguard_version)} · ${escape(r.updated_at)}</li>`).join('')}</ul><a href="?view=dashboard&amp;offset=${offset+100}">Next 100</a><h2>Global distributions (top 50 values per field)</h2>${table(distributions.map(d=>[d.field+' · '+d.value,d.count]))}}`}<p>HTTP Basic access uses an administrator-only random credential over HTTPS. Close the private browser session when finished.</p></body></html>`;
+}
+module.exports={dashboard,escape};

@@ -33,7 +33,7 @@ const STAGES = Object.freeze({
   stage6: { title:'TSH 6/10 - AI, Threat Intelligence and Credential Privacy', tests:[
     'ai-evidence-bridge.test.js','malguard-cloud-ai-provider.test.js','malwarebazaar-client.test.js',
     'threat-intel-cache.test.js','threat-intel-recent-feed.test.js','credential-store.test.js',
-    'threat-intel-integration.test.js'
+    'threat-intel-integration.test.js','tsh-telemetry.test.js'
   ]},
   stage7: { title:'TSH 7/10 - Cloud Sandbox and GTA Simulation', tests:[
     'sandbox-backend.test.js','cloud-sandbox-policy.test.js','cloud-sandbox-vercel-runner.test.js',
@@ -55,7 +55,7 @@ const STAGES = Object.freeze({
     'runtime-game-process-guard.test.js','runtime-containment.test.js',
     'sandbox-native-containment-source.test.js','windows-service-source.test.js',
     'windows-acceptance-harness.test.js','first-launch-counter.test.js',
-    'compatibility-profile.test.js','install-hardware-report-api.test.js'
+    'compatibility-profile.test.js','install-hardware-report-api.test.js','tsh-telemetry-runtime.test.js'
   ]},
   stage10:{ title:'TSH 10/10 - Product Models, Entitlements, UI and Final Readiness', tests:[
     'entitlement-gate.test.js','entitlement-api.test.js','product-readiness-gate.test.js',

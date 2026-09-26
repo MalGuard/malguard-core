@@ -9,6 +9,12 @@
 </head>
 <body>
   <main>
+    <section id="privacyFirstLaunch" hidden class="health-card" aria-labelledby="privacyTitle">
+      <h2 id="privacyTitle">Help improve MalGuard</h2>
+      <p>MalGuard can send basic device and installation diagnostics to the MalGuard administrator. If enabled, the administrator may also receive an email notification when this installation is registered.</p>
+      <p>This includes a random installation ID, app version, Windows version, CPU, RAM, GPU and device model. No files, Windows username, network identifiers or location are collected. Sharing is optional and does not change protection.</p>
+      <div class="row"><button id="privacyAllow">Allow diagnostics</button><button id="privacyReject">Continue without sharing</button></div>
+    </section>
     <header>
       <div>
         <h1>MalGuard Desktop</h1>
@@ -20,6 +26,7 @@
     <nav>
       <button class="tab active" data-tab="scanner">Scanner</button>
       <button class="tab" data-tab="engine">Security Health</button>
+      <button class="tab" data-tab="privacy">Settings · Privacy &amp; Diagnostics</button>
     </nav>
 
     <section id="scanner" class="panel active">
@@ -100,7 +107,21 @@
         <pre id="finalSandboxOut">No diagnostic data yet.</pre>
       </details>
     </section>
+    <section id="privacy" class="panel">
+      <h2>Privacy &amp; Diagnostics</h2>
+      <label><input type="checkbox" id="diagnosticsEnabled"> Diagnostics sharing</label>
+      <p>Device specifications and installation health may be registered with the administrator, including one notification email. Anonymous means no account identity; detailed device specifications may still be distinctive.</p>
+      <label><input type="checkbox" id="regionEnabled"> Share an approximate region I enter below</label>
+      <p>No automatic location lookup. Use only country and province; do not enter an address.</p>
+      <label>Country code <input id="regionCountry" maxlength="2" placeholder="Optional, e.g. IR"></label>
+      <label>Province / region <input id="regionName" maxlength="64" placeholder="Optional province only"></label>
+      <div class="row"><button id="privacySave">Save privacy choice</button><button id="privacyPreview">Preview data being shared</button><button id="privacyDelete">Delete telemetry record / retry deletion</button></div>
+      <p>Turning sharing off stops uploads immediately and requests deletion. If offline, deletion remains pending until you retry. Previously delivered email cannot be recalled. Preview shows the registration payload; daily heartbeat contains only the installation ID, consent and app version.</p>
+      <pre id="privacyState" role="status" aria-live="polite">Diagnostics sharing is off until explicitly allowed.</pre>
+      <pre id="privacyPayload">Nothing shared before consent. Unknown fields remain null.</pre>
+    </section>
   </main>
+  <script src="/privacy-diagnostics.js"></script>
   <script src="/app.js"></script>
   <script src="/sandbox-first-run.js"></script>
 </body>
