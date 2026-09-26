@@ -167,7 +167,7 @@ async function runStarvationCase(scanner, filePath) {
   const temp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'malguard-tsh-pro-'));
   try {
     const asi = path.join(temp, 'tsh-pro-benign.asi');
-    const dll = path.join(temp, 'tsh-pro-benign.dll');
+    const dll = path.join(temp, 'gta5-tsh-pro-benign.dll');
     const renamedExeAsAsi = path.join(temp, 'tsh-pro-renamed-exe.asi');
     await fs.promises.copyFile(dllSource, asi);
     await fs.promises.copyFile(dllSource, dll);
@@ -177,7 +177,7 @@ async function runStarvationCase(scanner, filePath) {
 
     // Hard question #1: real benign plugin-shaped PE files must still get a useful static verdict without Sandbox.
     await runNoSandboxCase(scanner, asi, 'ASI / real benign DLL / Sandbox unsupported');
-    await runNoSandboxCase(scanner, dll, 'DLL / real benign DLL / Sandbox unsupported');
+    await runNoSandboxCase(scanner, dll, 'DLL / real benign GTA-context DLL / Sandbox unsupported');
 
     // Hard question #2: a renamed EXE must never be promoted to SAFE just because independent engines are clean.
     const trapManager = new ModelScanPipelineManager({ scanner, sandbox:noSandbox() });
