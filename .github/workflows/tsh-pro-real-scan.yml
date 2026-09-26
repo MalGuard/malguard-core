@@ -59,24 +59,53 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "$($engine.Name) version probe failed" }
           }
 
-      - name: Build real benign Windows PE fixture
+      - name: Build real benign Windows DLL and EXE fixtures
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $build = Join-Path $env:RUNNER_TEMP 'tsh-pro-launcher-x64'
-          cmake -S native/windows-launcher -B $build -A x64
-          if ($LASTEXITCODE -ne 0) { throw 'launcher configure failed' }
+          $src = Join-Path $env:RUNNER_TEMP 'tsh-pro-benign-src'
+          $build = Join-Path $env:RUNNER_TEMP 'tsh-pro-benign-build'
+          New-Item -ItemType Directory -Path $src -Force | Out-Null
+
+          @'
+          cmake_minimum_required(VERSION 3.20)
+          project(TSHProBenign C)
+          add_library(TSHProBenign SHARED benign_dll.c)
+          add_executable(TSHProBenignExe benign_exe.c)
+          set_target_properties(TSHProBenign PROPERTIES OUTPUT_NAME "TSHProBenign")
+          set_target_properties(TSHProBenignExe PROPERTIES OUTPUT_NAME "TSHProBenignExe")
+          '@ | Set-Content -LiteralPath (Join-Path $src 'CMakeLists.txt') -Encoding ascii
+
+          @'
+          #include <windows.h>
+          BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
+            (void)instance; (void)reason; (void)reserved;
+            return TRUE;
+          }
+          __declspec(dllexport) int TSHProBenignValue(void) { return 7; }
+          '@ | Set-Content -LiteralPath (Join-Path $src 'benign_dll.c') -Encoding ascii
+
+          @'
+          int main(void) { return 0; }
+          '@ | Set-Content -LiteralPath (Join-Path $src 'benign_exe.c') -Encoding ascii
+
+          cmake -S $src -B $build -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'benign fixture configure failed' }
           cmake --build $build --config Release --parallel
-          if ($LASTEXITCODE -ne 0) { throw 'launcher build failed' }
-          $launcher = Get-ChildItem -LiteralPath $build -Filter 'MalGuard.exe' -File -Recurse | Select-Object -First 1
-          if (-not $launcher) { throw 'MalGuard.exe fixture was not produced' }
+          if ($LASTEXITCODE -ne 0) { throw 'benign fixture build failed' }
+
+          $dll = Get-ChildItem -LiteralPath $build -Filter 'TSHProBenign.dll' -File -Recurse | Select-Object -First 1
+          $exe = Get-ChildItem -LiteralPath $build -Filter 'TSHProBenignExe.exe' -File -Recurse | Select-Object -First 1
+          if (-not $dll -or -not $exe) { throw 'benign DLL/EXE fixtures were not produced' }
+
           New-Item -ItemType Directory -Path 'desktop-app/bin' -Force | Out-Null
-          Copy-Item -LiteralPath $launcher.FullName -Destination 'desktop-app/bin/MalGuard.exe' -Force
+          Copy-Item -LiteralPath $dll.FullName -Destination 'desktop-app/bin/TSHProBenign.dll' -Force
+          Copy-Item -LiteralPath $exe.FullName -Destination 'desktop-app/bin/TSHProBenignExe.exe' -Force
 
       - name: Run exact YARA diagnostic on benign fixture
         shell: pwsh
         run: |
-          & .\desktop-app\engines\yara-x\yr.exe scan --output-format ndjson .\desktop-app\multiengine\rules\malguard.yar .\desktop-app\bin\MalGuard.exe
+          & .\desktop-app\engines\yara-x\yr.exe scan --output-format ndjson .\desktop-app\multiengine\rules\malguard.yar .\desktop-app\bin\TSHProBenign.dll
           if ($LASTEXITCODE -ne 0) { throw "YARA diagnostic failed with exit code $LASTEXITCODE" }
 
       - name: Baseline Fusion and Pro regressions
@@ -90,4 +119,4 @@ jobs:
       - name: TSH PRO real no-Sandbox scan
         shell: pwsh
         run: |
-          node tests/tsh-pro-real-scan.js desktop-app/bin/MalGuard.exe
+          node tests/tsh-pro-real-scan.js desktop-app/bin/TSHProBenign.dll desktop-app/bin/TSHProBenignExe.exe
