@@ -59,7 +59,28 @@ function verdictFromClam(result) {
 function verdictFromYara(result) {
   if (!result.available) return 'unavailable';
   if (result.exitCode !== 0) return 'error';
-  return String(result.stdout || '').trim() ? 'matched' : 'no_match';
+
+  const output = String(result.stdout || '').trim();
+  if (!output) return 'no_match';
+
+  const lines = output.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch (_) {
+      return 'error';
+    }
+
+    if (Array.isArray(record.rules)) {
+      if (record.rules.length > 0) return 'matched';
+      continue;
+    }
+    if (record.match === true || record.type === 'match' || record.rule || record.identifier) {
+      return 'matched';
+    }
+  }
+  return 'no_match';
 }
 
 function parseJson(result) {
@@ -121,4 +142,4 @@ async function runExternalEngines(filePath, options = {}) {
   };
 }
 
-module.exports={ ENGINE_VERSION, runExternalEngines, runProcess };
+module.exports={ ENGINE_VERSION, runExternalEngines, runProcess, verdictFromYara };
