@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - test/tsh-pro-real-scan
+      - feature/opt-in-installation-telemetry
     paths:
       - 'engine.js'
       - 'desktop-app/**'
@@ -137,6 +138,12 @@ jobs:
         run: |
           node -e "const {runExternalEngines}=require('./desktop-app/multiengine/external-engine-runner.js'); (async()=>{const r=await runExternalEngines('desktop-app/bin/MalGuard.exe'); console.log(JSON.stringify(r,null,2)); for(const n of ['yara_x','capa']){const e=r.engines.find(x=>x.name===n); if(!e||e.status==='unavailable'||e.status==='error') throw new Error(n+' did not execute');}})().catch(e=>{console.error(e);process.exit(1)})"
 
+      - name: Telemetry preview acceptance
+        shell: pwsh
+        run: |
+          node tests/tsh-telemetry.test.js
+          node tests/tsh-telemetry-runtime.test.js
+
       - name: Release hardening smoke tests
         shell: pwsh
         run: |
@@ -155,18 +162,18 @@ jobs:
           node tools/build-portable-package.js
           node tools/verify-release-candidate.js
 
-      - name: Build TSH Pro Preview Setup
+      - name: Build Telemetry Preview Setup
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath 'DESKTOP-VERSION' -Raw).Trim()
           $root = Join-Path (Get-Location) "dist/malguard-desktop-$version"
-          $setup = Join-Path (Get-Location) "dist/MalGuard-TSH-Pro-Preview-$version-build-${{ github.sha }}-windows-x64.exe"
+          $setup = Join-Path (Get-Location) "dist/MalGuard-Telemetry-Preview-$version-build-${{ github.sha }}-windows-x64.exe"
           & pwsh -NoLogo -NoProfile -NonInteractive -File .\tools\build-windows-installer.ps1 -PackageRoot $root -Architecture 'x64' -OutputPath $setup -DiagnosticOutputDirectory (Join-Path $env:RUNNER_TEMP 'malguard-tsh-pro-installer-test-x64')
           if ($LASTEXITCODE -ne 0) { throw "Windows installer builder failed with exit code $LASTEXITCODE" }
           $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $([IO.Path]::GetFileName($setup))" | Set-Content -LiteralPath "$setup.sha256" -Encoding ascii
-          Write-Host "TSH Pro Preview Setup SHA-256: $hash"
+          Write-Host "Telemetry Preview Setup SHA-256: $hash"
           Write-Host 'NOTE: unsigned test preview. Not a public release.'
 
       - name: Install preview and verify local server startup
@@ -195,19 +202,19 @@ jobs:
               Start-Sleep -Seconds 1
             }
             if (-not $ready) { throw 'Installed preview did not become ready at /api/status' }
-            Write-Host 'Installed TSH Pro Preview runtime startup PASS.'
+            Write-Host 'Installed Telemetry Preview runtime startup PASS.'
           } finally {
             Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
               Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $installedNode, [StringComparison]::OrdinalIgnoreCase) } |
               ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           }
 
-      - name: Upload TSH Pro Preview installer
+      - name: Upload Telemetry Preview installer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: malguard-tsh-pro-preview-x64
+          name: malguard-telemetry-preview-x64
           path: |
-            dist/MalGuard-TSH-Pro-Preview-*-windows-x64.exe
-            dist/MalGuard-TSH-Pro-Preview-*-windows-x64.exe.sha256
+            dist/MalGuard-Telemetry-Preview-*-windows-x64.exe
+            dist/MalGuard-Telemetry-Preview-*-windows-x64.exe.sha256
           if-no-files-found: error
           retention-days: 7
