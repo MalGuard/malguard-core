@@ -1,0 +1,164 @@
+name: Prepare Claude Telemetry Exact Source
+
+on:
+  push:
+    branches:
+      - test/claude-telemetry-exe
+    paths:
+      - '.github/claude-telemetry-delta/**'
+      - '.github/workflows/prepare-claude-telemetry-exact.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    name: Verify and materialize uploaded Claude source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact staging branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup exact Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+
+      - name: Reconstruct and verify Claude delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/claude-telemetry-delta/part-*.txt | base64 -d > "$RUNNER_TEMP/claude-telemetry-delta.zip"
+          echo "dd5781874467d2599eb83c4a4cf02db7dd78a037b815dcc83cca136224ec2cff  $RUNNER_TEMP/claude-telemetry-delta.zip" | sha256sum -c -
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          expected = {
+              'PRIVACY.md',
+              'TSH-TELEMETRY-TEST-REPORT.md',
+              'admin-dashboard/index.html',
+              'api/_lib/admin-auth.js',
+              'api/_lib/rate-limit.js',
+              'api/_lib/region-resolver.js',
+              'api/_lib/validate-telemetry.js',
+              'api/v1/admin/installations/[id].js',
+              'api/v1/admin/installations/index.js',
+              'api/v1/installations/engine-status.js',
+              'api/v1/installations/heartbeat.js',
+              'api/v1/installations/register.js',
+              'api/v1/installations/unregister.js',
+              'db/client.js',
+              'db/migrations/0001_installations_init.sql',
+              'db/queries/installations.js',
+              'desktop-app/metrics/compatibility-install-report.js',
+              'desktop-app/metrics/device-info-provider.js',
+              'desktop-app/metrics/first-launch-counter.js',
+              'desktop-app/metrics/installation-telemetry.js',
+              'desktop-app/metrics/telemetry-consent.js',
+              'desktop-app/metrics/telemetry-payload.js',
+              'desktop-app/public/index.html',
+              'desktop-app/public/privacy-consent.js',
+              'desktop-app/public/styles.css',
+              'desktop-app/server.js',
+              'desktop-app/settings-store.js',
+              'package.json',
+              'tests/admin-auth.test.js',
+              'tests/db-queries-installations.test.js',
+              'tests/existing-telemetry-consent-regression.test.js',
+              'tests/first-launch-counter.test.js',
+              'tests/installation-telemetry.test.js',
+              'tests/run-all.js',
+              'tests/settings-store-diagnostics-migration.test.js',
+              'tests/telemetry-consent.test.js',
+              'tests/telemetry-payload.test.js',
+              'tests/validate-telemetry.test.js',
+          }
+          zpath = Path(__import__('os').environ['RUNNER_TEMP']) / 'claude-telemetry-delta.zip'
+          with zipfile.ZipFile(zpath) as z:
+              names = {n for n in z.namelist() if not n.endswith('/')}
+              if names != expected:
+                  raise SystemExit(f'delta path mismatch: missing={sorted(expected-names)} extra={sorted(names-expected)}')
+              for n in names:
+                  p = Path(n)
+                  if p.is_absolute() or '..' in p.parts:
+                      raise SystemExit(f'unsafe zip member: {n}')
+          print(f'Verified exact Claude delta allowlist: {len(expected)} files')
+          PY
+
+      - name: Apply exact Claude files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/claude-overlay"
+          unzip -q "$RUNNER_TEMP/claude-telemetry-delta.zip" -d "$RUNNER_TEMP/claude-overlay"
+          cp -a "$RUNNER_TEMP/claude-overlay"/. .
+
+      - name: Apply test-branch-only workflow fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          installer = Path('.github/workflows/tsh-pro-test-installer.yml')
+          text = installer.read_text()
+          old = "branches:\n      - test/tsh-pro-real-scan"
+          if text.count(old) != 1:
+              raise SystemExit('installer branch trigger pattern changed unexpectedly')
+          installer.write_text(text.replace(old, "branches:\n      - test/claude-telemetry-exe", 1))
+
+          publisher = Path('.github/workflows/publish-tsh-pro-preview.yml')
+          text = publisher.read_text()
+          old = "permissions:\n  actions: read\n  contents: write"
+          if text.count(old) != 1:
+              raise SystemExit('pre-existing publisher permission block changed unexpectedly')
+          publisher.write_text(text.replace(old, "permissions:\n  contents: read", 1))
+
+      - name: Run Claude telemetry regression set
+        shell: bash
+        env:
+          MALGUARD_SOURCE_COMMIT: 1977b2209e69705fa8d4273642fb12829ca50658
+        run: |
+          set -euo pipefail
+          tests=(
+            settings-store-diagnostics-migration.test.js
+            telemetry-consent.test.js
+            telemetry-payload.test.js
+            installation-telemetry.test.js
+            existing-telemetry-consent-regression.test.js
+            validate-telemetry.test.js
+            admin-auth.test.js
+            db-queries-installations.test.js
+            first-launch-counter.test.js
+          )
+          for test in "${tests[@]}"; do
+            echo "=== $test ==="
+            node "tests/$test"
+          done
+
+      - name: Remove staging payload and one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/claude-telemetry-delta
+          rm -f .github/workflows/prepare-claude-telemetry-exact.yml
+
+      - name: Verify diff hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git status --short
+
+      - name: Commit exact Claude test source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "MalGuard Test Builder"
+          git config user.email "malguard.security@gmail.com"
+          git add -A
+          git commit -m "test: materialize exact Claude telemetry implementation"
+          git push origin HEAD:test/claude-telemetry-exe
