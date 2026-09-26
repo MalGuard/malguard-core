@@ -65,3 +65,5 @@ test('installation ID generation needs no network and persists',()=>{const x=cli
 test('inventory does not run before consent',async()=>{const x=client(false);x.c.device=async()=>{throw Error('forbidden');};const p=await x.c.preview();assert.equal(p.cpuModel,null);});
 test('client modules do not reference server secret names',()=>{const files=[];function walk(dir){for(const d of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,d.name);if(d.isDirectory())walk(p);else if(/\.(js|html|json)$/.test(p))files.push(p);}}walk(path.join(__dirname,'../desktop-app'));for(const p of files)assert(!/DATABASE_URL|RESEND_API_KEY|MALGUARD_TELEMETRY_ADMIN_TOKEN_SHA256|MALGUARD_TELEMETRY_WORKER_TOKEN_SHA256/.test(fs.readFileSync(p,'utf8')),p);});
 test('untrusted redirects are forbidden',async()=>{let redirect;const x=client(true,async(u,o)=>{redirect=o.redirect;return {ok:true};});await x.c.send();assert.equal(redirect,'error');});
+
+test('UUID spelling canonicalizes before database lock selection',async()=>{const p=await payload();const lower=p.installationId;p.installationId=lower.toUpperCase();assert.equal(validatePayload(p,'register').installationId,lower);});

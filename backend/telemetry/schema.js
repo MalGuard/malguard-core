@@ -14,6 +14,8 @@ function validatePayload(p,event) {
   const keys=event==='unregister'?['installationId']:event==='register'?REGISTER:event==='engine-status'?[...BASE,'capabilities']:BASE;
   object(p,keys);
   if (!UUID.test(p.installationId)) invalid();
+  // UUID spelling must not select a different advisory lock for the same SQL UUID.
+  p.installationId=p.installationId.toLowerCase();
   if (event==='unregister') return p;
   if (p.diagnosticsConsent!==true) invalid();
   string(p.malguardVersion,64); if (!/^[0-9A-Za-z._-]+$/.test(p.malguardVersion)) invalid();
