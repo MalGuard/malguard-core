@@ -1,0 +1,67 @@
+'use strict';
+const {test,after}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('fs');const os=require('os');const path=require('path');const crypto=require('crypto');
+const {SettingsStore}=require('../desktop-app/settings-store');
+const {TelemetryClient}=require('../desktop-app/diagnostics/telemetry-client');
+const {buildTelemetryPayload,DEVICE_FIELDS}=require('../desktop-app/diagnostics/telemetry-payload');
+const {TelemetryConsent}=require('../desktop-app/diagnostics/telemetry-consent');
+const {validatePayload}=require('../backend/telemetry/schema');
+const {createHandler}=require('../backend/telemetry/handler');
+const {processEmail}=require('../backend/telemetry/email');
+const {dashboard}=require('../backend/telemetry/dashboard');
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'tsh-telemetry-'));
+after(()=>fs.rmSync(root,{recursive:true,force:true}));
+const id=()=>crypto.randomUUID();
+const adminToken=crypto.randomBytes(32).toString('hex');
+const env={MALGUARD_TELEMETRY_ENABLED:'1',MALGUARD_TELEMETRY_ADMIN_TOKEN_SHA256:crypto.createHash('sha256').update(adminToken).digest('hex')};
+function client(enabled=false,fetchImpl=async()=>({ok:true})) {
+ const store=new SettingsStore(path.join(root,id(),'settings.json'));let state=store.defaults();
+ state.diagnostics.enabled=enabled;state.diagnostics.consentUpdatedAt=enabled?new Date().toISOString():null;
+ state=store.saveSync(state);
+ const c=new TelemetryClient({readSettings:()=>state,saveSettings:s=>(state=store.saveSync(s)),settingsFile:store.filePath,version:'0.8.0-beta.7',build:'1977b22',fetchImpl,endpoint:'https://example.invalid/api/v1/installations',device:async()=>({architecture:'x64',cpuModel:'Synthetic CPU',cpuCores:4,cpuThreads:8,ramBytes:16*2**30})});
+ return {c,store,get:()=>state,set:s=>state=s};
+}
+async function payload() {return client(true).c.preview();}
+async function invoke(p,{event='register',method='POST',db={},headers={},url,environment=env}={}) {
+ const handler=createHandler({getDatabase:()=>({rate:async()=>true,register:async()=>true,...db}),env:environment});let status;let body;let responseHeaders={};
+ await handler({method,url:url||`/api/v1/installations/${event}`,headers:{'x-forwarded-proto':'https','content-type':'application/json',authorization:'Bearer '+'a'.repeat(64),...headers},body:p},{setHeader(k,v){responseHeaders[k]=v;},status(n){status=n;return this;},json(x){body=x;},send(x){body=x;}});
+ return {status,body,headers:responseHeaders};
+}
+test('TSH Telemetry: enabled sends the exact preview payload',async()=>{let sent;const x=client(true,async(url,o)=>{sent=JSON.parse(o.body);return {ok:true};});const preview=await x.c.preview();assert.equal((await x.c.send()).sent,true);assert.deepEqual(sent,preview);assert(x.get().diagnostics.lastUploadAt);});
+test('rejected diagnostics: all send types make zero requests',async()=>{let calls=0;const x=client(false,async()=>{calls++;return {ok:true};});for(const e of ['register','heartbeat','engine-status'])await x.c.send(e);assert.equal(calls,0);});
+test('enabled flag without affirmative consent timestamp cannot send',async()=>{let calls=0;const x=client(false,()=>calls++);x.get().diagnostics.enabled=true;await x.c.send();assert.equal(calls,0);});
+test('anonymous identity only; account claims rejected',async()=>{const p=await payload();assert.equal(p.identityType,'anonymous');assert.throws(()=>validatePayload({...p,accountId:'local-user'},'register'));assert.throws(()=>validatePayload({...p,identityType:'account'},'register'));});
+test('region disabled is null; no geolocation lookup',async()=>{const p=await payload();assert.equal(p.regionConsent,false);assert.equal(p.country,null);assert.equal(p.region,null);});
+test('region explicitly enabled sends only entered country and province',async()=>{const x=client(true);Object.assign(x.get().diagnostics,{shareRegion:true,country:'IR',region:'Tehran'});const p=await x.c.preview();validatePayload(p,'register');assert.equal(p.country,'IR');assert.equal(p.region,'Tehran');assert(!('city' in p));});
+for(const field of ['latitude','longitude','address','macAddress','ssid','bssid','ip','fingerprint','username','cookies','credentials','fileContents'])test(`prohibited field ${field} rejected`,async()=>{const p=await payload();assert.throws(()=>validatePayload({...p,[field]:'forbidden'},'register'));assert(!DEVICE_FIELDS.includes(field));});
+test('registration without consent cannot create an email event',async()=>{let calls=0;const p=await payload();p.diagnosticsConsent=false;assert.equal((await invoke(p,{db:{register:async()=>{calls++;}}})).status,400);assert.equal(calls,0);});
+test('email failure is outside registration request',async()=>{const r=await invoke(await payload());assert.equal(r.status,200);});
+test('email retry uses identical provider idempotency key and body',async()=>{const p=await payload();const event={id:id(),payload:p};let calls=[];let done=[];const db={claimEmail:async()=>event,emailExists:async()=>true,finishEmail:async(id,ok)=>done.push(ok)};const fakeEnv={RESEND_API_KEY:'synthetic-test-key',MALGUARD_INSTALL_NOTIFY_EMAIL:'admin@example.invalid',MALGUARD_INSTALL_FROM_EMAIL:'sender@example.invalid'};for(const ok of [false,true])await processEmail(db,{env:fakeEnv,fetchImpl:async(u,o)=>{calls.push(o);return {ok};}});assert.deepEqual(done,[false,true]);assert.equal(calls[0].headers['Idempotency-Key'],calls[1].headers['Idempotency-Key']);assert.equal(calls[0].body,calls[1].body);});
+test('network outage is contained by client',async()=>{const x=client(true,async()=>{throw Error('offline');});assert.equal((await x.c.send()).sent,false);});
+test('serialization failure is contained',async()=>{const x=client(true);x.c.preview=async()=>({x:1n});assert.equal((await x.c.send()).sent,false);});
+test('malformed JSON rejected',async()=>assert.equal((await invoke('{bad')).status,400));
+test('oversized JSON rejected',async()=>assert.equal((await invoke('x'.repeat(8193))).status,413));
+test('declared oversized request rejected before parsing',async()=>assert.equal((await invoke({}, {headers:{'content-length':'10000000'}})).status,413));
+test('invalid UUID rejected',async()=>assert.equal((await invoke({...await payload(),installationId:'bad'})).status,400));
+test('unknown fields rejected',async()=>assert.equal((await invoke({...await payload(),extra:true})).status,400));
+test('numeric ranges and enums rejected',async()=>{const p=await payload();for(const patch of [{ramBytes:-1},{cpuThreads:999999},{architecture:'evil'},{regionConsent:'yes'},{capabilities:{}}])assert.equal((await invoke({...p,...patch})).status,400);});
+test('admin authentication required',async()=>assert.equal((await invoke(null,{method:'GET',url:'/api/v1/admin/installations'})).status,401));
+test('installation bearer credential cannot authorize administrator',async()=>assert.equal((await invoke(null,{method:'GET',url:'/api/v1/admin/installations/id'})).status,401));
+test('admin server credential authorizes view',async()=>{const r=await invoke(null,{method:'GET',url:'/api/v1/admin/installations?view=dashboard',headers:{authorization:'Basic '+Buffer.from('admin:'+adminToken).toString('base64')},db:{summary:async()=>({total:0}),list:async()=>[],distributions:async()=>[]}});assert.equal(r.status,200);assert.match(r.body,/Consented installations/);assert.match(r.headers['Content-Security-Policy'],/default-src 'none'/);});
+test('dashboard malicious values are escaped',()=>{const html=dashboard({summary:{total:1},rows:[{installation_id:id(),device_model:'<script>alert(1)</script>',cpu_model:'__proto__'}]});assert(!html.includes('<script>'));assert(html.includes('&lt;script&gt;'));});
+test('backend disabled by default',async()=>assert.equal((await invoke(await payload(),{environment:{}})).status,503));
+test('plaintext transport rejected',async()=>assert.equal((await invoke(await payload(),{headers:{'x-forwarded-proto':'http'}})).status,403));
+test('database outage yields bounded generic error',async()=>{const r=await invoke(await payload(),{db:{register:async()=>{throw Error('sensitive database connection');}}});assert.equal(r.status,503);assert(!JSON.stringify(r).includes('sensitive'));});
+test('rate limit fails closed',async()=>assert.equal((await invoke(await payload(),{db:{rate:async()=>false}})).status,429));
+test('delete disables uploads, rotates ID, removes local credential',async()=>{const x=client(true);await x.c.send();const previous=x.get().diagnostics.installationId;assert.equal((await x.c.disableAndDelete()).deleted,true);assert.equal(x.get().diagnostics.enabled,false);assert.notEqual(x.get().diagnostics.installationId,previous);assert(!fs.existsSync(x.c.credentialFile));});
+test('offline deletion remains visibly pending, with no automatic recreation',async()=>{const x=client(true,async()=>{throw Error('offline');});x.c.credential(true);assert.equal((await x.c.disableAndDelete()).deleted,false);assert.equal(x.get().diagnostics.deletionPending,true);assert.equal((await x.c.send()).sent,false);});
+test('disable aborts an in-flight upload and prevents timestamp write',async()=>{let aborted=false;const x=client(true,(url,o)=>new Promise(resolve=>o.signal.addEventListener('abort',()=>{aborted=true;resolve({ok:false});})));const sending=x.c.send();await new Promise(r=>setImmediate(r));x.get().diagnostics.enabled=false;x.c.stop();await sending;assert.equal(aborted,true);assert.equal(x.get().diagnostics.lastUploadAt,null);});
+test('disable during inventory prevents later dispatch',async()=>{let finish;let calls=0;const x=client(true,async()=>{calls++;return {ok:true};});x.c.device=()=>new Promise(r=>finish=r);const pending=x.c.send();await new Promise(r=>setImmediate(r));x.get().diagnostics.enabled=false;x.c.stop();finish({architecture:'x64'});await pending;assert.equal(calls,0);});
+test('disabled heartbeat and engine status cannot upload',async()=>{let n=0;const x=client(true,async()=>{n++;return {ok:true};});x.get().diagnostics.enabled=false;x.c.stop();await x.c.send('heartbeat');await x.c.send('engine-status');assert.equal(n,0);});
+for(const [file,fn] of [['compatibility-install-report','sendCompatibilityInstallReport'],['first-launch-counter','recordFirstSuccessfulLaunch']])test(`legacy ${file}: no network without consent or after opt-in`,async()=>{let n=0;const f=require('../desktop-app/metrics/'+file)[fn];for(const b of [false,true])await f({consent:{canSendDiagnostics:()=>b},platform:'win32',ci:false,requirePackaged:false,fetchImpl:()=>n++});assert.equal(n,0);});
+test('settings migration retains every protected path and defaults consent off',()=>{const file=path.join(root,'migration.json');const old={schemaVersion:'1.0.0',watchRoots:[path.join(root,'game')],quarantineRoot:path.join(root,'q'),stagingRoot:path.join(root,'s')};fs.writeFileSync(file,JSON.stringify(old));const store=new SettingsStore(file);const s=store.loadSync();for(const k of ['watchRoots','quarantineRoot','stagingRoot'])assert.deepEqual(s[k],old[k]);assert.equal(s.schemaVersion,'2.0.0');assert.equal(s.diagnostics.enabled,false);assert.equal(s.diagnostics.shareRegion,false);assert.equal(store.loadSync().diagnostics.installationId,s.diagnostics.installationId);});
+test('installation ID generation needs no network and persists',()=>{const x=client(false);assert.match(x.get().diagnostics.installationId,/^[a-f0-9-]{36}$/);assert.equal(x.store.loadSync().diagnostics.installationId,x.get().diagnostics.installationId);});
+test('inventory does not run before consent',async()=>{const x=client(false);x.c.device=async()=>{throw Error('forbidden');};const p=await x.c.preview();assert.equal(p.cpuModel,null);});
+test('client modules do not reference server secret names',()=>{const files=[];function walk(dir){for(const d of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,d.name);if(d.isDirectory())walk(p);else if(/\.(js|html|json)$/.test(p))files.push(p);}}walk(path.join(__dirname,'../desktop-app'));for(const p of files)assert(!/DATABASE_URL|RESEND_API_KEY|MALGUARD_TELEMETRY_ADMIN_TOKEN_SHA256|MALGUARD_TELEMETRY_WORKER_TOKEN_SHA256/.test(fs.readFileSync(p,'utf8')),p);});
+test('untrusted redirects are forbidden',async()=>{let redirect;const x=client(true,async(u,o)=>{redirect=o.redirect;return {ok:true};});await x.c.send();assert.equal(redirect,'error');});

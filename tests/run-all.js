@@ -70,6 +70,8 @@ const tests=[
  'compatibility-profile.test.js',
  'install-hardware-report-api.test.js',
  'settings-store.test.js',
+ 'tsh-telemetry.test.js',
+ 'tsh-telemetry-runtime.test.js',
  'access-gate.test.js',
  'malwarebazaar-client.test.js',
  'threat-intel-cache.test.js',

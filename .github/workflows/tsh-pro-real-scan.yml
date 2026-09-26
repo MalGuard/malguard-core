@@ -1,6 +1,9 @@
 name: TSH Pro - Real No-Sandbox Scan
 
 on:
+  pull_request:
+    branches:
+      - test/tsh-pro-real-scan
   push:
     branches:
       - test/tsh-pro-real-scan
