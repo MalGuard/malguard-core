@@ -1,0 +1,85 @@
+name: TSH Pro - Real No-Sandbox Scan
+
+on:
+  push:
+    branches:
+      - test/tsh-pro-real-scan
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tsh-pro-real-scan:
+    name: TSH PRO · Real Scanner Without Sandbox
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact test branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+
+      - name: Stage hash-pinned YARA-X and capa
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $engines = @(
+            @{
+              Name='yara-x'
+              Uri='https://github.com/VirusTotal/yara-x/releases/download/v1.20.0/yara-x-v1.20.0-x86_64-pc-windows-msvc.zip'
+              Sha256='b1e2840bac593aea353d2b2b341f5a862c9d61c0c406d9abbbad9e1fa35163a1'
+              Exe='yr.exe'
+            },
+            @{
+              Name='capa'
+              Uri='https://github.com/mandiant/capa/releases/download/v9.4.0/capa-v9.4.0-windows.zip'
+              Sha256='670ab1a58b81f59cb57533bf4021ac1e7033fbe9b5d5cc180f796976081e3bb5'
+              Exe='capa.exe'
+            }
+          )
+          foreach ($engine in $engines) {
+            $archive = Join-Path $env:RUNNER_TEMP ($engine.Name + '.zip')
+            Invoke-WebRequest -Uri $engine.Uri -OutFile $archive
+            $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $engine.Sha256) { throw "$($engine.Name) SHA-256 mismatch" }
+            $extract = Join-Path $env:RUNNER_TEMP ('tsh-pro-' + $engine.Name)
+            Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+            $exe = Get-ChildItem -LiteralPath $extract -Filter $engine.Exe -File -Recurse | Select-Object -First 1
+            if (-not $exe) { throw "$($engine.Name) executable not found" }
+            $target = Join-Path (Get-Location) ('desktop-app/engines/' + $engine.Name)
+            New-Item -ItemType Directory -Path $target -Force | Out-Null
+            Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $target $engine.Exe) -Force
+            & (Join-Path $target $engine.Exe) --version
+            if ($LASTEXITCODE -ne 0) { throw "$($engine.Name) version probe failed" }
+          }
+
+      - name: Build real benign Windows PE fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $build = Join-Path $env:RUNNER_TEMP 'tsh-pro-launcher-x64'
+          cmake -S native/windows-launcher -B $build -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'launcher configure failed' }
+          cmake --build $build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'launcher build failed' }
+          $launcher = Get-ChildItem -LiteralPath $build -Filter 'MalGuard.exe' -File -Recurse | Select-Object -First 1
+          if (-not $launcher) { throw 'MalGuard.exe fixture was not produced' }
+          New-Item -ItemType Directory -Path 'desktop-app/bin' -Force | Out-Null
+          Copy-Item -LiteralPath $launcher.FullName -Destination 'desktop-app/bin/MalGuard.exe' -Force
+
+      - name: Baseline Fusion and Pro regressions
+        shell: pwsh
+        run: |
+          node tests/fusion-engine.test.js
+          node tests/multiengine-fusion.test.js
+          node tests/pro-scan-pipeline.test.js
+          node tests/ths-stage3-adversarial.test.js
+
+      - name: TSH PRO real no-Sandbox scan
+        shell: pwsh
+        run: |
+          node tests/tsh-pro-real-scan.js desktop-app/bin/MalGuard.exe
