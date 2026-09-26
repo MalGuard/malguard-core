@@ -1,0 +1,42 @@
+name: Package TSH Pro Source ZIP
+
+on:
+  push:
+    branches:
+      - test/tsh-pro-real-scan
+    paths:
+      - '.github/workflows/package-tsh-pro-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package exact source tree
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Create exact Git archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT="$(git rev-parse --short=8 HEAD)"
+          OUT="MalGuard-tsh-pro-real-scan-${SHORT}.zip"
+          git archive --format=zip --output="$OUT" HEAD
+          sha256sum "$OUT" | tee "$OUT.sha256"
+
+      - name: Upload source ZIP
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: malguard-tsh-pro-source
+          path: |
+            MalGuard-tsh-pro-real-scan-*.zip
+            MalGuard-tsh-pro-real-scan-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
