@@ -1,0 +1,89 @@
+name: TSH 5-Stage Maximum Hardening
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage1-core-detection:
+    name: "TSH 1/5 · Core Detection"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node tests/scanner-core-acceptance.test.js
+      - run: node tests/regression-corpus.test.js
+      - run: node tests/detector-regression.test.js
+      - run: node tests/malformed-fuzz.test.js
+      - run: node tests/pe-fuzz.test.js
+      - run: node tests/mutation-security.test.js
+      - run: node tests/mutation-sensitivity.test.js
+
+  stage2-multiengine-fusion:
+    name: "TSH 2/5 · Multi-Engine Fusion"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node tests/fusion-engine.test.js
+      - run: node tests/multiengine-fusion.test.js
+      - run: node tests/script-analyzer.test.js
+      - run: node tests/quality-benchmark.test.js
+      - run: node tests/performance-budget.test.js
+
+  stage3-ai-intel-privacy:
+    name: "TSH 3/5 · AI, Threat Intel & Privacy"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node tests/ai-evidence-bridge.test.js
+      - run: node tests/malguard-cloud-ai-provider.test.js
+      - run: node tests/malwarebazaar-client.test.js
+      - run: node tests/threat-intel-cache.test.js
+      - run: node tests/threat-intel-integration.test.js
+      - run: node tests/credential-store.test.js
+      - run: node tests/ths-stage3-adversarial.test.js
+
+  stage4-isolation-runtime:
+    name: "TSH 4/5 · Isolation & Runtime"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node tests/sandbox-backend.test.js
+      - run: node tests/isolation-backend-router.test.js
+      - run: node tests/gta-guard-sandbox-routing.test.js
+      - run: node tests/runtime-containment.test.js
+      - run: node tests/gta-simulation-engine.test.js
+      - run: node tests/gta-plugin-sandbox-loader.test.js
+      - run: node tests/isolation-readiness.test.js
+
+  stage5-product-release:
+    name: "TSH 5/5 · Product, UI & Release"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node tests/desktop-app.test.js
+      - run: node tests/pro-scan-pipeline.test.js
+      - run: node tests/pro-scan-api.test.js
+      - run: node tests/model-selection-ui.test.js
+      - run: node tests/scanner-feedback-ui.test.js
+      - run: node tests/secure-update.test.js
+      - run: node tests/release-trust.test.js
+      - run: node tests/product-readiness-gate.test.js
+      - run: node tools/verify-product-readiness.js

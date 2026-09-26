@@ -5,6 +5,7 @@ const path = require('path');
 const vm = require('vm');
 const { webcrypto, createHash } = require('crypto');
 const { performance } = require('perf_hooks');
+const { runExternalEngines } = require('./multiengine/external-engine-runner.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const TRANSIENT_IO_CODES = new Set(['EBUSY', 'ETXTBSY', 'EAGAIN']);
@@ -217,6 +218,27 @@ class ScannerBridge {
 
       const scannedIdentity = createHash('sha256').update(bytes).digest('hex');
       const result = await this.scanBuffer(path.basename(resolved), bytes, mode);
+
+      // Independent engines run against the exact revalidated on-disk target.
+      // Missing optional engines degrade coverage but never crash the scan.
+      try {
+        result.multiEngine = await runExternalEngines(resolved);
+        const engines = Array.isArray(result.multiEngine.engines) ? result.multiEngine.engines : [];
+        const hardMalicious = engines.some(e => e && e.name === 'clamav' && e.status === 'malicious');
+        const defenderDetection = engines.some(e => e && e.name === 'microsoft_defender' && e.status === 'detected_or_error' && e.exitCode !== 0);
+        const yaraMatch = engines.some(e => e && e.name === 'yara_x' && e.status === 'matched');
+        if (hardMalicious) {
+          result.finalVerdict = 'malicious';
+          result.reasons = Array.isArray(result.reasons) ? result.reasons : [];
+          result.reasons.unshift('Independent antivirus engine reported a malware detection.');
+        } else if ((defenderDetection || yaraMatch) && result.finalVerdict === 'safe') {
+          result.finalVerdict = 'suspicious';
+          result.reasons = Array.isArray(result.reasons) ? result.reasons : [];
+          result.reasons.unshift('Independent engine evidence conflicts with a local SAFE result.');
+        }
+      } catch (error) {
+        result.multiEngine = { schemaVersion:'2.0', engineVersion:'2.0.0', engines:[], completed:0, unavailable:['multi_engine_runner'], error:error && error.code || 'multi_engine_failed' };
+      }
 
       let currentStat;
       try { currentStat = await withTransientIoRetry(() => fs.promises.lstat(resolved)); }

@@ -11,6 +11,7 @@ on:
       - 'tests/compatibility-profile.test.js'
       - 'tests/install-hardware-report-api.test.js'
       - 'desktop-app/server.js'
+      - 'desktop-app/multiengine/**'
       - 'tests/first-launch-counter.test.js'
       - 'PRIVACY.md'
       - 'native/sandbox-containment-probe/**'
@@ -109,6 +110,45 @@ jobs:
           Copy-Item -LiteralPath $license.FullName -Destination (Join-Path $target 'NODE-LICENSE.txt') -Force
           Write-Host "Pinned Node runtime staged: $($lock.nodeVersion) / ${{ matrix.arch }} / $actual"
 
+      - name: Stage pinned independent analysis engines
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $engines = @(
+            @{
+              Name='yara-x'
+              Uri='https://github.com/VirusTotal/yara-x/releases/download/v1.20.0/yara-x-v1.20.0-x86_64-pc-windows-msvc.zip'
+              Sha256='b1e2840bac593aea353d2b2b341f5a862c9d61c0c406d9abbbad9e1fa35163a1'
+              Exe='yr.exe'
+            },
+            @{
+              Name='capa'
+              Uri='https://github.com/mandiant/capa/releases/download/v9.4.0/capa-v9.4.0-windows.zip'
+              Sha256='670ab1a58b81f59cb57533bf4021ac1e7033fbe9b5d5cc180f796976081e3bb5'
+              Exe='capa.exe'
+            }
+          )
+          foreach ($engine in $engines) {
+            $uri=[Uri]$engine.Uri
+            if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'github.com') { throw "untrusted engine origin: $uri" }
+            $archive=Join-Path $env:RUNNER_TEMP ($engine.Name+'.zip')
+            Invoke-WebRequest -Uri $uri -OutFile $archive
+            $actual=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $engine.Sha256) { throw "$($engine.Name) SHA-256 mismatch" }
+            $extract=Join-Path $env:RUNNER_TEMP ('engine-'+$engine.Name)
+            Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+            Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+            $exe=Get-ChildItem -LiteralPath $extract -Filter $engine.Exe -File -Recurse | Select-Object -First 1
+            if (-not $exe) { throw "$($engine.Name) executable missing from verified archive" }
+            $target=Join-Path (Get-Location) ('desktop-app/engines/'+$engine.Name)
+            New-Item -ItemType Directory -Path $target -Force | Out-Null
+            Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $target $engine.Exe) -Force
+            & (Join-Path $target $engine.Exe) --version
+            if ($LASTEXITCODE -ne 0) { throw "$($engine.Name) self-identification failed" }
+            Write-Host "Pinned $($engine.Name) staged and verified: $actual"
+          }
+
       - name: Build native MalGuard launcher
         shell: pwsh
         run: |
@@ -174,6 +214,14 @@ jobs:
             if ($actual -ne $expected) { throw ("PE architecture mismatch for {0}: expected 0x{1:X4}, got 0x{2:X4}" -f $file,$expected,$actual) }
             Write-Host ("PE architecture PASS: {0} = 0x{1:X4}" -f $file,$actual)
           }
+
+      - name: Prove independent engines execute on benign release binary
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node -e "const {runExternalEngines}=require('./desktop-app/multiengine/external-engine-runner.js'); (async()=>{const r=await runExternalEngines('desktop-app/bin/MalGuard.exe'); console.log(JSON.stringify(r,null,2)); for(const n of ['yara_x','capa']){const e=r.engines.find(x=>x.name===n); if(!e||e.status==='unavailable'||e.status==='error') throw new Error(n+' did not execute');}})().catch(e=>{console.error(e);process.exit(1)})"
+          if ($LASTEXITCODE -ne 0) { throw 'independent engine smoke test failed' }
 
       - name: Run Sandbox and release hardening regressions
         shell: pwsh
