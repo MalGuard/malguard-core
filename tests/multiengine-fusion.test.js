@@ -2,7 +2,7 @@
 
 const assert = require('assert');
 const { fuseEvidence } = require('../desktop-app/fusion/evidence-fusion-engine.js');
-const { runProcess, ENGINE_VERSION } = require('../desktop-app/multiengine/external-engine-runner.js');
+const { runProcess, verdictFromYara, ENGINE_VERSION } = require('../desktop-app/multiengine/external-engine-runner.js');
 
 function base(verdict='safe') {
   return {
@@ -15,6 +15,13 @@ function base(verdict='safe') {
 
 (async()=>{
   assert.equal(ENGINE_VERSION,'2.0.0');
+
+  assert.equal(verdictFromYara({available:true,exitCode:0,stdout:''}),'no_match');
+  assert.equal(verdictFromYara({available:true,exitCode:0,stdout:'{"path":"sample.asi","rules":[]}\n'}),'no_match',
+    'YARA-X NDJSON with an empty rules array must not be treated as a match');
+  assert.equal(verdictFromYara({available:true,exitCode:0,stdout:'{"path":"sample.asi","rules":[{"identifier":"MG_Test"}]}\n'}),'matched');
+  assert.equal(verdictFromYara({available:true,exitCode:0,stdout:'not-json'}),'error',
+    'unexpected YARA output must fail closed instead of inventing a match');
 
   const clam=base('safe');
   clam.multiEngine={engines:[
