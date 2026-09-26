@@ -73,6 +73,12 @@ jobs:
           New-Item -ItemType Directory -Path 'desktop-app/bin' -Force | Out-Null
           Copy-Item -LiteralPath $launcher.FullName -Destination 'desktop-app/bin/MalGuard.exe' -Force
 
+      - name: Run exact YARA diagnostic on benign fixture
+        shell: pwsh
+        run: |
+          & .\desktop-app\engines\yara-x\yr.exe scan --output-format ndjson .\desktop-app\multiengine\rules\malguard.yar .\desktop-app\bin\MalGuard.exe
+          if ($LASTEXITCODE -ne 0) { throw "YARA diagnostic failed with exit code $LASTEXITCODE" }
+
       - name: Baseline Fusion and Pro regressions
         shell: pwsh
         run: |
