@@ -1291,7 +1291,10 @@ async function scanFile(file) {
   // --- شواهد ساختاری PE که خودشان امتیازدهی می‌شوند ---
 
   // ۱) عدم تطابق پسوند با پرچم IMAGE_FILE_DLL
-  if (peInfo.isDllFlagSet === false && rules.extension_mismatch_heuristic) {
+  // A .dll/.asi that is structurally an EXE is never allowed to end as SAFE.
+  // This remains suspicious metadata evidence, not proof of malware.
+  const extensionMismatchDetected = peInfo.isDllFlagSet === false && !!rules.extension_mismatch_heuristic;
+  if (extensionMismatchDetected) {
     const h = rules.extension_mismatch_heuristic;
     const ev = { category: h.category, rule: h.id, severity: h.severity, weight: h.weight,
       confidence: h.confidence, evidence: ['پرچم IMAGE_FILE_DLL در فایل تنظیم نشده، اما پسوند .dll/.asi است.'],
@@ -1496,6 +1499,13 @@ async function scanFile(file) {
     reasons.push('حکم بر اساس یک ترکیب شاهد قوی و از‌پیش‌تعریف‌شده تنظیم شد، نه صرفاً امتیاز عددی.');
   }
 
+  let metadataVerdictFloorApplied = null;
+  if (extensionMismatchDetected && verdictRank.suspicious > verdictRank[verdict]) {
+    verdict = 'suspicious';
+    metadataVerdictFloorApplied = 'HEUR-EXT-MISMATCH';
+    reasons.push('فایل با پسوند DLL/ASI ارائه شده اما IMAGE_FILE_DLL تنظیم نیست؛ برای جلوگیری از SAFE کاذب، حکم حداقل SUSPICIOUS نگه داشته شد.');
+  }
+
   // --- اطمینان (confidence): بر اساس تنوع دسته‌های مستقل شواهد، نه شمارش خام ---
   const independentCategories = new Set(
     [...matchedCategories].filter(c => c !== 'gta_context' && c !== 'metadata_anomaly')
@@ -1543,6 +1553,7 @@ async function scanFile(file) {
     rulesStatus: rules.status || 'official',
     peValid: true,
     riskFloorApplied: verdictFloorApplied,
+    metadataVerdictFloorApplied,
     peSummary: {
       is64: peInfo.is64,
       numberOfSections: peInfo.numberOfSections,
