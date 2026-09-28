@@ -79,7 +79,6 @@ class SafeSelfHeal {
       { id: 'settings-dir', path: path.dirname(settingsFile) },
       { id: 'quarantine-dir', path: config.quarantineRoot },
       { id: 'staging-dir', path: config.stagingRoot },
-      { id: 'sandbox-temp-dir', path: path.join(os.tmpdir(), 'malguard-windows-sandbox') },
     ];
 
     for (const entry of directories) {

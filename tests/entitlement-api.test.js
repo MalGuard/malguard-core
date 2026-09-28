@@ -30,22 +30,29 @@ function request(port, method, urlPath, body) {
     const status = await request(port, 'GET', '/api/entitlement/status');
     assert.equal(status.status, 200);
     assert.equal(status.body.entitlement.valid, true);
-    assert.equal(status.body.entitlement.plan, 'pro');
-    assert.equal(status.body.entitlement.source, 'premium-preview');
+    assert.equal(status.body.entitlement.plan, 'unified');
+    assert.equal(status.body.entitlement.source, 'product');
 
     const standard = await request(port, 'POST', '/api/model-scan/start', { path: safeFile, model: 'standard' });
     assert.equal(standard.status, 202);
-    assert.equal(standard.body.entitlement.plan, 'pro');
+    assert.equal(standard.body.session.model, 'unified');
 
     const plus = await request(port, 'POST', '/api/model-scan/start', { path: safeFile, model: 'plus' });
-    assert.equal(plus.status, 202); assert.equal(plus.body.entitlement.plan, 'pro');
+    assert.equal(plus.status, 202); assert.equal(plus.body.session.model, 'unified');
 
     const pro = await request(port, 'POST', '/api/model-scan/start', { path: safeFile, model: 'pro' });
-    assert.equal(pro.status, 202); assert.equal(pro.body.entitlement.plan, 'pro');
+    assert.equal(pro.status, 202); assert.equal(pro.body.session.model, 'unified');
 
     const legacy = await request(port, 'POST', '/api/pro-scan/start', { path: safeFile });
-    assert.equal(legacy.status, 202); assert.equal(legacy.body.entitlement.plan, 'pro');
+    assert.equal(legacy.status, 202); assert.equal(legacy.body.session.model, 'unified');
 
+    for (const started of [standard,plus,pro,legacy]) {
+      for (let n=0;n<1500;n++) {
+        const status=await request(port,'GET','/api/model-scan/status?id='+started.body.session.id);
+        if (['completed','failed'].includes(status.body.session.state)) break;
+        await new Promise(resolve=>setTimeout(resolve,100));
+      }
+    }
     const freeBridge = await request(port, 'POST', '/api/scan-path', { path: safeFile, mode: 'free' });
     assert.equal(freeBridge.status, 200);
     assert.equal(freeBridge.body.ok, true);
@@ -59,12 +66,12 @@ function request(port, method, urlPath, body) {
     assert.equal(implicitPaidBridge.body.ok, true);
 
     const sandboxAnalyze = await request(port, 'POST', '/api/sandbox/analyze', { path: safeFile });
-    assert.equal(sandboxAnalyze.status, 409);
+    assert.equal(sandboxAnalyze.status, 410);
     assert.notEqual(sandboxAnalyze.body.code, 'ENTITLEMENT_REQUIRED');
 
     const sandboxSelfTest = await request(port, 'POST', '/api/sandbox/self-test', {});
-    assert.equal(sandboxSelfTest.status, 200);
+    assert.equal(sandboxSelfTest.status, 410);
   } finally { await new Promise(resolve => server.close(resolve)); }
 
-  console.log('✓ Entitlement API: premium preview exposes Standard, Plus, Pro and Sandbox paths PASS');
+  console.log('✓ Entitlement API: legacy aliases get unified analysis without entitlement; sandbox requests are rejected PASS');
 })().catch(error => { console.error(error.stack || error); process.exit(1); });

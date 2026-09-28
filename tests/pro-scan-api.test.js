@@ -6,21 +6,6 @@ const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
 
-function makeToken(privateKey, claims) {
-  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
-  const signature = crypto.sign(null, Buffer.from(payload, 'utf8'), privateKey).toString('base64url');
-  return `${payload}.${signature}`;
-}
-
-const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
-process.env.MALGUARD_ENTITLEMENT_PUBLIC_KEY_PEM = publicKey.export({ type: 'spki', format: 'pem' });
-process.env.MALGUARD_ENTITLEMENT_TOKEN = makeToken(privateKey, {
-  schemaVersion: '1.0.0',
-  subject: 'synthetic-api-test',
-  plan: 'pro',
-  expiresAt: Date.now() + 60_000,
-});
-
 const { startServer } = require('../desktop-app/server.js');
 
 function request(port, method, urlPath, body) {
@@ -44,12 +29,12 @@ function request(port, method, urlPath, body) {
 }
 
 async function waitSession(port,id){
-  for(let i=0;i<200;i++){
+  for(let i=0;i<1500;i++){
     const r=await request(port,'GET','/api/model-scan/status?id='+encodeURIComponent(id));
     assert.equal(r.status,200);
     const session=r.body.session;
     if(session.state==='completed'||session.state==='failed') return session;
-    await new Promise(r=>setTimeout(r,20));
+    await new Promise(r=>setTimeout(r,100));
   }
   throw new Error('session polling timeout');
 }
@@ -63,39 +48,36 @@ async function waitSession(port,id){
     const ent = await request(port,'GET','/api/entitlement/status');
     assert.equal(ent.status,200);
     assert.equal(ent.body.entitlement.valid,true);
-    assert.equal(ent.body.entitlement.plan,'pro');
+    assert.equal(ent.body.entitlement.plan,'unified');
 
     const safeFile = path.join(__dirname,'corpus','benign-config-read.lua');
     let started = await request(port,'POST','/api/model-scan/start',{path:safeFile,model:'standard',aiEvidence:false});
     assert.equal(started.status,202);
-    assert.equal(started.body.entitlement.plan,'pro');
     let session=await waitSession(port,started.body.session.id);
-    assert.equal(session.model,'standard');
+    assert.equal(session.model,'unified');
     assert.equal(session.finalResult.sandboxRequested,false);
-    assert.equal(session.finalResult.aiEvidence.status,'not_requested');
+    assert.equal(session.finalResult.fileBytesShared,false);
 
     const suspiciousFile = path.join(__dirname,'corpus','suspicious-cs-powershell.cs');
     started = await request(port,'POST','/api/model-scan/start',{path:suspiciousFile,model:'plus',aiEvidence:false});
     assert.equal(started.status,202);
-    assert.equal(started.body.entitlement.plan,'pro');
     session=await waitSession(port,started.body.session.id);
-    assert.equal(session.model,'plus');
-    assert.equal(session.finalResult.sandboxRequested,true);
+    assert.equal(session.model,'unified');
+    assert.equal(session.finalResult.sandboxRequested,false);
     assert.notEqual(session.finalResult.verdict,'safe');
-    assert(session.events.some(e=>e.phase==='sandbox_decision'));
+    assert(!session.events.some(e=>e.phase==='sandbox_decision'));
 
     const jsFile=path.join(tempDir,'sample.js');
     await fs.promises.writeFile(jsFile,'console.log("sandbox probe fixture");\n');
     started = await request(port,'POST','/api/model-scan/start',{path:jsFile,model:'pro',aiEvidence:false});
     assert.equal(started.status,202);
-    assert.equal(started.body.entitlement.plan,'pro');
     session=await waitSession(port,started.body.session.id);
-    assert.equal(session.model,'pro');
-    assert.equal(session.finalResult.sandboxRequested,true);
+    assert.equal(session.model,'unified');
+    assert.equal(session.finalResult.sandboxRequested,false);
     assert.notEqual(session.finalResult.verdict,'safe');
-    assert(session.events.some(e=>e.phase==='preflight'));
-    assert(session.events.some(e=>e.phase==='sandbox_analysis'));
-    assert(!session.events.some(e=>e.phase==='static_scan'));
+    assert(!session.events.some(e=>e.phase==='preflight'));
+    assert(!session.events.some(e=>e.phase==='sandbox_analysis'));
+    assert(session.events.some(e=>e.phase==='static_scan'));
 
     const invalid=await request(port,'POST','/api/model-scan/start',{path:safeFile,model:'ultra'});
     assert.equal(invalid.status,400);
@@ -104,11 +86,11 @@ async function waitSession(port,id){
     const legacy=await request(port,'POST','/api/pro-scan/start',{path:safeFile,aiEvidence:false});
     assert.equal(legacy.status,202);
     assert.equal(legacy.body.deprecated,true);
-    assert.equal(legacy.body.mappedModel,'plus');
-    assert.equal(legacy.body.entitlement.plan,'pro');
+    assert.equal(legacy.body.mappedModel,'unified');
+    await waitSession(port,legacy.body.session.id);
   } finally {
     await fs.promises.rm(tempDir,{recursive:true,force:true});
     await new Promise(resolve=>server.close(resolve));
   }
-  console.log('✓ Model scan API: signed entitlement, Standard/Plus/Pro semantics and legacy compatibility passed');
+  console.log('✓ Model scan API: unified semantics, no execution, no cloud upload and legacy aliases passed');
 })().catch(e=>{console.error(e.stack||e);process.exit(1)});

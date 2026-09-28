@@ -6,7 +6,7 @@ const http = require('http');
 const { ScannerBridge } = require('../desktop-app/scanner-bridge.js');
 const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller.js');
 const { IsolationBackendRouter } = require('../desktop-app/sandbox/isolation-backend-router.js');
-const { startServer, sandbox: productSandbox } = require('../desktop-app/server.js');
+const { startServer } = require('../desktop-app/server.js');
 
 function requestJson({ port, method = 'GET', path: requestPath }) {
  return new Promise((resolve,reject)=>{
@@ -24,9 +24,6 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
 }
 
 (async()=>{
- assert(productSandbox.windowsBackend instanceof IsolationBackendRouter,
-   'production Sandbox execution must use the certified multi-backend isolation router');
-
  const scanner = new ScannerBridge();
  let r = await scanner.scanPath(path.join(__dirname,'corpus','benign-config-read.lua'),'pro');
  assert.equal(r.finalVerdict,'safe');
@@ -57,49 +54,11 @@ function requestJson({ port, method = 'GET', path: requestPath }) {
  assert.equal(status.version,expectedVersion);
 
  const readinessResponse = await requestJson({port:address.port,method:'POST',path:'/api/sandbox/readiness'});
- assert.equal(readinessResponse.statusCode,200);
- const readiness=readinessResponse.body;
- assert.equal(readiness.kind,'malguard-embedded-validation-lab');
- assert.equal(readiness.engineeringValidationPercent,100,JSON.stringify(readiness,null,2));
- assert.equal(readiness.engineeringReady,true,JSON.stringify(readiness,null,2));
- assert.equal(readiness.productImplementationReady,true,JSON.stringify(readiness,null,2));
- assert.equal(readiness.productReadinessPercent,100,JSON.stringify(readiness,null,2));
- assert.equal(readiness.productReleaseReady,true,JSON.stringify(readiness,null,2));
- assert.equal(readiness.artifactReleaseReady,true);
- assert.equal(readiness.fullProductReleaseReady,true);
- assert.equal(readiness.releaseReady,true);
- assert.equal(readiness.deployableReleaseReady,true);
- assert.equal(readiness.deployableReleaseProfile,'standard-plus-pro-runtime-gated');
-
- for(const plan of ['standard','plus','pro']){
-   assert.equal(readiness.releaseProfiles[plan].implementationReady,true);
-   assert.equal(readiness.releaseProfiles[plan].releaseReady,true);
-   assert.equal(readiness.releaseProfiles[plan].coverage,100);
- }
-
- assert.equal(readiness.virtualWindowsLab.ok,true);
- assert.equal(readiness.virtualWindowsLab.coveragePercent,100);
- assert.equal(readiness.virtualWindowsLab.safety.realWindowsSandboxClaimed,false);
- assert.equal(readiness.mxcProcessContainer.validated,true);
- assert.equal(readiness.mxcProcessContainer.syntheticOnly,true);
- assert.equal(readiness.mxcProcessContainer.untrustedExecutionCertified,false);
- assert.equal(readiness.runtimeSelfCertification.hostSpecific,true);
- assert.equal(readiness.runtimeSelfCertification.failClosed,true);
- assert.equal(readiness.runtimeSelfCertification.currentHostCertified,readiness.windowsSandboxCertified);
- assert.equal(readiness.runtimeCapabilitiesReadyOnCurrentHost,readiness.windowsSandboxCertified);
-
- if(readiness.windowsSandboxCertified){
-   assert.equal(readiness.releaseProfiles.plus.runtimeSandboxEscalationReady,true);
-   assert.equal(readiness.releaseProfiles.pro.runtimeBehavioralExecutionReady,true);
-   assert.deepEqual(readiness.lockedCapabilities,[]);
- }else{
-   assert.equal(readiness.releaseProfiles.plus.runtimeSandboxEscalationReady,false);
-   assert.equal(readiness.releaseProfiles.pro.runtimeBehavioralExecutionReady,false);
-   assert(readiness.lockedCapabilities.includes('plus-sandbox-escalation'));
-   assert(readiness.lockedCapabilities.includes('pro-behavioral-sandbox'));
-   assert(readiness.runtimeBlockers.includes('windows_sandbox_runtime_certification_pending_on_current_host'));
- }
-
+ assert.equal(readinessResponse.statusCode,410);
+ assert.equal(readinessResponse.body.code,'DYNAMIC_ANALYSIS_DISABLED');
+ assert.deepEqual(status.supportedModels,['unified']);
+ assert.equal(status.executionMode,'static_only');
+ assert.equal(status.sandboxMode,'disabled');
  await new Promise(resolve=>server.close(resolve));
- console.log('✓ Desktop app: product release readiness is 100% while each host independently fail-closes Sandbox execution until local certification passes');
+ console.log('✓ Desktop app: unified static runtime, localhost binding and disabled dynamic endpoints PASS');
 })().catch(e=>{console.error(e.stack||e);process.exit(1)});

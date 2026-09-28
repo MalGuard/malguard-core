@@ -8,7 +8,7 @@ const path = require('path');
 
 const diagnosticsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'malguard-runtime-errors-'));
 process.env.MALGUARD_DIAGNOSTICS_ROOT = diagnosticsRoot;
-const { startServer, installFatalErrorHandlers } = require('../desktop-app/server.js');
+const { startServer, installFatalErrorHandlers, settingsStore } = require('../desktop-app/server.js');
 
 function request({ port, method = 'GET', path: requestPath = '/', body = null }) {
   return new Promise((resolve, reject) => {
@@ -34,14 +34,20 @@ function request({ port, method = 'GET', path: requestPath = '/', body = null })
       path: '/api/settings',
       body: `{ "watchRoots": ["${secret}"`,
     });
-    assert.equal(response.status, 500);
+    assert.equal(response.status, 400);
     const parsed = JSON.parse(response.text);
     assert.equal(parsed.ok, false);
-    assert.equal(parsed.code, 'INTERNAL_ERROR');
-    assert.equal(parsed.message, 'Internal MalGuard error. See local diagnostics.');
+    assert.equal(parsed.code, 'INVALID_JSON');
     assert(!response.text.includes('Unexpected'));
     assert(!response.text.includes(secret));
 
+    const originalSave = settingsStore.save;
+    settingsStore.save = async () => { throw Object.assign(new Error('synthetic disk failure'), { code: 'EIO' }); };
+    try {
+      const response = await request({ port: server.address().port, method: 'POST', path: '/api/settings', body: '{}' });
+      assert.equal(response.status, 500);
+      assert.equal(JSON.parse(response.text).code, 'INTERNAL_ERROR');
+    } finally { settingsStore.save = originalSave; }
     const diagnosticFiles = fs.readdirSync(diagnosticsRoot).filter(name => name.endsWith('.json'));
     assert.equal(diagnosticFiles.length, 1, 'HTTP 500 must create exactly one local diagnostic record');
     const diagnosticText = fs.readFileSync(path.join(diagnosticsRoot, diagnosticFiles[0]), 'utf8');

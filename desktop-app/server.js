@@ -10,24 +10,19 @@ const { WindowsUserSpaceGuardAgent } = require('../desktop-guard/windows-agent/a
 const { ManagedInstallGuard } = require('../desktop-guard/windows-agent/managed-install.js');
 const { ProtectionCoordinator } = require('../desktop-guard/windows-agent/protection-coordinator.js');
 const { RuntimeGameProcessGuard } = require('../desktop-guard/windows-agent/runtime-process-guard.js');
-const { SandboxController } = require('./sandbox/sandbox-controller.js');
-const { IsolationBackendRouter } = require('./sandbox/isolation-backend-router.js');
-const { CloudEphemeralInspectionClient } = require('./sandbox/cloud-ephemeral-inspection.js');
 const { GtaSimulationEngine } = require('./gta-simulation/simulation-engine.js');
-const { CloudGtaSimulationClient } = require('./gta-simulation/cloud-gta-simulation-client.js');
 const { AiEvidenceBridge } = require('./gta-simulation/ai-evidence-bridge.js');
 const { MalGuardCloudAiProvider } = require('./gta-simulation/malguard-cloud-ai-provider.js');
-const { EmbeddedValidationLab } = require('./sandbox/embedded-validation-lab.js');
 const { IncidentStore } = require('../desktop-guard/windows-agent/incident-store.js');
 const { SettingsStore } = require('./settings-store.js');
 const { recordFirstSuccessfulLaunch } = require('./metrics/first-launch-counter.js');
 const { sendCompatibilityInstallReport } = require('./metrics/compatibility-install-report.js');
 const { ProtectedFolderAclGate } = require('../desktop-guard/windows-agent/acl-protection.js');
 const { ThreatIntelService } = require('./threat-intel/service.js');
-const { ModelScanPipelineManager } = require('./pro-scan-pipeline.js');
-const { EntitlementGate } = require('./entitlement/entitlement-gate.js');
 const { LocalErrorReporter, safeText } = require('./diagnostics/error-reporter.js');
 const { stageScanUpload, discardScanUpload } = require('./local-scan-upload.js');
+
+const { UnifiedScanPipeline, unifiedResult, ALIASES } = require('./unified-scan-pipeline.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC = path.join(__dirname, 'public');
@@ -43,19 +38,11 @@ const BUILD = (() => {
 let activeStagedScans = 0;
 const threatIntel = new ThreatIntelService();
 const scanner = new ScannerBridge({ threatIntel });
-const isolationBackend = new IsolationBackendRouter({ prefer: 'windows-sandbox' });
-const sandbox = new SandboxController({
-  isolationBackend,
-  autoCertify: true,
-});
-const validationLab = new EmbeddedValidationLab({ windowsBackend: sandbox.windowsBackend });
-const cloudInspection = new CloudEphemeralInspectionClient();
 const gtaSimulation = new GtaSimulationEngine();
-const gtaCloudSimulation = new CloudGtaSimulationClient();
 const malguardAiProvider = new MalGuardCloudAiProvider();
 const aiEvidence = new AiEvidenceBridge({ provider: malguardAiProvider, timeoutMs: 15000 });
-const modelPipeline = new ModelScanPipelineManager({ scanner, sandbox, cloudInspection, gtaCloudSimulation, gtaSimulation, aiEvidence });
-const entitlementGate = new EntitlementGate();
+const modelPipeline = new UnifiedScanPipeline({ scanner });
+const entitlementGate = { status: () => ({ valid: true, plan: 'unified', source: 'product', supportedModels: ['unified'] }) };
 const errorReporter = new LocalErrorReporter();
 
 function json(res, status, body) {
@@ -68,7 +55,9 @@ async function readJson(req, max = 128 * 1024) {
   const chunks = []; let size = 0;
   for await (const chunk of req) { size += chunk.length; if (size > max) throw Object.assign(new Error('request too large'), { code: 'REQUEST_TOO_LARGE' }); chunks.push(chunk); }
   if (!chunks.length) return {};
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new SyntaxError('JSON object required');
+  return body;
 }
 
 function contentType(file) {
@@ -106,10 +95,7 @@ async function applySettings(nextSettings) {
   agent = null; managedInstall = null; aclGate = null; runtimeProcessGuard = null; protectionCoordinator = null;
   const saved = await settingsStore.save(validated); config = saved; incidentStore = new IncidentStore(config.quarantineRoot); return saved;
 }
-function normalizeVerdict(result) { const v = result && result.finalVerdict; return ['safe', 'suspicious', 'malicious', 'inconclusive'].includes(v) ? v : 'inconclusive'; }
-function entitlementDenied(res, error) { return json(res, 403, { ok: false, code: error.code || 'ENTITLEMENT_REQUIRED', message: error.message, requiredPlan: error.requiredPlan || null, currentPlan: error.currentPlan || 'standard' }); }
-function requirePlanForApi(res, plan) { try { return entitlementGate.requirePlan(plan); } catch (error) { if (error.code && error.code.startsWith('ENTITLEMENT_')) { entitlementDenied(res, error); return null; } throw error; } }
-
+function normalizeVerdict(result) { const v = unifiedResult(result).verdict; return ['safe', 'suspicious', 'malicious', 'inconclusive'].includes(v) ? v : 'inconclusive'; }
 async function recordRuntimeError(error, context) {
   try { return await errorReporter.record(error, context); } catch (_) { return null; }
 }
@@ -139,15 +125,12 @@ function ensureAgent() {
 async function handler(req, res) {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
   try {
+    const expectedOrigin = `http://${HOST}:${req.socket.localPort || PORT}`;
+    if (req.headers.origin && req.headers.origin !== expectedOrigin) return json(res, 403, { ok: false, code: 'LOCAL_ORIGIN_REJECTED' });
+    if (req.headers.host && req.headers.host !== new URL(expectedOrigin).host) return json(res, 403, { ok: false, code: 'LOCAL_HOST_REJECTED' });
     if (req.method === 'GET' && url.pathname === '/api/status') {
       const protection = protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, accessGateProtected:false, watcherHealthy:false, runtimeProcessHealthy:false, runtimeProcessProtection:null, state:'stopped', reason:null };
-      const sandboxCertification = sandbox.certificationStatus();
-      const sandboxMode = sandboxCertification.ok === true
-        ? `${sandboxCertification.selectedBackend || 'isolation-backend'}-certified`
-        : sandboxCertification.state === 'running'
-          ? 'isolation-backend-self-certifying'
-          : 'fail-closed-until-isolation-backend-certified';
-      return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, build: BUILD, supportedModels: ['standard', 'plus', 'pro'], entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', cloudInspection: { available: cloudInspection.available(), mode: 'opt-in-ephemeral-inspection-only' }, gtaSimulation: gtaSimulation.capabilities(), gtaCloudSimulation: { available: gtaCloudSimulation.available(), mode: 'opt-in-disposable-synthetic-gta-no-sample-execution' }, aiEvidence: aiEvidence.capabilities(), guardConfigured: config.watchRoots.length > 0, watching: protection.completeProtection === true, realtimeProtection: protection, runtimeProcessProtection: protection.runtimeProcessProtection, guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode, sandboxCertification, threatIntel: await threatIntel.status() });
+      return json(res, 200, { ok: true, product: 'MalGuard Desktop', version: DESKTOP_VERSION, build: BUILD, supportedModels: ['unified'], executionMode: 'static_only', entitlement: entitlementGate.status(), scanner: 'hardened-core-bridge', gtaSimulation: gtaSimulation.capabilities(), aiEvidence: aiEvidence.capabilities(), guardConfigured: config.watchRoots.length > 0, watching: protection.completeProtection === true, realtimeProtection: protection, runtimeProcessProtection: protection.runtimeProcessProtection, guardHealth: agent ? agent.getHealth() : { state: 'stopped' }, watchRoots: config.watchRoots, quarantineRoot: config.quarantineRoot, sandboxMode: 'disabled', dynamicAnalysis: { available: false, reason: 'disabled_by_product_design' }, threatIntel: await threatIntel.status() });
     }
     if (req.method === 'GET' && url.pathname === '/api/entitlement/status') return json(res, 200, { ok: true, entitlement: entitlementGate.status() });
     if (req.method === 'GET' && url.pathname === '/api/threat-intel/status') return json(res, 200, { ok: true, status: await threatIntel.status() });
@@ -155,28 +138,21 @@ async function handler(req, res) {
     if (req.method === 'DELETE' && url.pathname === '/api/threat-intel/credential') return json(res, 200, await threatIntel.credentials.clear());
     if (req.method === 'GET' && url.pathname === '/api/settings') return json(res, 200, { ok: true, settings: config });
     if (req.method === 'POST' && url.pathname === '/api/settings') { const body = await readJson(req); const settings = await applySettings(body); return json(res, 200, { ok: true, settings, guardRestarted: false }); }
-    if (req.method === 'POST' && url.pathname === '/api/scan-path') { const body = await readJson(req); if (typeof body.path !== 'string') return json(res, 400, { ok: false, code: 'PATH_REQUIRED' }); const requestedMode = body.mode === 'free' ? 'free' : 'pro'; if (requestedMode === 'pro') { const entitlement = requirePlanForApi(res, 'plus'); if (!entitlement) return; } const result = await scanner.scanPath(body.path, requestedMode); return json(res, 200, { ok: true, result }); }
     if (req.method === 'POST' && url.pathname === '/api/model-scan/upload') {
       // A custom header prevents a cross-origin HTML form from staging a file on localhost.
-      if (req.headers['x-malguard-local-upload'] !== '1' || (req.headers.origin && req.headers.origin !== `http://${HOST}:${PORT}`)) {
+      if (req.headers['x-malguard-local-upload'] !== '1' || (req.headers.origin && req.headers.origin !== expectedOrigin)) {
         return json(res, 403, { ok: false, code: 'LOCAL_UPLOAD_ORIGIN_REJECTED' });
       }
       const name = url.searchParams.get('name');
-      const model = url.searchParams.get('model') || 'standard';
-      if (!['standard', 'plus', 'pro'].includes(model)) return json(res, 400, { ok: false, code: 'INVALID_MODEL' });
-      try { entitlementGate.requireModel(model); }
-      catch (error) { if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error); throw error; }
+      const model = url.searchParams.get('model') || 'unified';
+      if (!ALIASES.has(model)) return json(res, 400, { ok: false, code: 'INVALID_MODEL' });
       if (activeStagedScans >= 4) return json(res, 429, { ok: false, code: 'TOO_MANY_LOCAL_SCANS' });
       activeStagedScans++;
       let upload;
       let scanStarted = false;
       try {
         upload = await stageScanUpload(req, name);
-        const allowCloudFallback = url.searchParams.get('cloudFallback') === '1';
-        const allowAiEvidence = url.searchParams.get('aiEvidence') !== '0';
         const session = modelPipeline.start(upload.path, model, {
-          allowCloudFallback,
-          allowAiEvidence,
           onFinish: async () => {
             try { await discardScanUpload(upload); }
             finally { activeStagedScans--; }
@@ -195,10 +171,33 @@ async function handler(req, res) {
         throw error;
       }
     }
-    if (req.method === 'POST' && url.pathname === '/api/model-scan/start') { const body = await readJson(req); if (typeof body.path !== 'string' || !body.path.trim()) return json(res, 400, { ok: false, code: 'PATH_REQUIRED' }); try { const model = body.model || 'standard'; const entitlement = entitlementGate.requireModel(model); const session = modelPipeline.start(body.path, model, { allowCloudFallback: body.cloudFallback === true, allowAiEvidence: body.aiEvidence !== false }); return json(res, 202, { ok: true, entitlement: { plan: entitlement.plan, source: entitlement.source }, session }); } catch (error) { if (error.code === 'INVALID_MODEL') return json(res, 400, { ok: false, code: error.code, message: error.message }); if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error); throw error; } }
-    if (req.method === 'GET' && url.pathname === '/api/model-scan/status') { const id = url.searchParams.get('id'); if (!id) return json(res, 400, { ok: false, code: 'SCAN_ID_REQUIRED' }); const session = modelPipeline.snapshot(id); if (!session) return json(res, 404, { ok: false, code: 'MODEL_SCAN_NOT_FOUND' }); return json(res, 200, { ok: true, session }); }
-    if (req.method === 'POST' && url.pathname === '/api/pro-scan/start') { const body = await readJson(req); if (typeof body.path !== 'string' || !body.path.trim()) return json(res, 400, { ok: false, code: 'PATH_REQUIRED' }); try { const entitlement = entitlementGate.requireModel('plus'); const session = modelPipeline.start(body.path, 'plus', { allowCloudFallback: body.cloudFallback === true, allowAiEvidence: body.aiEvidence !== false }); return json(res, 202, { ok: true, deprecated: true, mappedModel: 'plus', entitlement: { plan: entitlement.plan, source: entitlement.source }, session }); } catch (error) { if (error.code && error.code.startsWith('ENTITLEMENT_')) return entitlementDenied(res, error); throw error; } }
-    if (req.method === 'GET' && url.pathname === '/api/pro-scan/status') { const id = url.searchParams.get('id'); if (!id) return json(res, 400, { ok: false, code: 'SCAN_ID_REQUIRED' }); const session = modelPipeline.snapshot(id); if (!session) return json(res, 404, { ok: false, code: 'PRO_SCAN_NOT_FOUND' }); return json(res, 200, { ok: true, deprecated: true, mappedModel: 'plus', session }); }
+    if (req.method === 'POST' && url.pathname === '/api/scan-path') {
+      const body = await readJson(req);
+      const started = modelPipeline.start(body.path);
+      let session;
+      do {
+        await new Promise(resolve => setTimeout(resolve, 20));
+        session = modelPipeline.snapshot(started.id);
+      } while (!['completed', 'failed', 'cancelled'].includes(session.state));
+      const result = { ...session.localResult, ...session.finalResult, finalVerdict: session.finalResult.verdict };
+      return json(res, 200, { ok: session.state === 'completed', result });
+    }
+    if (req.method === 'POST' && ['/api/model-scan/start', '/api/pro-scan/start'].includes(url.pathname)) {
+      const body = await readJson(req);
+      const session = modelPipeline.start(body.path, body.model || 'unified');
+      return json(res, 202, { ok: true, deprecated: url.pathname === '/api/pro-scan/start', mappedModel: 'unified', session });
+    }
+    if (req.method === 'GET' && ['/api/model-scan/status', '/api/pro-scan/status'].includes(url.pathname)) {
+      const id = url.searchParams.get('id');
+      if (!id) return json(res, 400, { ok: false, code: 'SCAN_ID_REQUIRED' });
+      const session = modelPipeline.snapshot(id);
+      return json(res, session ? 200 : 404, session ? { ok: true, session } : { ok: false, code: 'MODEL_SCAN_NOT_FOUND' });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/model-scan/cancel') {
+      const body = await readJson(req);
+      const session = modelPipeline.cancel(body.id);
+      return json(res, session ? 200 : 404, session ? { ok: true, session } : { ok: false, code: 'MODEL_SCAN_NOT_FOUND' });
+    }
     if (req.method === 'GET' && url.pathname === '/api/access-gate/status') { ensureAgent(); return json(res, 200, await aclGate.status()); }
     if (req.method === 'POST' && url.pathname === '/api/access-gate/enable') { ensureAgent(); const result = await aclGate.protectAll(); return json(res, result.ok ? 200 : 409, result); }
     if (req.method === 'POST' && url.pathname === '/api/access-gate/disable') { ensureAgent(); const protection = protectionCoordinator.getCachedStatus(); if (protection.active) return json(res, 409, { ok:false, code:'ACCESS_GATE_REQUIRED_BY_ACTIVE_GUARD', protection }); return json(res, 200, await aclGate.restoreAll()); }
@@ -210,18 +209,15 @@ async function handler(req, res) {
     if (req.method === 'POST' && url.pathname === '/api/quarantine/restore') { const body = await readJson(req); if (typeof body.id !== 'string') return json(res, 400, { ok: false, code: 'ID_REQUIRED' }); const a = ensureAgent(); return json(res, 200, { ok: true, entry: await a.restore(body.id) }); }
     if (req.method === 'POST' && url.pathname === '/api/install') { const body = await readJson(req); if (typeof body.source !== 'string' || typeof body.destination !== 'string') return json(res, 400, { ok: false, code: 'SOURCE_AND_DESTINATION_REQUIRED' }); ensureAgent(); return json(res, 200, await managedInstall.install(body.source, body.destination)); }
     if (req.method === 'GET' && url.pathname === '/api/incidents') return json(res, 200, { ok: true, incidents: await incidentStore.list(100) });
-    if (req.method === 'GET' && url.pathname === '/api/sandbox/status') {
-      const certification = sandbox.certificationStatus();
-      const capabilities = await sandbox.windowsBackend.capabilities();
-      return json(res, 200, { ok: true, certification, capabilities, selectedBackend: certification.selectedBackend || capabilities.selectedBackend || null });
+    if (url.pathname.startsWith('/api/sandbox/')) return json(res, 410, { ok: false, code: 'DYNAMIC_ANALYSIS_DISABLED', sampleExecutionStarted: false });
+    if (req.method === 'POST' && url.pathname === '/api/self-test') {
+      const result = await scanner.scanBuffer('health.lua', Buffer.from('-- benign static scanner health check'), 'pro');
+      return json(res, 200, { ok: !result.hardeningError, executionMode: 'static_only', checks: { scanner: { ok: !result.hardeningError }, dynamicAnalysis: { status: 'disabled' } } });
     }
-    if (req.method === 'POST' && url.pathname === '/api/sandbox/self-test') return json(res, 200, await sandbox.ensureRuntimeCertified({ force: true }));
-    if (req.method === 'POST' && url.pathname === '/api/sandbox/readiness') return json(res, 200, await validationLab.run());
-    if (req.method === 'POST' && url.pathname === '/api/sandbox/analyze') { const entitlement = requirePlanForApi(res, 'pro'); if (!entitlement) return; const body = await readJson(req); const result = await sandbox.analyzeUntrustedSample(body.path); return json(res, result.ok ? 200 : 409, result); }
-    if (req.method === 'POST' && url.pathname === '/api/self-test') { const probe = await sandbox.ensureRuntimeCertified({ force: true }); const fixture = path.join(ROOT, 'tests', 'corpus', 'benign-config-read.lua'); const scan = await scanner.scanPath(fixture, 'pro'); return json(res, 200, { ok: probe.ok && scan.finalVerdict === 'safe', checks: { scanner: { ok: scan.finalVerdict === 'safe', verdict: scan.finalVerdict }, sandboxIsolationProbe: probe, guardConfiguration: { ok: config.watchRoots.length > 0, configured: config.watchRoots.length > 0 } } }); }
     if (req.method === 'GET' && await serveStatic(url.pathname, res)) return;
     json(res, 404, { ok: false, code: 'NOT_FOUND' });
   } catch (error) {
+    if (['INVALID_MODEL', 'PATH_REQUIRED', 'REQUEST_TOO_LARGE', 'TOO_MANY_LOCAL_SCANS'].includes(error.code) || error instanceof SyntaxError) return json(res, error.code === 'TOO_MANY_LOCAL_SCANS' ? 429 : error.code === 'REQUEST_TOO_LARGE' ? 413 : 400, { ok: false, code: error instanceof SyntaxError ? 'INVALID_JSON' : error.code });
     await recordRuntimeError(error, { area: 'http', method: req.method, route: url.pathname });
     json(res, 500, { ok: false, code: 'INTERNAL_ERROR', message: 'Internal MalGuard error. See local diagnostics.' });
   }
@@ -269,4 +265,4 @@ if (require.main === module) {
   }).catch(async error => { await recordRuntimeError(error, { area: 'startup' }); console.error(`MalGuard startup failed: ${safeText(error.code || error.name || 'INTERNAL_ERROR', 128)}`); process.exit(1); });
 }
 
-module.exports = { startServer, handler, scanner, sandbox, validationLab, cloudInspection, gtaSimulation, gtaCloudSimulation, malguardAiProvider, aiEvidence, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }), getRealtimeProtectionStatus: () => protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, state:'stopped' }, getRuntimeProcessProtectionStatus: () => runtimeProcessGuard ? runtimeProcessGuard.getCachedStatus() : { ok:false, active:false, healthy:false, state:'stopped' } };
+module.exports = { startServer, handler, scanner, gtaSimulation, malguardAiProvider, aiEvidence, modelPipeline, proPipeline: modelPipeline, entitlementGate, errorReporter, recordRuntimeError, installFatalErrorHandlers, settingsStore, applySettings, getConfig: () => ({ ...config, watchRoots: [...config.watchRoots] }), getRealtimeProtectionStatus: () => protectionCoordinator ? protectionCoordinator.getCachedStatus() : { ok:false, active:false, completeProtection:false, state:'stopped' }, getRuntimeProcessProtectionStatus: () => runtimeProcessGuard ? runtimeProcessGuard.getCachedStatus() : { ok:false, active:false, healthy:false, state:'stopped' } };
