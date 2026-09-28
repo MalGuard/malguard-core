@@ -173,7 +173,8 @@ class ScannerBridge {
     return result;
   }
 
-  async scanPath(filePath, mode = 'pro') {
+  async scanPath(filePath, mode = 'pro', { signal } = {}) {
+    if (signal) signal.throwIfAborted();
     const resolved = path.resolve(filePath);
     let beforePathStat;
     try { beforePathStat = await withTransientIoRetry(() => fs.promises.lstat(resolved)); }
@@ -217,12 +218,14 @@ class ScannerBridge {
       }
 
       const scannedIdentity = createHash('sha256').update(bytes).digest('hex');
+      if (signal) signal.throwIfAborted();
       const result = await this.scanBuffer(path.basename(resolved), bytes, mode);
+      if (signal) signal.throwIfAborted();
 
       // Independent engines run against the exact revalidated on-disk target.
       // Missing optional engines degrade coverage but never crash the scan.
       try {
-        result.multiEngine = await runExternalEngines(resolved);
+        result.multiEngine = await runExternalEngines(resolved, { signal });
         const engines = Array.isArray(result.multiEngine.engines) ? result.multiEngine.engines : [];
         const hardMalicious = engines.some(e => e && e.name === 'clamav' && e.status === 'malicious');
         const defenderDetection = engines.some(e => e && e.name === 'microsoft_defender' && e.status === 'detected_or_error' && e.exitCode !== 0);
@@ -240,6 +243,7 @@ class ScannerBridge {
         result.multiEngine = { schemaVersion:'2.0', engineVersion:'2.0.0', engines:[], completed:0, unavailable:['multi_engine_runner'], error:error && error.code || 'multi_engine_failed' };
       }
 
+      if (signal) signal.throwIfAborted();
       let currentStat;
       try { currentStat = await withTransientIoRetry(() => fs.promises.lstat(resolved)); }
       catch (error) {

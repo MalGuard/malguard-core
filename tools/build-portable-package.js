@@ -92,6 +92,8 @@ function copyTree(relativeDir) {
   if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Unsafe runtime directory: ${relativeDir}`);
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
     const relativePath = path.join(relativeDir, entry.name);
+    const portablePath = relativePath.split(path.sep).join('/');
+    if (['desktop-app/sandbox', 'desktop-app/pro-scan-pipeline.js', 'desktop-app/public/sandbox-first-run.js', 'desktop-app/gta-simulation/cloud-gta-simulation-client.js'].includes(portablePath)) continue;
     if (entry.isSymbolicLink()) throw new Error(`Refusing symlink in package: ${relativePath}`);
     if (entry.isDirectory()) copyTree(relativePath);
     else if (entry.isFile()) copyFile(relativePath);

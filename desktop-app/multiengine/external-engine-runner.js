@@ -18,8 +18,9 @@ function bounded(text) {
   return s.length > MAX_OUTPUT ? s.slice(0, MAX_OUTPUT) : s;
 }
 
-function runProcess(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+function runProcess(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}) {
   return new Promise(resolve => {
+    if (signal && signal.aborted) return resolve({ ok:false, available:false, code:'cancelled' });
     let stdout = '', stderr = '', settled = false;
     let child;
     try {
@@ -28,6 +29,9 @@ function runProcess(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
       resolve({ ok:false, available:false, code:'spawn_failed', error:error.code || error.message });
       return;
     }
+    const abort = () => { try { child.kill(); } catch (_) {} };
+    if (signal) { signal.addEventListener('abort', abort, { once:true }); if (signal.aborted) abort(); }
+    child.once('close', () => { if (signal) signal.removeEventListener('abort', abort); });
     const timer = setTimeout(() => {
       if (settled) return;
       try { child.kill(); } catch (_) {}
@@ -98,18 +102,18 @@ async function runExternalEngines(filePath, options = {}) {
 
   tasks.push((async()=>{
     if (!yaraRules) return { name:'yara_x', status:'unavailable', reason:'rules_not_configured' };
-    const r=await runProcess(process.env.MALGUARD_YARAX_BIN || bundled('yara-x/yr.exe','yr'), ['scan','--output-format','ndjson',yaraRules,resolved]);
+    const r=await runProcess(process.env.MALGUARD_YARAX_BIN || bundled('yara-x/yr.exe','yr'), ['scan','--output-format','ndjson',yaraRules,resolved], { signal: options.signal });
     return { name:'yara_x', status:verdictFromYara(r), available:r.available, exitCode:r.exitCode, evidence:r.stdout ? bounded(r.stdout) : null, stderr:r.stderr ? bounded(r.stderr) : null };
   })());
 
   tasks.push((async()=>{
-    const r=await runProcess(process.env.MALGUARD_CAPA_BIN || bundled('capa/capa.exe','capa'), ['-j',resolved], {timeoutMs:90_000});
+    const r=await runProcess(process.env.MALGUARD_CAPA_BIN || bundled('capa/capa.exe','capa'), ['-j',resolved], {timeoutMs:90_000, signal:options.signal});
     const json=parseJson(r);
     return { name:'capa', status:!r.available?'unavailable':r.ok?'complete':'error', available:r.available, capabilities:json && json.rules ? Object.keys(json.rules).slice(0,256) : [], evidenceCount:json && json.rules ? Object.keys(json.rules).length : 0 };
   })());
 
   tasks.push((async()=>{
-    const r=await runProcess(process.env.MALGUARD_FLOSS_BIN || bundled('floss/floss.exe','floss'), ['--json',resolved], {timeoutMs:90_000});
+    const r=await runProcess(process.env.MALGUARD_FLOSS_BIN || bundled('floss/floss.exe','floss'), ['--json',resolved], {timeoutMs:90_000, signal:options.signal});
     const json=parseJson(r);
     const strings=json && json.strings ? json.strings : null;
     const count=strings && typeof strings==='object' ? Object.values(strings).reduce((n,v)=>n+(Array.isArray(v)?v.length:0),0) : 0;
@@ -117,14 +121,14 @@ async function runExternalEngines(filePath, options = {}) {
   })());
 
   tasks.push((async()=>{
-    const r=await runProcess(process.env.MALGUARD_CLAM_BIN || bundled('clamav/clamscan.exe','clamscan'), ['--no-summary','--infected',resolved], {timeoutMs:90_000});
+    const r=await runProcess(process.env.MALGUARD_CLAM_BIN || bundled('clamav/clamscan.exe','clamscan'), ['--no-summary','--infected',resolved], {timeoutMs:90_000, signal:options.signal});
     return { name:'clamav', status:verdictFromClam(r), available:r.available, exitCode:r.exitCode };
   })());
 
   if (process.platform === 'win32') {
     tasks.push((async()=>{
       const defender=process.env.MALGUARD_DEFENDER_BIN || 'C:\\Program Files\\Windows Defender\\MpCmdRun.exe';
-      const r=await runProcess(defender, ['-Scan','-ScanType','3','-File',resolved,'-DisableRemediation'], {timeoutMs:120_000});
+      const r=await runProcess(defender, ['-Scan','-ScanType','3','-File',resolved,'-DisableRemediation'], {timeoutMs:120_000, signal:options.signal});
       return { name:'microsoft_defender', status:!r.available?'unavailable':r.exitCode===0?'clean':'detected_or_error', available:r.available, exitCode:r.exitCode };
     })());
   } else {

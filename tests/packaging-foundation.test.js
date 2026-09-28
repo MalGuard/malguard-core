@@ -26,7 +26,7 @@ for (const required of [
   'desktop-app/server.js',
   'desktop-app/gta-simulation/simulation-engine.js',
   'desktop-app/gta-simulation/ai-evidence-bridge.js',
-  'desktop-app/gta-simulation/cloud-gta-simulation-client.js',
+  'desktop-app/unified-scan-pipeline.js',
   'desktop-app/gta-simulation/malguard-cloud-ai-provider.js',
   'desktop-app/threat-intel/credential-store.js',
   'desktop-guard/windows-agent/agent.js',
@@ -41,6 +41,8 @@ const bridge = spawnSync(process.execPath, ['-e', "new (require('./desktop-app/s
 });
 assert.equal(bridge.status, 0, `packaged scanner startup failed: ${bridge.stderr || bridge.stdout}`);
 
+assert.ok(!fs.existsSync(path.join(out, 'desktop-app/sandbox')), 'sandbox must not ship in unified runtime');
+assert.ok(!fs.existsSync(path.join(out, 'desktop-app/pro-scan-pipeline.js')), 'legacy execution pipeline must not ship');
 assert.ok(!fs.existsSync(path.join(out, 'tests')), 'tests must not ship in portable runtime package');
 assert.ok(!fs.existsSync(path.join(out, '.env')), 'environment secret file must not ship');
 assert.ok(!fs.existsSync(path.join(out, 'desktop-app', 'threat-intel', 'abusech-auth.dpapi')), 'DPAPI credential blob must not ship');

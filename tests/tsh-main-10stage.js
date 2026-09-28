@@ -32,6 +32,7 @@ const STAGES = Object.freeze({
   ]},
   stage6: { title:'TSH 6/10 - AI, Threat Intelligence and Credential Privacy', tests:[
     'ai-evidence-bridge.test.js','malguard-cloud-ai-provider.test.js','malwarebazaar-client.test.js',
+      'unified-static.test.js',
     'threat-intel-cache.test.js','threat-intel-recent-feed.test.js','credential-store.test.js',
     'threat-intel-integration.test.js'
   ]},

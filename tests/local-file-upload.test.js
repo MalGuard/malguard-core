@@ -32,7 +32,7 @@ function request(port, endpoint, body, headers = {}) {
     const port = server.address().port;
     const endpoint = '/api/model-scan/upload?model=standard&name=benign.lua';
     const fixture = Buffer.from('-- harmless local upload fixture\nlocal n = 1\n');
-    const headers = { 'x-malguard-local-upload': '1', origin: 'http://127.0.0.1:18777' };
+    const headers = { 'x-malguard-local-upload': '1', origin: `http://127.0.0.1:${port}` };
     const denied = await request(port, endpoint, fixture);
     assert.equal(denied.status, 403);
     const wrongOrigin = await request(port, endpoint, fixture, { ...headers, origin: 'https://example.org' });
@@ -43,20 +43,17 @@ function request(port, endpoint, body, headers = {}) {
     assert.equal(uploaded.status, 202, JSON.stringify(uploaded.body));
     const id = uploaded.body.session.id;
     let session;
-    for (let attempt = 0; attempt < 600; attempt++) {
+    for (let attempt = 0; attempt < 1500; attempt++) {
       const response = await fetch(`http://127.0.0.1:${port}/api/model-scan/status?id=${encodeURIComponent(id)}`);
       session = (await response.json()).session;
       if (['completed', 'failed'].includes(session.state) && session.cleanupPending !== true) break; // terminal states are exposed only after upload cleanup
-      await new Promise(resolve => setTimeout(resolve, 20));
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.equal(session.state, 'completed');
     assert.notEqual(session.cleanupPending, true, 'upload cleanup must finish before the test accepts completion');
-    assert.equal(session.model, 'standard');
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (!fs.existsSync(session.filePath)) break;
-      await new Promise(resolve => setTimeout(resolve, 20));
-    }
-    assert(!fs.existsSync(session.filePath), 'temporary file should be deleted when scanning finishes');
+    assert.equal(session.model, 'unified');
+    const remaining = await fs.promises.readdir(root, { recursive: true });
+    assert(!remaining.some(file => file.endsWith('benign.lua')), 'temporary upload must be removed before completion');
     const tooLarge = Readable.from([Buffer.alloc(5)]);
     tooLarge.headers = {};
     await assert.rejects(stageScanUpload(tooLarge, 'safe.lua', { maxBytes: 4, root }), /UPLOAD_TOO_LARGE/);

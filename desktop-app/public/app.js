@@ -10,30 +10,20 @@ function out(id,data){$(id).textContent=JSON.stringify(data,null,2)}
 async function status(){try{const s=await api('/api/status');$('status').textContent=`${s.watching?'Guard active':'Guard idle'} · ${s.version}`;const build=$('buildId');if(build)build.textContent=s.build?`Build ${s.build}`:'Build unavailable';out('guardOut',s)}catch(e){$('status').textContent='Offline';const build=$('buildId');if(build)build.textContent='Build unavailable'}}
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')});
 
-const MODEL_HINTS={
- standard:'Standard: hardened local analysis for GTA plugins, Lua/C# scripts and ZIP mod packages + synthetic GTA context + MalGuard AI evidence.',
- plus:'Plus: deep local analysis + synthetic GTA context + disposable isolated GTA fallback and MalGuard AI evidence analysis when internet is available.',
- pro:'Pro: verified local behavioral analysis when possible + GTA simulation + isolated cloud fallback and MalGuard AI evidence analysis when internet is available.',
-};
 const VERDICT_COPY={
- safe:{label:'Safe',tone:'safe',title:'No threat detected',message:'MalGuard completed the selected analysis and found no malicious behavior in the available evidence.'},
- suspicious:{label:'Review recommended',tone:'warning',title:'Suspicious activity detected',message:'MalGuard found behavior or indicators that deserve caution. Keep the file blocked unless you trust its source.'},
- malicious:{label:'Threat blocked',tone:'danger',title:'Malicious activity detected',message:'MalGuard detected malicious evidence. Keep the file quarantined and do not run it.'},
- inconclusive:{label:'Unclear',tone:'inconclusive',title:'No safety verdict',message:'The analysis did not establish whether this file is safe. Do not treat it as approved.'},
+ safe:{label:'No detection',tone:'inconclusive',title:'No safety approval',message:'No detected static indicator is not proof of safety.'},
+ suspicious:{label:'Review recommended',tone:'warning',title:'Suspicious indicators detected',message:'Review the evidence before using this file. This scan has not quarantined or blocked it.'},
+ malicious:{label:'Threat detected',tone:'danger',title:'Malicious evidence detected',message:'Do not run this file. This scan has not quarantined or blocked it.'},
+ inconclusive:{label:'Unclear',tone:'inconclusive',title:'No safety verdict',message:'The analysis did not establish that this file is safe. Do not treat it as approved.'},
 };
-function currentModel(){return $('scanModel').value}
-function cloudFallbackEnabled(){const box=$('cloudFallback');return currentModel()!=='standard'&&!!(box&&box.checked)}
-function aiEvidenceEnabled(){const box=$('aiEvidence');return !!(box&&box.checked)}
+let activeScanId=null;
+function currentModel(){return 'unified'}
+function cloudFallbackEnabled(){return false}
+function aiEvidenceEnabled(){return false}
 function updateModelUi(){
- const model=currentModel();
- $('modelHint').textContent=MODEL_HINTS[model]||'';
- const cloudOption=$('cloudFallbackOption');if(cloudOption)cloudOption.hidden=model==='standard'; if(cloudOption&&model!=='standard'){const box=$('cloudFallback');if(box)box.checked=true;}
- $('modelFlow').hidden=false;
- $('modelFlowTitle').textContent=model==='pro'?'Pro secure analysis + GTA simulation':model==='plus'?'Plus deep analysis + GTA simulation':'Standard local analysis + GTA simulation';
- $('modelSteps').innerHTML='';
- resetCustomerResult(model==='pro'?'Ready for isolated behavioral analysis and GTA simulation.':model==='plus'?'Ready for deep analysis and GTA simulation.':'Ready for local analysis and GTA simulation.');
+ $('modelFlowTitle').textContent='Static analysis and reputation';
+ resetCustomerResult('Ready for local analysis without executing the file.');
 }
-$('scanModel').onchange=updateModelUi;
 
 function resetCustomerResult(text='Ready to scan.'){
  const box=$('modelFinal');
@@ -61,7 +51,8 @@ function scanFailureMessage(code){
  if(code==='UPLOAD_EMPTY')return 'The selected file is empty. Choose a different file.';
  if(code==='UPLOAD_TOO_LARGE')return 'The file is larger than 64 MB. Choose a smaller file.';
  if(code==='LOCAL_UPLOAD_ORIGIN_REJECTED')return 'Open GTA Guard from its Desktop shortcut and try again.';
- if(String(code||'').startsWith('ENTITLEMENT_'))return 'This protection level is unavailable. Select Standard for .asi or .dll files.';
+ if(code==='SCAN_CANCELLED')return 'Scan cancelled. No safety verdict was issued.';
+ if(code==='TOO_MANY_LOCAL_SCANS')return 'The scanner is busy. Wait for active scans to finish.';
  return 'The scan stopped before a reliable result was available. The file was not marked safe. Open Scan diagnostics for the error code.';
 }
 function friendlyPhase(event){
@@ -100,75 +91,22 @@ function friendlyMeta(event){
  if(status==='failed')return 'Stopped safely';
  return 'Queued';
 }
-function pluginDirectExecutionUnsupported(result){
- return !!(result&&result.pluginDirectExecutionUnsupported===true);
-}
-function sandboxSetupRequired(result){
- return !!(result&&!pluginDirectExecutionUnsupported(result)&&(
-   result.completionState==='sandbox_unavailable_fail_closed'||
-   (result.sandboxRequested===true&&result.sandboxCompleted===false&&result.completionState!=='preflight_failed_closed')
- ));
-}
 function renderCustomerResult(session){
- const result=session&&session.finalResult?session.finalResult:null;
+ const result=session&&session.finalResult;
  const box=$('modelFinal');
- box.innerHTML='';
- const diagnostics=$('modelDiagnostics');
- const diagnosticsOut=$('modelDiagnosticsOut');
- if(diagnostics&&diagnosticsOut&&session){
-   diagnostics.hidden=false;
-   diagnosticsOut.textContent=JSON.stringify(session,null,2);
- }
- if(!result){
-   box.className='scan-result result-neutral';
-   box.textContent='Analysis is still running securely.';
-   return;
- }
- const setupRequired=sandboxSetupRequired(result);
- const preflightBlocked=result.completionState==='preflight_failed_closed';
- const pluginFallback=pluginDirectExecutionUnsupported(result);
- let copy=VERDICT_COPY[result.verdict]||VERDICT_COPY.inconclusive;
- if(pluginFallback&&result.verdict==='inconclusive'){
-   copy=result.cloudInspectionCompleted===true
-     ?{label:'Protected',tone:'inconclusive',title:'GTA plugin inspected without direct execution',message:'This ASI/DLL plugin cannot be launched safely as a standalone Windows program. MalGuard completed local fallback analysis and disposable Cloud Inspection, but did not claim a SAFE result without real plugin execution proof.'}
-     :{label:'Protected',tone:'inconclusive',title:'GTA plugin inspected without direct execution',message:'This ASI/DLL plugin cannot be launched safely as a standalone Windows program. MalGuard completed non-executing fallback analysis and kept the result inconclusive instead of pretending the plugin was behaviorally tested.'};
- }else if(setupRequired){
-   copy=result.cloudInspectionCompleted===true
-     ?{label:'Protected',tone:'setup',title:'Cloud inspection completed',message:'The disposable cloud environment inspected the file and was destroyed after the job, but Windows behavioral execution was not proven on this PC. MalGuard therefore did not mark the file safe.'}
-     :{label:'Protected',tone:'setup',title:'Secure Sandbox setup required',message:'MalGuard kept the file protected because isolated execution is not ready on this PC. The file was not executed outside the Sandbox.'};
- }else if(preflightBlocked){
-   copy={label:'Protected',tone:'setup',title:'File kept protected',message:'MalGuard could not prepare this file for isolated execution safely, so it stopped before running it.'};
- }
+ box.replaceChildren();
+ if(!result){box.textContent=session&&session.state==='cancelling'?'Stopping analysis and cleaning up…':'Analysis in progress…';return;}
+ const copy=VERDICT_COPY[result.verdict]||VERDICT_COPY.inconclusive;
  box.className=`scan-result result-${copy.tone}`;
- const header=document.createElement('div');header.className='result-header';
- const title=document.createElement('div');title.className='result-title';title.textContent=copy.title;
- const badge=document.createElement('span');badge.className='result-badge';badge.textContent=copy.label;
- header.append(title,badge);
- const message=document.createElement('p');message.className='result-message';message.textContent=copy.message;
- box.append(header,message);
- const ai=result.aiEvidence;
- if(ai&&ai.status==='completed'){
-   const aiNote=document.createElement('p');
-   aiNote.className='result-note';
-   const risk=String(ai.risk||'unknown').toUpperCase();
-   aiNote.textContent='MalGuard AI · '+risk+(ai.summary?' · '+ai.summary:'')+' AI advice is advisory and does not change the security verdict.';
-   box.append(aiNote);
- }
- if(result.gtaCloudSimulationCompleted===true){
-   const simNote=document.createElement('p');
-   simNote.className='result-note';
-   simNote.textContent='Disposable GTA simulation environment completed and was destroyed after the job. The plugin was staged but not executed in this simulation phase.';
-   box.append(simNote);
- }
- if(setupRequired){
-   const note=document.createElement('p');note.className='result-note';note.textContent=result.cloudInspectionCompleted===true?'Cloud Inspection is inspection-only and cannot replace verified Windows behavioral execution for a SAFE verdict.':'Plus and Pro stay fail-closed until this device passes a real local behavioral isolation check.';
-   const actions=document.createElement('div');actions.className='result-actions';
-   const check=document.createElement('button');check.type='button';check.textContent='Check Sandbox compatibility';
-   check.onclick=()=>{const tab=document.querySelector('.tab[data-tab="engine"]');if(tab)tab.click();const button=$('finalSandboxTest');if(button)button.click();};
-   const standard=document.createElement('button');standard.type='button';standard.className='button-secondary';standard.textContent='Run Standard scan instead';
-   standard.onclick=()=>{$('scanModel').value='standard';updateModelUi();$('scanBtn').click();};
-   actions.append(check,standard);box.append(note,actions);
- }
+ const title=document.createElement('strong');title.textContent=copy.title;
+ const message=document.createElement('p');message.textContent=copy.message;
+ const limitations=document.createElement('p');limitations.textContent='Static analysis only. No sample execution or external file upload. '+(result.limitations||[]).join(' · ');
+ const intel=document.createElement('p');
+ const reputation=result.localResult&&result.localResult.threatIntel;
+ intel.textContent='MalwareBazaar: '+(reputation&&reputation.status||'not_checked')+(reputation&&reputation.reason?' ('+reputation.reason+')':'');
+ box.append(title,message,intel,limitations);
+ $('modelDiagnostics').hidden=false;
+ out('modelDiagnosticsOut',result);
 }
 function renderPipeline(session){
  const list=$('modelSteps'); list.innerHTML='';
@@ -198,14 +136,17 @@ async function runModelScan(path,model,file=null){
  }
  if(!started.session)throw new Error(started.code||'SCAN_NOT_STARTED');
  const id=started.session.id;
+ activeScanId=id;
+ $('cancelScan').disabled=false;
  renderPipeline(started.session);
  for(let i=0;i<600;i++){
    await new Promise(r=>setTimeout(r,250));
    const d=await api(`/api/model-scan/status?id=${encodeURIComponent(id)}`);
    renderPipeline(d.session);
-   if(d.session.state==='completed'||d.session.state==='failed') return d.session;
+   if(['completed','failed','cancelled'].includes(d.session.state)) return d.session;
  }
- throw new Error('Model scan status polling timed out');
+ await api('/api/model-scan/cancel','POST',{id});
+ throw new Error('SCAN_POLL_TIMEOUT');
 }
 
 $('scanFile').onchange=()=>{if($('scanFile').files.length)$('scanPath').value='';};
@@ -218,8 +159,8 @@ $('scanBtn').onclick=async()=>{
    setScanSummary('Choose a file from this PC to begin scanning.','neutral');
    return;
  }
- if(model==='standard'&&!standardSupportsFile(file?file.name:p)){
-   setScanSummary('Standard scans supported GTA .asi/.dll plugins, .lua/.cs scripts and .zip mod packages. This file type is outside Standard coverage, so no scan was run.','unsupported');
+ if(!standardSupportsFile(file?file.name:p)){
+   setScanSummary('GTA Guard scans supported GTA .asi/.dll plugins, .lua/.cs scripts and .zip mod packages. This file type is outside scanner coverage, so no scan was run.','unsupported');
    return;
  }
  if(file&&file.size>64*1024*1024){setScanSummary(scanFailureMessage('UPLOAD_TOO_LARGE'),'error');return;}
@@ -234,14 +175,8 @@ $('scanBtn').onclick=async()=>{
      setScanSummary(scanFailureMessage(session.error&&session.error.code),'error');
      $('modelDiagnostics').hidden=false;
      out('modelDiagnosticsOut',{code:session.error&&session.error.code||'SCAN_FAILED',message:session.error&&session.error.message||null});
-   }else if(pluginDirectExecutionUnsupported(result)){
-     setScanSummary(result.cloudInspectionCompleted===true
-       ?'GTA plugin inspected locally and in a disposable cloud environment. Direct plugin execution was not performed, so the result remains fail-closed.'
-       :'GTA plugin inspected with non-executing fallback analysis. Direct plugin execution was not performed, so MalGuard did not claim a SAFE result.','inconclusive');
-   }else if(sandboxSetupRequired(result)){
-     setScanSummary(result&&result.cloudInspectionCompleted===true?'Cloud isolated analysis completed. Local behavioral execution was unavailable, so MalGuard preserved a fail-closed verdict.':'File kept protected. Local behavioral isolation was unavailable; MalGuard completed every available defensive fallback and did not mark the file safe.','setup');
-   }else if(result&&result.completionState==='preflight_failed_closed'){
-     setScanSummary('File kept protected because MalGuard could not prepare it safely for isolated execution.','setup');
+   }else if(session.state==='cancelled'){
+     setScanSummary('Scan cancelled. No safety verdict was issued.','inconclusive');
    }else if(result&&result.verdict==='inconclusive'){
      setScanSummary(VERDICT_COPY.inconclusive.message,'inconclusive');
    }else{
@@ -255,7 +190,15 @@ $('scanBtn').onclick=async()=>{
    if(diagnostics&&diagnosticsOut){diagnostics.hidden=false;diagnosticsOut.textContent=JSON.stringify({code:'MODEL_SCAN_UI_ERROR',message:e.message},null,2);}
  }finally{
    $('scanBtn').disabled=false;
+   $('cancelScan').disabled=true;
+   activeScanId=null;
  }
+};
+$('cancelScan').onclick=async()=>{
+ if(!activeScanId)return;
+ $('cancelScan').disabled=true;
+ try{const d=await api('/api/model-scan/cancel','POST',{id:activeScanId});if(!d.ok)throw new Error(d.code);setScanSummary('Stopping analysis; waiting for active reads and temporary file cleanup…','neutral');}
+ catch(e){$('cancelScan').disabled=false;setScanSummary('Cancellation could not be confirmed. The scan may still be running.','error');}
 };
 async function loadThreatStatus(){out('threatOut',await api('/api/threat-intel/status'))}
 $('threatStatus').onclick=loadThreatStatus;
@@ -267,39 +210,6 @@ $('enableGate').onclick=async()=>out('gateOut',await api('/api/access-gate/enabl
 $('disableGate').onclick=async()=>out('gateOut',await api('/api/access-gate/disable','POST',{}));
 $('gateStatus').onclick=async()=>out('gateOut',await api('/api/access-gate/status'));
 
-function renderIsolationReadiness(report){
- const productReady=!!(report&&report.productReleaseReady===true);
- const runtimeReady=!!(report&&report.runtimeCapabilitiesReadyOnCurrentHost===true);
- const summary=$('finalSandboxSummary');
- summary.className=runtimeReady?'health-card health-ready':'health-card health-setup';
- if(runtimeReady){
-   summary.textContent='Secure Sandbox is ready on this PC. Plus and Pro can run isolated behavioral analysis.';
- }else if(productReady){
-   summary.textContent='MalGuard is installed correctly. Secure Sandbox needs setup or compatibility approval on this PC before Plus/Pro can execute files in isolation.';
- }else{
-   summary.textContent='MalGuard completed the compatibility check, but this installation still needs attention before premium Sandbox analysis can run.';
- }
- const diagnostics=$('finalSandboxDiagnostics');
- if(diagnostics)diagnostics.hidden=false;
- out('finalSandboxOut',report);
-}
-$('finalSandboxTest').onclick=async()=>{
- const button=$('finalSandboxTest');
- button.disabled=true;
- $('finalSandboxSummary').className='health-card health-checking';
- $('finalSandboxSummary').textContent='Checking secure Sandbox compatibility on this PC…';
- try{
-   const report=await api('/api/sandbox/readiness','POST',{});
-   renderIsolationReadiness(report);
- }catch(e){
-   $('finalSandboxSummary').className='health-card health-setup';
-   $('finalSandboxSummary').textContent='Compatibility check could not finish. Premium Sandbox execution remains safely disabled until the check succeeds.';
-   const diagnostics=$('finalSandboxDiagnostics');if(diagnostics)diagnostics.hidden=false;
-   out('finalSandboxOut',{code:'ISOLATION_READINESS_UI_ERROR',message:e.message});
- }finally{
-   button.disabled=false;
- }
-};
 $('selfTest').onclick=async()=>out('selfOut',await api('/api/self-test','POST',{}));
 $('refreshQ').onclick=async()=>{const d=await api('/api/quarantine');const box=$('quarantine');box.innerHTML='';for(const q of d.entries||[]){const e=document.createElement('div');e.className='qitem';const t=document.createElement('div');t.textContent=`${q.responsibleFile||'file'} • ${q.verdict} • ${q.state}`;const p=document.createElement('div');p.className='muted';p.textContent=q.originalPath||'';e.append(t,p);if(q.state==='quarantined'){const b=document.createElement('button');b.textContent='Restore';b.onclick=async()=>{await api('/api/quarantine/restore','POST',{id:q.id});$('refreshQ').click()};e.append(b)}box.append(e)}};
 async function loadSettings(){const d=await api('/api/settings');const x=d.settings||{};$('watchRoot').value=(x.watchRoots||[])[0]||'';$('quarantineRoot').value=x.quarantineRoot||'';$('stagingRoot').value=x.stagingRoot||'';out('settingsOut',d)}

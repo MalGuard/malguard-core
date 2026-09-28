@@ -25,6 +25,7 @@ const STAGES = Object.freeze({
       'mutation-sensitivity.test.js',
       'self-test.test.js',
       'malwarebazaar-client.test.js',
+      'unified-static.test.js',
       'threat-intel-cache.test.js',
       'threat-intel-recent-feed.test.js',
       'credential-store.test.js',

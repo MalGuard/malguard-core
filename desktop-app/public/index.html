@@ -12,7 +12,7 @@
     <header>
       <div>
         <h1>MalGuard Desktop</h1>
-        <p>Local protection on this PC · works offline for Standard scans</p>
+        <p>Local protection on this PC · static analysis works offline</p>
       </div>
       <div class="header-status"><span id="buildId" class="build-id">Build loading…</span><span id="status">Loading…</span></div>
     </header>
@@ -24,30 +24,14 @@
 
     <section id="scanner" class="panel active">
       <h2>Scan a file</h2>
-      <div class="model-picker">
-        <label for="scanModel">Protection level</label>
-        <select id="scanModel" aria-label="Choose MalGuard scan model">
-          <option value="standard">Standard</option>
-          <option value="plus">Plus</option>
-          <option value="pro">Pro</option>
-        </select>
-        <span id="modelHint" class="muted">Standard hardened multi-layer local protection.</span>
-      </div>
-      <label id="cloudFallbackOption" class="cloud-fallback-option" hidden>
-        <input id="cloudFallback" type="checkbox" checked>
-        <span><strong>Use disposable GTA Cloud Simulation if local behavioral isolation is unavailable</strong><small>Enabled by default for Plus/Pro when internet is available. ASI/DLL plugins are staged inside a fresh synthetic GTA filesystem with deny-all networking. The sample is not executed in this simulation phase, and the environment is destroyed after the job.</small></span>
-      </label>
-      <label id="aiEvidenceOption" class="cloud-fallback-option">
-        <input id="aiEvidence" type="checkbox" checked>
-        <span><strong>Use MalGuard AI evidence analysis</strong><small>Enabled by default for Standard, Plus and Pro when internet is available. You can turn it off. Offline scans continue with the local engine. Only bounded scan metadata is sent to MalGuard Malware AI. File bytes, filename, full path and SHA-256 are not sent to the AI provider. AI advice cannot mark a file SAFE or automatically delete files.</small></span>
-      </label>
-      <div class="row file-chooser"><input id="scanFile" type="file" aria-label="Choose a file from this PC"><button id="scanBtn">Scan selected file</button></div>
+      <p id="modelHint" class="muted">One complete static scan. No sample execution, sandbox or external file upload.</p>
+      <div class="row file-chooser"><input id="scanFile" type="file" aria-label="Choose a file from this PC"><button id="scanBtn">Scan selected file</button><button id="cancelScan" disabled>Cancel scan</button></div>
       <div id="scanOut" class="scan-summary result-neutral" role="status" aria-live="polite">Choose a supported file to scan.</div>
       <details id="modelDiagnostics" class="diagnostics" hidden>
         <summary>Scan diagnostics</summary>
         <pre id="modelDiagnosticsOut">No diagnostic data yet.</pre>
       </details>
-      <p class="muted">Standard uses the hardened multi-layer local engine for GTA .asi/.dll plugins, .lua/.cs scripts and supported .zip mod packages. PDF files and unsupported archive formats remain outside Standard coverage. Files up to 64 MB. Temporary local copies are removed after scanning.</p>
+      <p class="muted">GTA Guard uses the hardened multi-layer local engine for GTA .asi/.dll plugins, .lua/.cs scripts and supported .zip mod packages. PDF files and unsupported archive formats remain outside scanner coverage. Files up to 64 MB. Temporary local copies are removed after scanning.</p>
       <details class="diagnostics"><summary>Advanced: enter a full file path instead</summary><input id="scanPath" aria-label="Full path to a file on this PC" placeholder="C:\Games\GTA V\mods\example.asi"></details>
       <div id="modelFlow">
         <h3 id="modelFlowTitle">Analysis flow</h3>
@@ -57,7 +41,7 @@
 
       <details class="advanced-tools"><summary>Optional tools and protection settings</summary>
       <h2>Online threat intelligence</h2>
-      <p class="muted">Optional malware reputation lookup. Standard local file scans do not need an Auth-Key or internet. Save stores your key on this PC; Remove deletes it; Refresh checks its status.</p>
+      <p class="muted">Optional malware reputation lookup. Local file scans do not need an Auth-Key or internet. Save stores your key on this PC; Remove deletes it; Refresh checks its status.</p>
       <div class="stack">
         <div class="row"><input id="abuseAuthKey" type="password" autocomplete="off" spellcheck="false" placeholder="abuse.ch Auth-Key (stored with Windows DPAPI)"><button id="saveThreatKey">Save Auth-Key</button><button id="clearThreatKey">Remove Auth-Key</button><button id="threatStatus">Refresh status</button></div>
         <p class="muted">MalGuard sends only the file SHA-256 for MalwareBazaar reputation lookup. The Auth-Key is never returned by the local API or written to project source.</p>
@@ -83,25 +67,17 @@
 
     <section id="engine" class="panel">
       <h2>Security Health</h2>
-      <p class="muted">Check the local protection engine and whether this PC is ready for Plus and Pro isolated behavioral analysis.</p>
+      <p class="muted">Check the local static scanner. Dynamic analysis is not part of this product.</p>
       <button id="selfTest">Run core security check</button>
       <details class="diagnostics">
         <summary>Core diagnostics</summary>
         <pre id="selfOut">Not run.</pre>
       </details>
 
-      <h2>Hybrid Isolation</h2>
-      <p class="muted">Plus and Pro use verified local Windows Sandbox for behavioral execution. If local isolation is unavailable, MalGuard can optionally continue with disposable Cloud Inspection: a fresh ephemeral sandbox with deny-all networking that is destroyed after the job. Cloud Inspection does not execute Windows samples and never turns incomplete evidence into a SAFE verdict.</p>
-      <p class="muted">Standard local scanning works offline. Behavioral execution stays fail-closed unless a local execution backend passes certification.</p>
-      <button id="finalSandboxTest">Re-check real Sandbox execution</button>
-      <p id="finalSandboxSummary" class="health-card health-checking">Real Sandbox execution has not been verified yet.</p>
-      <details id="finalSandboxDiagnostics" class="diagnostics" hidden>
-        <summary>Advanced diagnostics</summary>
-        <pre id="finalSandboxOut">No diagnostic data yet.</pre>
-      </details>
+      <h2>Analysis limitations</h2>
+      <p class="muted">Files are never executed. Static analysis and reputation checks can identify threats but cannot prove a file is safe. Unknown hashes, offline checks, missing engines and unsupported content are reported explicitly.</p>
     </section>
   </main>
   <script src="/app.js"></script>
-  <script src="/sandbox-first-run.js"></script>
 </body>
 </html>

@@ -25,7 +25,7 @@ jobs:
       - name: Run complete Engineering Hardening suite
         run: node tests/run-all.js
 
-      - name: Verify 100% product readiness gate
+      - name: Verify unified product contract
         run: node tools/verify-product-readiness.js
 
       - name: Verify JavaScript syntax
@@ -55,6 +55,9 @@ jobs:
 
       - name: Run real Chromium Worker and Self-Test acceptance
         run: node tests/chromium-live-validation.js
+
+      - name: Verify unified desktop at phone, tablet and desktop sizes
+        run: node tests/unified-browser-validation.js
 
       - name: Build portable release candidate
         run: node tools/build-portable-package.js
