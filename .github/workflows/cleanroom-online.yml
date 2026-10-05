@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cleanroom-online-${{ github.ref }}
+  group: cleanroom-online-${{ github.ref }}-windows-2025
   cancel-in-progress: true
 
 jobs:
@@ -80,7 +80,7 @@ jobs:
 
   windows-desktop:
     if: github.event_name != 'schedule'
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
