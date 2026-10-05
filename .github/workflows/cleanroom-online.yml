@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: cleanroom-online-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   publish-intelligence:
@@ -150,6 +150,28 @@ jobs:
           "$hash  MalGuard-Online-Setup-x64.exe" | Set-Content verified-desktop/MalGuard-Online-Setup-x64.exe.sha256 -Encoding ascii
           Copy-Item cleanroom-source/windows-tests.xml verified-desktop/
           Copy-Item cleanroom-source/desktop/src-tauri/Cargo.lock verified-desktop/
+      - name: Encrypt installer before artifact upload
+        shell: pwsh
+        run: |
+          @'
+          import os,struct
+          from pathlib import Path
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from cryptography.hazmat.primitives.serialization import load_pem_public_key
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          root=Path('verified-desktop')
+          data=(root/'MalGuard-Online-Setup-x64.exe').read_bytes()
+          assert 0 < len(data) <= 64*1024*1024
+          key=os.urandom(32);nonce=os.urandom(12)
+          public=load_pem_public_key(Path('cleanroom-v1/artifact-public.pem').read_bytes())
+          wrapped=public.encrypt(key,padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
+          sealed=b'MGBUILD1'+struct.pack('>I',len(wrapped))+wrapped+nonce+AESGCM(key).encrypt(nonce,data,b'MalGuard clean-room desktop 1.1.0')
+          (root/'MalGuard-Online-Setup-x64.exe.sealed').write_bytes(sealed)
+          (root/'MalGuard-Online-Setup-x64.exe').unlink()
+          print('Installer encrypted for the delivery owner; no plaintext installer uploaded')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: malguard-cleanroom-online-windows
