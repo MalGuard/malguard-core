@@ -163,6 +163,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
           & desktop/engine/MalGuard/MalGuard.exe --security-status
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          Copy-Item desktop/protect-install.ps1 desktop/engine/MalGuard/protect-install.ps1
       - name: Select pinned Rust
         run: |
           rustup toolchain install 1.99.0 --profile minimal
