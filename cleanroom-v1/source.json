@@ -1,0 +1,9 @@
+{
+  "sha256": "68720b45ee3ab47062cbd1a5379cfe365b6e85ea908d89dddea2c9ac9476d008",
+  "files": 191,
+  "bytes": 1056849,
+  "app_version": "1.1.0",
+  "engine_version": "1.0.0",
+  "cleanroom": true,
+  "synthetic_tests_only": true
+}
