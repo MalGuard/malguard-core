@@ -97,6 +97,27 @@ jobs:
           $actual=(Get-FileHash cleanroom-v1/source.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $manifest.sha256) {throw 'Source integrity mismatch'}
           Expand-Archive -LiteralPath cleanroom-v1/source.zip -DestinationPath cleanroom-source
+      - name: Verify privileged installation ACL helper before building
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixture=Join-Path $env:ProgramFiles 'MalGuard'
+          if (Test-Path $fixture) {throw 'Installation fixture already exists'}
+          New-Item -ItemType Directory -Path (Join-Path $fixture 'engine') -Force | Out-Null
+          try {
+            Set-Content -LiteralPath (Join-Path $fixture 'engine/harmless.txt') -Value 'Harmless permission fixture'
+            $script=(Resolve-Path cleanroom-source/desktop/protect-install.ps1).Path
+            & "$env:SystemRoot\SysWOW64\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Directory $fixture
+            if ($LASTEXITCODE -ne 0) {throw '32-bit installer ACL helper failed'}
+            foreach ($path in @($fixture,(Join-Path $fixture 'engine'),(Join-Path $fixture 'engine/harmless.txt'))) {
+              $acl=Get-Acl -LiteralPath $path
+              if ($acl.Owner -notmatch 'Administrators$|SYSTEM$' -or -not $acl.AreAccessRulesProtected) {throw 'Fixture ACL owner/protection invalid'}
+              foreach ($ace in $acl.Access) {
+                if ($ace.IdentityReference -match 'Users$' -and ($ace.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -ne 0) {throw 'Fixture grants user write'}
+              }
+            }
+            Write-Output 'Protected directory/file ACLs verified through the installer PowerShell architecture'
+          } finally {Remove-Item -LiteralPath $fixture -Recurse -Force}
       - name: Provision verified CPython 3.12.15 Windows runtime
         shell: pwsh
         run: |
