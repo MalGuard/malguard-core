@@ -97,6 +97,26 @@ jobs:
           $actual=(Get-FileHash cleanroom-v1/source.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $manifest.sha256) {throw 'Source integrity mismatch'}
           Expand-Archive -LiteralPath cleanroom-v1/source.zip -DestinationPath cleanroom-source
+      - name: Provision verified CPython 3.12.15 Windows runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Invoke-WebRequest -Uri 'https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15%2B20261003-x86_64-pc-windows-msvc-install_only.tar.gz' -OutFile python-runtime.tar.gz
+          $hash=(Get-FileHash python-runtime.tar.gz -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '4b6f0beebbb695a0f3ea237b8c3eaa5bd424f47a7bc25b2fbe3a43390c770f08') {throw 'Python runtime integrity mismatch'}
+          New-Item -ItemType Directory -Path runtime315 | Out-Null
+          tar -xzf python-runtime.tar.gz -C runtime315
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          $runtime=Join-Path (Get-Location) 'runtime315/python/python.exe'
+          & $runtime -I -c "import sys; assert sys.version_info[:3] == (3,12,15)"
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          & $runtime -I -m pip install --require-hashes -r cleanroom-source/requirements-lock.txt
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          & $runtime -I -m pip install --require-hashes -r cleanroom-source/packaging/windows/build-requirements-lock.txt
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          & $runtime -I -m pip install --no-deps --no-build-isolation ./cleanroom-source
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          "MALGUARD_RUNTIME=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install locked Python engine and packager
         working-directory: cleanroom-source
         run: |
@@ -116,7 +136,7 @@ jobs:
       - name: Build and test trusted frozen engine
         working-directory: cleanroom-source
         run: |
-          python -m PyInstaller --noconfirm --clean --distpath desktop/engine --workpath windows-work packaging/windows/MalGuard.spec
+          & $env:MALGUARD_RUNTIME -I -m PyInstaller --noconfirm --clean --distpath desktop/engine --workpath windows-work packaging/windows/MalGuard.spec
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
           & desktop/engine/MalGuard/MalGuard.exe --self-test
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
@@ -129,14 +149,36 @@ jobs:
       - name: Install locked native UI builder
         working-directory: cleanroom-source/desktop
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Fetch checksum-locked native dependencies
+        working-directory: cleanroom-source/desktop
+        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+      - name: Bundle Python and native dependency license notices
+        shell: pwsh
+        run: |
+          @'
+          import importlib.util,shutil,sys
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('trusted_packager','cleanroom-source/packaging/windows/package_release.py')
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          runtime=Path(__import__('os').environ['MALGUARD_RUNTIME']).parent
+          target=Path('cleanroom-source/desktop/engine/MalGuard/THIRD-PARTY-NOTICES')
+          module.copy_notices(runtime,target,None)
+          for path in Path('cleanroom-source/packaging/windows/notices').iterdir():shutil.copy2(path,target/path.name)
+          for directory in (Path.home()/'.cargo/registry/src').glob('*/*'):
+              for path in directory.glob('*'):
+                  if path.is_file() and any(word in path.name.upper() for word in ['LICENSE','NOTICE','COPYING']):
+                      dest=target/'Rust'/directory.name/path.name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,dest)
+          print('Redistribution notices bundled')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - name: Generate brand icons and build native installer
         working-directory: cleanroom-source/desktop
         run: |
           npx --no-install tauri icon icon.svg
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
-          cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
+          cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 | Out-File cargo-metadata.json
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
-          npm run build -- --bundles nsis
+          npm run build -- --bundles nsis -- --locked
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - name: Hash the installer and prepare verification artifacts
         shell: pwsh
@@ -150,6 +192,11 @@ jobs:
           "$hash  MalGuard-Online-Setup-x64.exe" | Set-Content verified-desktop/MalGuard-Online-Setup-x64.exe.sha256 -Encoding ascii
           Copy-Item cleanroom-source/windows-tests.xml verified-desktop/
           Copy-Item cleanroom-source/desktop/src-tauri/Cargo.lock verified-desktop/
+      - name: Verify native GUI installation, startup, scheduler and uninstall
+        shell: pwsh
+        run: |
+          & cleanroom-source/packaging/online/smoke_gui_install.ps1 -Setup verified-desktop/MalGuard-Online-Setup-x64.exe -Output verified-desktop/gui-install-qa.json
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - name: Encrypt installer before artifact upload
         shell: pwsh
         run: |
