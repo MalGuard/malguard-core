@@ -12,7 +12,7 @@ function normalizePort(value) {
 }
 
 function localStatusUrl(port) {
-  return \`http://127.0.0.1:\${normalizePort(port)}/api/status\`;
+  return 'http://127.0.0.1:' + normalizePort(port) + '/api/status';
 }
 
 function safeOptionalText(value, max) {
