@@ -24,7 +24,7 @@ const STAGES = Object.freeze({
   ]},
   stage4: { title:'TSH 4/10 - Script, Input, Local API and Error Foundations', tests:[
     'script-analyzer.test.js','self-test.test.js','local-file-upload.test.js','desktop-app.test.js',
-    'settings-store.test.js','access-gate.test.js','error-reporter.test.js','runtime-error-integration.test.js'
+    'settings-store.test.js','access-gate.test.js','error-reporter.test.js','mcp-read-only-tools.test.js','runtime-error-integration.test.js'
   ]},
   stage5: { title:'TSH 5/10 - Independent Engines and Fusion Arbitration', tests:[
     'fusion-engine.test.js','multiengine-fusion.test.js','ths-stage2-integration.test.js',
