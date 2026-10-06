@@ -67,11 +67,11 @@ function jsonResponse(body) {
   };
 
   const reports = Array.from({ length: MAX_RECENT_LOGS + 5 }, (_, index) => ({
-    id: \`report-\${index}\`,
+    id: 'report-' + index,
     time: '2026-10-06T12:00:00.000Z',
     code: 'SYNTHETIC_FAILURE',
     name: 'Error',
-    message: \`failed at C:\\Users\\Test\\secret-\${index}.txt token \${secret}\`,
+    message: 'failed at C:\\Users\\Test\\secret-' + index + '.txt token ' + secret,
     context: {
       area: 'runtime',
       method: 'GET',
@@ -141,7 +141,7 @@ function jsonResponse(body) {
 
   const unavailable = createReadOnlyTools({
     fetchImpl: async () => {
-      throw new Error(\`connect failed at C:\\Users\\Test\\private.txt token \${secret}\`);
+      throw new Error('connect failed at C:\\Users\\Test\\private.txt token ' + secret);
     },
     errorReporter,
     now: () => '2026-10-06T12:34:56.000Z',
