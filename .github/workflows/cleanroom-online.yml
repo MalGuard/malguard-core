@@ -38,6 +38,13 @@ jobs:
           & cleanroom-source/packaging/online/build_iexpress.ps1 -PackageRoot inert-payload -Output (Join-Path (Get-Location) 'probe-output/MalGuard-fixture-Setup.exe') -DiagnosticDirectory probe-diagnostics
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
           Write-Output 'Inert IExpress build fixture passed; fixture installer was not executed or published'
+          $env:PSModulePath=Join-Path $env:RUNNER_TEMP 'intentionally-unavailable-modules'
+          $errorFile=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MalGuard-install-error.txt'
+          Remove-Item -LiteralPath $errorFile -ErrorAction SilentlyContinue
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File probe-diagnostics/install.ps1 -PayloadHash ('0'*64) -Quiet -NoLaunch
+          if ($LASTEXITCODE -ne 41 -or (Get-Content -LiteralPath $errorFile -Raw) -notmatch 'Installer payload integrity mismatch') {throw 'Native module-path isolation preflight failed'}
+          Write-Output 'Native Windows PowerShell modules loaded with poisoned inherited search path; corrupt fixture rejected before execution'
+          exit 0
   publish-intelligence:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
