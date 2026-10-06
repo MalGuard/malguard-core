@@ -118,6 +118,16 @@ jobs:
             }
             Write-Output 'Protected directory/file ACLs verified through the installer PowerShell architecture'
           } finally {Remove-Item -LiteralPath $fixture -Recurse -Force}
+      - name: Parse packaging scripts using Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach ($file in @('install_iexpress.ps1','uninstall_iexpress.ps1','build_iexpress.ps1','smoke_gui_install.ps1')) {
+            $tokens=$null;$errors=$null
+            [Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) ('cleanroom-source/packaging/online/'+$file)),[ref]$tokens,[ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) {throw ($errors | Out-String)}
+          }
+          Write-Output 'All IExpress packaging scripts parsed by Windows PowerShell 5.1'
       - name: Provision verified CPython 3.12.15 Windows runtime
         shell: pwsh
         run: |
@@ -200,16 +210,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
           cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 | Out-File cargo-metadata.json
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
-          npm run build -- --bundles nsis -- --locked
+          npm run build -- --no-bundle -- --locked
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Build IExpress PowerShell package using the existing graphical engine
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Path graphical-payload | Out-Null
+          Copy-Item cleanroom-source/desktop/src-tauri/target/release/malguard-desktop.exe graphical-payload/
+          Copy-Item cleanroom-source/desktop/engine/MalGuard graphical-payload/engine -Recurse
+          & cleanroom-source/packaging/online/build_iexpress.ps1 -PackageRoot graphical-payload -Output (Join-Path (Get-Location) 'verified-desktop/MalGuard-Online-Setup-x64.exe') -DiagnosticDirectory iexpress-diagnostics
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - name: Hash the installer and prepare verification artifacts
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Path verified-desktop | Out-Null
-          $setup=Get-ChildItem cleanroom-source/desktop/src-tauri/target/release/bundle/nsis -Filter *.exe | Select-Object -First 1
-          if (-not $setup) {throw 'Native GUI installer missing'}
-          Copy-Item $setup.FullName verified-desktop/MalGuard-Online-Setup-x64.exe
+          if (-not (Test-Path -LiteralPath verified-desktop/MalGuard-Online-Setup-x64.exe)) {throw 'IExpress installer missing'}
           $hash=(Get-FileHash verified-desktop/MalGuard-Online-Setup-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  MalGuard-Online-Setup-x64.exe" | Set-Content verified-desktop/MalGuard-Online-Setup-x64.exe.sha256 -Encoding ascii
           Copy-Item cleanroom-source/windows-tests.xml verified-desktop/
