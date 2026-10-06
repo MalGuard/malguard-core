@@ -16,6 +16,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-packaging-probe:
+    if: github.event_name != 'schedule'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify own source and build an inert IExpress fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $manifest=Get-Content cleanroom-v1/source.json -Raw | ConvertFrom-Json
+          if ((Get-FileHash cleanroom-v1/source.zip).Hash.ToLowerInvariant() -ne $manifest.sha256) {throw 'Source integrity mismatch'}
+          Expand-Archive -LiteralPath cleanroom-v1/source.zip -DestinationPath cleanroom-source
+          New-Item -ItemType Directory -Path inert-payload/engine -Force | Out-Null
+          Set-Content -LiteralPath inert-payload/malguard-desktop.exe -Value 'Harmless packaging fixture; not executable'
+          Set-Content -LiteralPath inert-payload/engine/MalGuard.exe -Value 'Harmless packaging fixture; not executable'
+          Copy-Item cleanroom-source/desktop/protect-install.ps1 inert-payload/engine/protect-install.ps1
+          & cleanroom-source/packaging/online/build_iexpress.ps1 -PackageRoot inert-payload -Output (Join-Path (Get-Location) 'probe-output/MalGuard-fixture-Setup.exe') -DiagnosticDirectory probe-diagnostics
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          Write-Output 'Inert IExpress build fixture passed; fixture installer was not executed or published'
   publish-intelligence:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -79,6 +101,7 @@ jobs:
           PY
 
   windows-desktop:
+    needs: windows-packaging-probe
     if: github.event_name != 'schedule'
     runs-on: windows-2025
     timeout-minutes: 50
