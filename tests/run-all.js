@@ -17,6 +17,7 @@ const tests=[
  'entitlement-gate.test.js',
  'entitlement-api.test.js',
  'error-reporter.test.js',
+ 'mcp-read-only-tools.test.js',
  'runtime-error-integration.test.js',
  'script-analyzer.test.js',
  'regression-corpus.test.js',
