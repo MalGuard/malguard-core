@@ -277,6 +277,8 @@ jobs:
           sealed=b'MGBUILD1'+struct.pack('>I',len(wrapped))+wrapped+nonce+AESGCM(key).encrypt(nonce,data,b'MalGuard clean-room desktop 1.1.0')
           (root/'MalGuard-Online-Setup-x64.exe.sealed').write_bytes(sealed)
           (root/'MalGuard-Online-Setup-x64.exe').unlink()
+          for name in ('setup-stdout.txt','setup-stderr.txt'):
+              (root/name).unlink(missing_ok=True)
           print('Installer encrypted for the delivery owner; no plaintext installer uploaded')
           '@ | python -
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
