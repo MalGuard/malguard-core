@@ -169,10 +169,13 @@ function projectReport(report) {
 }
 
 function safeFailure(code, message, generatedAt) {
+  const internalCode = typeof code === 'string' && /^[A-Z0-9_]{1,128}$/.test(code)
+    ? code
+    : 'MCP_READ_FAILED';
   return {
     ok: false,
     generatedAt,
-    code: safeText(code || 'MCP_READ_FAILED', 128),
+    code: internalCode,
     message: safeText(message || 'The requested MalGuard read-only status is unavailable.', 256),
   };
 }
