@@ -91,6 +91,7 @@ const STAGES = Object.freeze({
       'entitlement-gate.test.js',
       'entitlement-api.test.js',
       'error-reporter.test.js',
+      'mcp-read-only-tools.test.js',
       'runtime-error-integration.test.js',
       'final-security-audit.test.js',
       'product-readiness-gate.test.js',
