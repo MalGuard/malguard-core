@@ -50,11 +50,14 @@ try {
     }
   }
   $checks+=@{name='license-bytes-and-system-acls';passed=$true}
-  $process=Start-Process -FilePath $powershell -ArgumentList $arguments -PassThru -Wait
+  $childError=Join-Path $root 'activation-repeat-error.txt'
+  $process=Start-Process -FilePath $powershell -ArgumentList $arguments -RedirectStandardError $childError -PassThru -Wait
   if ($process.ExitCode -ne 0) {throw 'License replacement was not idempotent'}
   $checks+=@{name='same-device-repeated-activation';passed=$true}
 } catch {
-  @{passed=$checks.Count;failed=1;error=$_.Exception.Message;position=$_.InvocationInfo.PositionMessage;trusted_stub_only=$true} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Output -Encoding UTF8
+  $detail=''
+  if (Test-Path (Join-Path $root 'activation-repeat-error.txt')) {$detail=(Get-Content (Join-Path $root 'activation-repeat-error.txt') -Raw)}
+  @{passed=$checks.Count;failed=1;error=$_.Exception.Message;child_error=$detail;position=$_.InvocationInfo.PositionMessage;trusted_stub_only=$true} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Output -Encoding UTF8
   throw
 } finally {
   if (Test-Path -LiteralPath $system) {Remove-Item -LiteralPath $system -Recurse -Force}

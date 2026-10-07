@@ -61,10 +61,14 @@ try {
   $temporary=Join-Path $folder ([guid]::NewGuid().ToString('N')+'.tmp')
   $stream=[IO.File]::Open($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
   try {$bytes=[IO.File]::ReadAllBytes($licenseFile);$stream.Write($bytes,0,$bytes.Length);$stream.Flush()} finally {$stream.Dispose()}
+  $backup=Join-Path $folder ([guid]::NewGuid().ToString('N')+'.backup')
   try {
-    if (Test-Path -LiteralPath $destination) {[IO.File]::Replace($temporary,$destination,$null)}
+    if (Test-Path -LiteralPath $destination) {[IO.File]::Replace($temporary,$destination,$backup)}
     else {[IO.File]::Move($temporary,$destination)}
-  } finally {if (Test-Path -LiteralPath $temporary) {Remove-Item -LiteralPath $temporary -Force}}
+  } finally {
+    if (Test-Path -LiteralPath $temporary) {Remove-Item -LiteralPath $temporary -Force}
+    if (Test-Path -LiteralPath $backup) {Remove-Item -LiteralPath $backup -Force}
+  }
   $fileAcl=New-Object Security.AccessControl.FileSecurity
   $fileAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;BU)')
   (Get-Item -LiteralPath $destination).SetAccessControl($fileAcl)
