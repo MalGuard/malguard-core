@@ -64,5 +64,5 @@ try {
   Remove-Item -LiteralPath $root -Recurse -Force
   Remove-Item Env:MALGUARD_ACTIVATION_TEST_MARKER -ErrorAction SilentlyContinue
 }
-@{passed=$checks.Count;failed=0;checks=$checks;trusted_stub_only=$true;production_installation_tested=$false} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Output -Encoding UTF8
+@{passed=$checks.Count;failed=0;checks=$checks;trusted_stub_only=$true;production_installation_tested=$false;source_commit=$env:GITHUB_SHA;run_id=$env:GITHUB_RUN_ID} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Output -Encoding UTF8
 exit 0

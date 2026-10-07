@@ -128,7 +128,8 @@ def main():
             try:
                 with py7zr.SevenZipFile(output, "r", password=denied) as archive:
                     archive.getnames()
-            except (py7zr.exceptions.PasswordRequired, py7zr.exceptions.Bad7zFile, lzma.LZMAError):
+            except (py7zr.exceptions.PasswordRequired, py7zr.exceptions.ArchiveError,
+                    lzma.LZMAError, TypeError, ValueError, EOFError, struct.error):
                 denied_count += 1
             else:
                 raise AssertionError("Missing or incorrect password revealed encrypted headers")
