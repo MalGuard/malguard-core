@@ -2,6 +2,10 @@ param([switch]$Quiet)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2
 try {
+  $env:PSModulePath=Join-Path $PSHOME 'Modules'
+  foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security')) {
+    Import-Module -Name (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -ErrorAction Stop
+  }
   $setup=Join-Path $PSScriptRoot 'MalGuard-Online-Setup-x64.exe'
   $licenseFile=Join-Path $PSScriptRoot 'device-license.json'
   $manifestFile=Join-Path $PSScriptRoot 'private-release.json'

@@ -1,5 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$Output)
 $ErrorActionPreference='Stop'
+$env:PSModulePath=Join-Path $PSHOME 'Modules'
 $root=Join-Path $env:RUNNER_TEMP ('malguard-activation-qa-'+[guid]::NewGuid().ToString('N'))
 $system=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'MalGuard/Licenses'
 if (Test-Path -LiteralPath $system) {throw 'An existing license directory must not be modified by fixtures'}
@@ -52,6 +53,9 @@ try {
   $process=Start-Process -FilePath $powershell -ArgumentList $arguments -PassThru -Wait
   if ($process.ExitCode -ne 0) {throw 'License replacement was not idempotent'}
   $checks+=@{name='same-device-repeated-activation';passed=$true}
+} catch {
+  @{passed=$checks.Count;failed=1;error=$_.Exception.Message;position=$_.InvocationInfo.PositionMessage;trusted_stub_only=$true} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Output -Encoding UTF8
+  throw
 } finally {
   if (Test-Path -LiteralPath $system) {Remove-Item -LiteralPath $system -Recurse -Force}
   Remove-Item -LiteralPath $root -Recurse -Force
