@@ -1,0 +1,7 @@
+﻿{
+    "position":  "At D:\\a\\malguard-core\\malguard-core\\private-delivery\\test-activation.ps1:54 char:33\r\n+ ... cess.ExitCode -ne 0) {throw \u0027License replacement was not idempotent\u0027}\r\n+                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+    "error":  "License replacement was not idempotent",
+    "trusted_stub_only":  true,
+    "failed":  1,
+    "passed":  4
+}
