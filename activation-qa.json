@@ -1,4 +1,8 @@
 ﻿{
+    "passed":  5,
+    "trusted_stub_only":  true,
+    "failed":  0,
+    "production_installation_tested":  false,
     "checks":  [
                    {
                        "name":  "wrong-device-rejected-before-license-write-or-setup",
@@ -21,8 +25,6 @@
                        "passed":  true
                    }
                ],
-    "trusted_stub_only":  true,
-    "production_installation_tested":  false,
-    "failed":  0,
-    "passed":  5
+    "source_commit":  "6b7e6d06a6bf57c4bd9c9ec49c208c15ceabaf1d",
+    "run_id":  "37655271299"
 }
