@@ -265,12 +265,13 @@ jobs:
         with:
           ref: codex/malguard-private-1-3-artifacts
           path: delivery-output
-          persist-credentials: true
+          persist-credentials: false
       - name: Publish ciphertext and bounded verification metadata
         if: always()
         shell: pwsh
         env:
           BUILD_OUTCOME: ${{ job.status }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
           # Explicit allowlist prevents publishing installers, payload ZIPs or keys.
@@ -282,6 +283,12 @@ jobs:
             }
           }
           @{schema=1;source_commit=$env:GITHUB_SHA;run_id=$env:GITHUB_RUN_ID;result=$env:BUILD_OUTCOME;windows_runner='windows-2025'} | ConvertTo-Json | Set-Content delivery-output/build-status.json -Encoding UTF8
+          # Authenticate this Git process only; no credential is saved in .git.
+          $authorization=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('x-access-token:'+$env:GH_TOKEN))
+          Write-Output ('::add-mask::'+$authorization)
+          $env:GIT_CONFIG_COUNT='1'
+          $env:GIT_CONFIG_KEY_0='http.https://github.com/.extraheader'
+          $env:GIT_CONFIG_VALUE_0='AUTHORIZATION: basic '+$authorization
           Push-Location delivery-output
           try {
             git config user.name 'MalGuard private build'
@@ -295,4 +302,7 @@ jobs:
               git push origin HEAD:codex/malguard-private-1-3-artifacts
               if ($LASTEXITCODE -ne 0) {throw 'Encrypted delivery push failed'}
             }
-          } finally {Pop-Location}
+          } finally {
+            Pop-Location
+            Remove-Item Env:GIT_CONFIG_COUNT,Env:GIT_CONFIG_KEY_0,Env:GIT_CONFIG_VALUE_0 -ErrorAction SilentlyContinue
+          }

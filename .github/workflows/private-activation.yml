@@ -37,13 +37,21 @@ jobs:
         with:
           ref: codex/malguard-private-1-3-artifacts
           path: delivery-output
-          persist-credentials: true
+          persist-credentials: false
       - name: Publish only activation verification metadata
         if: always()
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
           Copy-Item -LiteralPath activation-qa.json -Destination delivery-output/activation-qa.json
+          # Authenticate this Git process only; no credential is saved in .git.
+          $authorization=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('x-access-token:'+$env:GH_TOKEN))
+          Write-Output ('::add-mask::'+$authorization)
+          $env:GIT_CONFIG_COUNT='1'
+          $env:GIT_CONFIG_KEY_0='http.https://github.com/.extraheader'
+          $env:GIT_CONFIG_VALUE_0='AUTHORIZATION: basic '+$authorization
           Push-Location delivery-output
           try {
             git config user.name 'MalGuard private build'
@@ -55,4 +63,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) {throw 'Activation evidence synchronization failed'}
             git push origin HEAD:codex/malguard-private-1-3-artifacts
             if ($LASTEXITCODE -ne 0) {throw 'Activation evidence push failed'}
-          } finally {Pop-Location}
+          } finally {
+            Pop-Location
+            Remove-Item Env:GIT_CONFIG_COUNT,Env:GIT_CONFIG_KEY_0,Env:GIT_CONFIG_VALUE_0 -ErrorAction SilentlyContinue
+          }
