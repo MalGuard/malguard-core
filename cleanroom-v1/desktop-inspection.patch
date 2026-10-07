@@ -1,0 +1,4525 @@
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,9 @@
+ # MalGuard / GTA Guard
++
++Desktop 1.3.0 / engine 1.2.0 source candidate adds byte-based file explanations,
++real stage progress, an evidence gauge and a downloadable bilingual report card.
++See [desktop inspection and validation](docs/DESKTOP_INSPECTION.md). A new Windows
++installer has not yet been published.
+ 
+ Clean-room, offline static analysis for GTA V mod files and packages, with a Python 3.12 library and Persian command-line reports. Scanned content is never executed, imported, compiled, loaded as a DLL or assembly, or passed to a shell. The workspace initially contained no engine, repository or legacy tests; no previous MalGuard implementation was used.
+ 
+--- a/desktop/package-lock.json
++++ b/desktop/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "malguard-cleanroom-desktop",
+-  "version": "1.2.0",
++  "version": "1.3.0",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "malguard-cleanroom-desktop",
+-      "version": "1.2.0",
++      "version": "1.3.0",
+       "devDependencies": {
+         "@tauri-apps/cli": "2.12.1"
+       }
+--- a/desktop/package.json
++++ b/desktop/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "malguard-cleanroom-desktop",
+-  "version": "1.2.0",
++  "version": "1.3.0",
+   "private": true,
+   "scripts": { "build": "tauri build", "tauri": "tauri" },
+   "devDependencies": { "@tauri-apps/cli": "2.12.1" }
+--- a/desktop/src-tauri/Cargo.lock
++++ b/desktop/src-tauri/Cargo.lock
+@@ -1769,7 +1769,7 @@
+ 
+ [[package]]
+ name = "malguard-desktop"
+-version = "1.2.0"
++version = "1.3.0"
+ dependencies = [
+  "rfd",
+  "serde",
+--- a/desktop/src-tauri/Cargo.toml
++++ b/desktop/src-tauri/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "malguard-desktop"
+-version = "1.2.0"
++version = "1.3.0"
+ edition = "2021"
+ description = "Clean-room GTA mod static scanner with signed online intelligence"
+ license = "MIT"
+--- a/desktop/src-tauri/src/bridge.rs
++++ b/desktop/src-tauri/src/bridge.rs
+@@ -0,0 +1,72 @@
++//! Narrow validation for engine telemetry and generated report images.
++
++pub fn scan_stage(line: &[u8]) -> Option<&'static str> {
++    if line.len() > 128 {
++        return None;
++    }
++    let value: serde_json::Value = serde_json::from_slice(line).ok()?;
++    if value.get("event")?.as_str()? != "scan_stage" {
++        return None;
++    }
++    match value.get("stage")?.as_str()? {
++        "updates" => Some("updates"),
++        "capture" => Some("capture"),
++        "reputation" => Some("reputation"),
++        "strings" => Some("strings"),
++        "native" => Some("native"),
++        "script" => Some("script"),
++        "rules" => Some("rules"),
++        "pe" => Some("pe"),
++        "dotnet" => Some("dotnet"),
++        "archive" => Some("archive"),
++        "context" => Some("context"),
++        "finalizing" => Some("finalizing"),
++        _ => None,
++    }
++}
++
++pub fn validate_card(bytes: &[u8]) -> bool {
++    // Only a bounded generated PNG is saved. No sample path is accepted here.
++    if bytes.len() < 45
++        || bytes.len() > 6 * 1024 * 1024
++        || &bytes[..8] != b"\x89PNG\r\n\x1a\n"
++        || &bytes[8..16] != b"\0\0\0\rIHDR"
++        || &bytes[bytes.len() - 12..] != b"\0\0\0\0IEND\xaeB`\x82"
++    {
++        return false;
++    }
++    let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
++    let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
++    (1..=2000).contains(&width) && (1..=2600).contains(&height)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn telemetry_accepts_known_stages_only() {
++        assert_eq!(
++            scan_stage(br#"{"event":"scan_stage","stage":"pe"}"#),
++            Some("pe")
++        );
++        assert_eq!(scan_stage(br#"{"event":"sample","stage":"pe"}"#), None);
++        assert_eq!(
++            scan_stage(br#"{"event":"scan_stage","stage":"execute"}"#),
++            None
++        );
++        assert_eq!(scan_stage(b"bad json"), None);
++        assert_eq!(scan_stage(&[b' '; 129]), None);
++    }
++    #[test]
++    fn export_rejects_arbitrary_bytes_and_unbounded_dimensions() {
++        assert!(!validate_card(b"not an image"));
++        let mut image = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
++        image.extend_from_slice(&1200_u32.to_be_bytes());
++        image.extend_from_slice(&1800_u32.to_be_bytes());
++        image.extend_from_slice(&[0; 9]);
++        image.extend_from_slice(b"\0\0\0\0IEND\xaeB`\x82");
++        assert!(validate_card(&image));
++        image[16..20].copy_from_slice(&2001_u32.to_be_bytes());
++        assert!(!validate_card(&image));
++    }
++}
+--- a/desktop/src-tauri/src/main.rs
++++ b/desktop/src-tauri/src/main.rs
+@@ -2,13 +2,23 @@
+ 
+ use std::io::Read;
+ use std::io::Write;
++use std::io::{BufRead, BufReader};
+ use std::path::{Path, PathBuf};
+ use std::process::{Command, Stdio};
++use std::sync::atomic::{AtomicBool, Ordering};
++use std::sync::Arc;
+ use std::sync::Mutex;
+-use std::sync::Arc;
+-use std::sync::atomic::{AtomicBool, Ordering};
+ use std::time::{Duration, Instant};
+-use tauri::Manager;
++use tauri::{Emitter, Manager};
++
++mod bridge;
++
++#[derive(Clone, serde::Serialize)]
++#[serde(rename_all = "camelCase")]
++struct ScanProgress {
++    scan_id: String,
++    stage: &'static str,
++}
+ 
+ #[derive(Default)]
+ struct Selection {
+@@ -19,52 +29,112 @@
+ 
+ struct BusyGuard(Arc<AtomicBool>);
+ impl Drop for BusyGuard {
+-    fn drop(&mut self) { self.0.store(false, Ordering::Release); }
++    fn drop(&mut self) {
++        self.0.store(false, Ordering::Release);
++    }
+ }
+ 
+ fn engine(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+-    let root = app.path().resource_dir().map_err(|_| "Application path is unavailable")?;
++    let root = app
++        .path()
++        .resource_dir()
++        .map_err(|_| "Application path is unavailable")?;
+     let exe = root.join("engine").join("MalGuard.exe");
+-    if !exe.is_file() { return Err("The scanner engine is not installed".into()); }
++    if !exe.is_file() {
++        return Err("The scanner engine is not installed".into());
++    }
+     Ok(exe)
+ }
+ 
+-fn run_engine(exe: &Path, mode: &str, file: Option<&Path>) -> Result<serde_json::Value, String> {
++fn run_engine(
++    exe: &Path,
++    mode: &str,
++    file: Option<&Path>,
++    progress: Option<(tauri::AppHandle, String)>,
++) -> Result<serde_json::Value, String> {
+     let mut command = Command::new(exe);
+     command.current_dir(exe.parent().ok_or("Invalid engine directory")?);
+-    command.arg(mode).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+-    if let Some(path) = file { command.arg(path); }
+-    #[cfg(windows)] {
++    command
++        .arg(mode)
++        .stdin(Stdio::null())
++        .stdout(Stdio::piped())
++        .stderr(Stdio::piped());
++    if let Some(path) = file {
++        command.arg(path);
++    }
++    #[cfg(windows)]
++    {
+         use std::os::windows::process::CommandExt;
+         command.creation_flags(0x08000000);
+     }
+-    let mut child = command.spawn().map_err(|_| "The scanner engine could not start")?;
++    let mut child = command
++        .spawn()
++        .map_err(|_| "The scanner engine could not start")?;
+     let stdout = child.stdout.take().ok_or("Engine output is unavailable")?;
++    let stderr = child
++        .stderr
++        .take()
++        .ok_or("Engine telemetry is unavailable")?;
++    let telemetry = std::thread::spawn(move || {
++        for line in BufReader::new(stderr.take(64 * 1024)).split(b'\n') {
++            let Ok(line) = line else {
++                break;
++            };
++            if let (Some(stage), Some((app, scan_id))) =
++                (bridge::scan_stage(&line), progress.as_ref())
++            {
++                let _ = app.emit_to(
++                    "main",
++                    "scan-progress",
++                    ScanProgress {
++                        scan_id: scan_id.clone(),
++                        stage,
++                    },
++                );
++            }
++        }
++    });
+     let reader = std::thread::spawn(move || {
+         let mut bytes = Vec::new();
+-        stdout.take(12 * 1024 * 1024 + 1).read_to_end(&mut bytes).map(|_| bytes)
++        stdout
++            .take(12 * 1024 * 1024 + 1)
++            .read_to_end(&mut bytes)
++            .map(|_| bytes)
+     });
+     let started = Instant::now();
+-    loop {
++    let exit_result = loop {
+         match child.try_wait() {
+             Ok(Some(code)) => {
+-                if !code.success() { return Err("Analysis did not complete; prior data is retained".into()); }
+-                break;
++                break if code.success() {
++                    Ok(())
++                } else {
++                    Err("Analysis did not complete; prior data is retained")
++                };
+             }
+             Ok(None) => {
+                 if started.elapsed() > Duration::from_secs(240) {
+                     let _ = child.kill();
+                     let _ = child.wait();
+-                    return Err("Engine time or output limit exceeded".into());
++                    break Err("Engine time or output limit exceeded");
+                 }
+                 std::thread::sleep(Duration::from_millis(50));
+             }
+-            Err(_) => { let _ = child.kill(); return Err("Engine status could not be checked".into()); }
++            Err(_) => {
++                let _ = child.kill();
++                let _ = child.wait();
++                break Err("Engine status could not be checked");
++            }
+         }
+-    }
+-    let bytes = reader.join().map_err(|_| "Reading engine output failed")?
++    };
++    let _ = telemetry.join();
++    let bytes = reader
++        .join()
++        .map_err(|_| "Reading engine output failed")?
+         .map_err(|_| "Reading engine output failed")?;
+-    if bytes.len() > 12 * 1024 * 1024 { return Err("Engine output exceeded the limit".into()); }
++    exit_result?;
++    if bytes.len() > 12 * 1024 * 1024 {
++        return Err("Engine output exceeded the limit".into());
++    }
+     serde_json::from_slice(&bytes).map_err(|_| "Invalid engine report".into())
+ }
+ 
+@@ -79,62 +149,162 @@
+ 
+ #[tauri::command]
+ async fn choose_file(state: tauri::State<'_, Selection>) -> Result<Option<String>, String> {
+-    let chosen = tauri::async_runtime::spawn_blocking(|| rfd::FileDialog::new()
+-        .set_title("Choose a GTA V mod file").pick_file()).await.map_err(|_| "File selection failed")?;
++    if state.busy.swap(true, Ordering::AcqRel) {
++        return Err("An analysis or file selection is already running".into());
++    }
++    let _guard = BusyGuard(state.busy.clone());
++    let chosen = tauri::async_runtime::spawn_blocking(|| {
++        rfd::FileDialog::new()
++            .set_title("Choose a GTA V mod file")
++            .pick_file()
++    })
++    .await
++    .map_err(|_| "File selection failed")?;
+     if let Some(path) = chosen {
+         let label = path.to_string_lossy().to_string();
+-        *state.path.lock().map_err(|_| "Application state is unavailable")? = Some(path);
++        *state
++            .path
++            .lock()
++            .map_err(|_| "Application state is unavailable")? = Some(path);
++        *state
++            .last_report
++            .lock()
++            .map_err(|_| "Application state is unavailable")? = None;
+         Ok(Some(label))
+-    } else { Ok(None) }
+-}
+-
+-#[tauri::command]
+-async fn scan_selected(app: tauri::AppHandle, state: tauri::State<'_, Selection>) -> Result<serde_json::Value, String> {
+-    let file = state.path.lock().map_err(|_| "Application state is unavailable")?
+-        .clone().ok_or("Choose a file first")?;
+-    if state.busy.swap(true, Ordering::AcqRel) { return Err("An analysis is already running".into()); }
+-    let guard = BusyGuard(state.busy.clone());
++    } else {
++        Ok(None)
++    }
++}
++
++#[tauri::command]
++async fn scan_selected(
++    app: tauri::AppHandle,
++    state: tauri::State<'_, Selection>,
++    scan_id: String,
++) -> Result<serde_json::Value, String> {
++    if scan_id.is_empty()
++        || scan_id.len() > 64
++        || !scan_id
++            .bytes()
++            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
++    {
++        return Err("Invalid scan identifier".into());
++    }
++    let file = state
++        .path
++        .lock()
++        .map_err(|_| "Application state is unavailable")?
++        .clone()
++        .ok_or("Choose a file first")?;
++    if state.busy.swap(true, Ordering::AcqRel) {
++        return Err("An analysis is already running".into());
++    }
++    let _guard = BusyGuard(state.busy.clone());
++    *state
++        .last_report
++        .lock()
++        .map_err(|_| "Application state is unavailable")? = None;
+     let exe = engine(&app)?;
+     let report = tauri::async_runtime::spawn_blocking(move || {
+-        let _guard = guard;
+-        run_engine(&exe, "--desktop-scan", Some(&file))
+-    }).await.map_err(|_| "Analysis failed")??;
+-    *state.last_report.lock().map_err(|_| "Application state is unavailable")? = Some(report.clone());
++        run_engine(&exe, "--desktop-scan", Some(&file), Some((app, scan_id)))
++    })
++    .await
++    .map_err(|_| "Analysis failed")??;
++    *state
++        .last_report
++        .lock()
++        .map_err(|_| "Application state is unavailable")? = Some(report.clone());
+     Ok(report)
+ }
+ 
+ #[tauri::command]
+ async fn save_report(state: tauri::State<'_, Selection>) -> Result<bool, String> {
+-    let report = state.last_report.lock().map_err(|_| "Application state is unavailable")?
+-        .clone().ok_or("Complete a scan first")?;
++    let report = state
++        .last_report
++        .lock()
++        .map_err(|_| "Application state is unavailable")?
++        .clone()
++        .ok_or("Complete a scan first")?;
+     tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
+-        let Some(path) = rfd::FileDialog::new().set_file_name("MalGuard-report.json").save_file()
+-            else { return Ok(false); };
++        let Some(path) = rfd::FileDialog::new()
++            .set_file_name("MalGuard-report.json")
++            .save_file()
++        else {
++            return Ok(false);
++        };
+         let bytes = serde_json::to_vec_pretty(&report).map_err(|_| "Invalid report")?;
+-        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)
++        let mut file = std::fs::OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .open(path)
+             .map_err(|_| "Choose a new filename; existing files are never overwritten")?;
+         file.write_all(&bytes).map_err(|_| "Report was not saved")?;
+         file.sync_all().map_err(|_| "Report was not saved")?;
+         Ok(true)
+-    }).await.map_err(|_| "Saving the report failed")?
++    })
++    .await
++    .map_err(|_| "Saving the report failed")?
++}
++
++#[tauri::command]
++async fn save_card(state: tauri::State<'_, Selection>, bytes: Vec<u8>) -> Result<bool, String> {
++    if state
++        .last_report
++        .lock()
++        .map_err(|_| "Application state is unavailable")?
++        .is_none()
++    {
++        return Err("Complete a scan first".into());
++    }
++    if !bridge::validate_card(&bytes) {
++        return Err("Invalid report image".into());
++    }
++    tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
++        let Some(path) = rfd::FileDialog::new()
++            .set_file_name("MalGuard-report-card.png")
++            .add_filter("PNG image", &["png"])
++            .save_file()
++        else {
++            return Ok(false);
++        };
++        let mut file = std::fs::OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .open(path)
++            .map_err(|_| "Choose a new filename; existing files are never overwritten")?;
++        file.write_all(&bytes)
++            .and_then(|_| file.sync_all())
++            .map_err(|_| "Card was not saved")?;
++        Ok(true)
++    })
++    .await
++    .map_err(|_| "Saving the card failed")?
+ }
+ 
+ #[tauri::command]
+ async fn security_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+     let exe = engine(&app)?;
+-    tauri::async_runtime::spawn_blocking(move || run_engine(&exe, "--security-status", None))
+-        .await.map_err(|_| "Status check failed")?
++    tauri::async_runtime::spawn_blocking(move || run_engine(&exe, "--security-status", None, None))
++        .await
++        .map_err(|_| "Status check failed")?
+ }
+ 
+ #[tauri::command]
+ fn refresh_security(app: tauri::AppHandle) -> Result<(), String> {
+     let exe = engine(&app)?;
+-    #[cfg(windows)] {
++    #[cfg(windows)]
++    {
+         use std::os::windows::ffi::OsStrExt;
+         #[link(name = "shell32")]
+         extern "system" {
+-            fn ShellExecuteW(hwnd: isize, operation: *const u16, file: *const u16,
+-                parameters: *const u16, directory: *const u16, show: i32) -> isize;
++            fn ShellExecuteW(
++                hwnd: isize,
++                operation: *const u16,
++                file: *const u16,
++                parameters: *const u16,
++                directory: *const u16,
++                show: i32,
++            ) -> isize;
+         }
+         let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+         let verb = wide(std::ffi::OsStr::new("runas"));
+@@ -142,15 +312,60 @@
+         let args = wide(std::ffi::OsStr::new("--refresh-security"));
+         let directory = wide(exe.parent().ok_or("Invalid engine directory")?.as_os_str());
+         // Elevate the installed trusted updater only; sample paths are absent.
+-        let result = unsafe { ShellExecuteW(0, verb.as_ptr(), file.as_ptr(), args.as_ptr(), directory.as_ptr(), 0) };
+-        if result <= 32 { return Err("Update approval was not granted".into()); }
++        let result = unsafe {
++            ShellExecuteW(
++                0,
++                verb.as_ptr(),
++                file.as_ptr(),
++                args.as_ptr(),
++                directory.as_ptr(),
++                0,
++            )
++        };
++        if result <= 32 {
++            return Err("Update approval was not granted".into());
++        }
+         Ok(())
+     }
+-    #[cfg(not(windows))] { let _ = exe; Err("This package requires Windows".into()) }
++    #[cfg(not(windows))]
++    {
++        let _ = exe;
++        Err("This package requires Windows".into())
++    }
+ }
+ 
+ fn main() {
+-    tauri::Builder::default().manage(Selection::default())
+-        .invoke_handler(tauri::generate_handler![release_info, choose_file, scan_selected, save_report, security_status, refresh_security])
+-        .run(tauri::generate_context!()).expect("MalGuard desktop startup failed");
+-}
++    tauri::Builder::default()
++        .manage(Selection::default())
++        .setup(|app| {
++            #[cfg(windows)]
++            {
++                let allowed = engine(app.handle())
++                    .and_then(|exe| run_engine(&exe, "--license-status", None, None))
++                    .map(|item| item.get("authorized").and_then(|value| value.as_bool()) == Some(true))
++                    .unwrap_or(false);
++                if !allowed {
++                    rfd::MessageDialog::new()
++                        .set_title("MalGuard private device license")
++                        .set_description("This build requires a valid license for this Windows device. / این نسخه به مجوز معتبر همین دستگاه نیاز دارد.")
++                        .set_level(rfd::MessageLevel::Error)
++                        .show();
++                    return Err("Device license is missing, invalid, or belongs to another device".into());
++                }
++            }
++            #[cfg(not(windows))]
++            let _ = app;
++            Ok(())
++        })
++        .invoke_handler(tauri::generate_handler![
++            release_info,
++            choose_file,
++            scan_selected,
++            save_report,
++            save_card,
++            security_status,
++            refresh_security
++        ])
++        .run(tauri::generate_context!())
++        .expect("MalGuard desktop startup failed");
++}
+--- a/desktop/src-tauri/tauri.conf.json
++++ b/desktop/src-tauri/tauri.conf.json
+@@ -1,14 +1,14 @@
+ {
+   "$schema": "https://schema.tauri.app/config/2",
+   "productName": "MalGuard",
+-  "version": "1.2.0",
++  "version": "1.3.0",
+   "identifier": "io.github.malguard.cleanroom",
+   "build": { "frontendDist": "../ui" },
+   "app": {
+     "withGlobalTauri": true,
+     "windows": [{ "label": "main", "title": "MalGuard / GTA Guard", "width": 1120, "height": 800, "minWidth": 700, "minHeight": 600 }],
+     "security": {
+-      "capabilities": [],
++      "capabilities": [{"identifier": "scan-progress", "windows": ["main"], "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]}],
+       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+     }
+   },
+--- a/desktop/ui/app.css
++++ b/desktop/ui/app.css
+@@ -1,3 +1,823 @@
+-:root{color-scheme:dark;font-family:Tahoma,Arial,sans-serif;background:#071014;color:#e4edf0}*{box-sizing:border-box}body{margin:0}header{display:flex;justify-content:space-between;align-items:center;padding:22px 36px;border-bottom:1px solid #24404a;background:#0c191e;color:#a2bec9}.brand{font-size:25px;font-weight:bold;color:#adf0ff;direction:ltr}.brand small{font-size:12px;color:#a2bec9;margin-left:12px}main{max-width:1020px;margin:0 auto;padding:30px}.intro{padding:5px 0 20px}h1{font-size:32px;margin:10px 0}h2{font-size:20px;margin-top:0}.eyebrow{color:#84dfed}.intro p,.hint,footer{line-height:1.9;color:#adc3cc}.card{padding:25px;margin:18px 0;border:1px solid #28505b;border-radius:17px;background:linear-gradient(130deg,#10232a,#0d171c)}button{font:inherit;color:#06242e;background:#a5efff;border:1px solid #92dcea;border-radius:9px;padding:12px 22px;cursor:pointer;margin:5px 0 5px 10px}button.secondary{background:transparent;color:#c2dbe4}button:disabled{opacity:.45;cursor:default}button:focus-visible{outline:3px solid #fff;outline-offset:3px}#filePath{overflow-wrap:anywhere;color:#c6dce3}#scanStatus{color:#b0eaff}#metrics{display:flex;gap:22px;padding:12px 0;flex-wrap:wrap}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.9 Tahoma,Arial,sans-serif;text-align:start}footer{font-size:12px;padding:10px 5px}#updateStatus{line-height:1.8}#verdict[data-verdict=MALICIOUS]{color:#ff8383}#verdict[data-verdict=SUSPICIOUS]{color:#ffd989}#verdict[data-verdict=SAFE]{color:#91e5be}
+-
+-select{font:inherit;background:#0c191e;color:#e4edf0;border:1px solid #488393;border-radius:8px;padding:8px}select:focus-visible{outline:3px solid #fff;outline-offset:3px}header{gap:16px;flex-wrap:wrap}html[dir=rtl] button{margin-left:10px;margin-right:0}pre[dir=ltr]{text-align:left}pre[dir=rtl]{text-align:right}
++:root {
++  color-scheme: dark;
++  --bg: #0b111a;
++  --panel: #111b28;
++  --line: #253348;
++  --ink: #eef3f9;
++  --muted: #9aaabd;
++  --accent: #70e7c0;
++  font-family: Inter, "Segoe UI", Tahoma, Arial, sans-serif;
++  font-synthesis: none;
++}
++* {
++  box-sizing: border-box;
++}
++body {
++  margin: 0;
++  background:
++    radial-gradient(ellipse at 15% 0%, #17353360, transparent 48%), var(--bg);
++  color: var(--ink);
++  line-height: 1.65;
++}
++button,
++select {
++  font: inherit;
++}
++button {
++  border: 1px solid transparent;
++  border-radius: 11px;
++  padding: 10px 19px;
++  background: var(--accent);
++  color: #082920;
++  font-weight: 650;
++  cursor: pointer;
++  transition:
++    background 0.2s,
++    transform 0.2s;
++}
++button:hover:not(:disabled) {
++  background: #94f4d6;
++  transform: translateY(-1px);
++}
++button:disabled {
++  opacity: 0.4;
++  cursor: default;
++}
++button.secondary {
++  background: #1b2c3c;
++  color: var(--ink);
++  border-color: #33495d;
++}
++button.secondary:hover:not(:disabled) {
++  background: #294154;
++}
++button.quiet {
++  background: transparent;
++  color: var(--muted);
++}
++button.quiet:hover:not(:disabled) {
++  background: #203041;
++  color: var(--ink);
++}
++:focus-visible {
++  outline: 3px solid var(--accent);
++  outline-offset: 4px;
++}
++[hidden] {
++  display: none !important;
++}
++h1,
++h2,
++h3,
++h4,
++p {
++  margin: 0;
++}
++h2 {
++  font-size: 21px;
++  letter-spacing: -0.4px;
++}
++h3 {
++  line-height: 1.35;
++}
++a {
++  color: inherit;
++  text-decoration: none;
++}
++select {
++  background: #152232;
++  color: var(--ink);
++  border: 1px solid var(--line);
++  border-radius: 8px;
++  padding: 5px 9px;
++}
++.topbar {
++  max-width: 1100px;
++  margin: auto;
++  padding: 23px 36px;
++  display: flex;
++  gap: 24px;
++  align-items: center;
++  border-bottom: 1px solid var(--line);
++}
++.brand {
++  display: flex;
++  gap: 11px;
++  align-items: center;
++  font-size: 22px;
++  letter-spacing: -0.5px;
++  font-weight: 750;
++}
++.brand small {
++  display: block;
++  font-size: 9px;
++  letter-spacing: 3px;
++  color: var(--muted);
++  line-height: 1.1;
++}
++.brand-mark,
++.footer-mark {
++  display: grid;
++  place-items: center;
++  width: 36px;
++  height: 40px;
++  font-size: 21px;
++  font-weight: 800;
++  background: var(--accent);
++  color: #0c3127;
++  clip-path: polygon(0 0, 100% 0, 100% 76%, 50% 100%, 0 76%);
++}
++.local-pill {
++  margin-inline-start: auto;
++  font-size: 10px;
++  letter-spacing: 1.6px;
++  color: var(--accent);
++}
++.language {
++  font-size: 12px;
++  color: var(--muted);
++  display: flex;
++  gap: 9px;
++  align-items: center;
++}
++main {
++  max-width: 1000px;
++  padding: 40px 36px 24px;
++  margin: auto;
++}
++.intro {
++  margin-bottom: 32px;
++}
++.eyebrow {
++  font-size: 11px;
++  font-weight: 650;
++  letter-spacing: 2.2px;
++  color: var(--accent);
++  margin-bottom: 10px;
++}
++h1 {
++  font-size: clamp(32px, 4.6vw, 49px);
++  letter-spacing: -1.6px;
++  line-height: 1.22;
++  font-weight: 650;
++}
++.intro-copy {
++  max-width: 675px;
++  color: var(--muted);
++  font-size: 15px;
++  margin-top: 15px;
++}
++.build-line {
++  display: flex;
++  gap: 15px;
++  flex-wrap: wrap;
++  font-size: 10px;
++  color: #75879b;
++  margin-top: 20px;
++}
++.build-line bdi {
++  font-family: Consolas, monospace;
++}
++.panel {
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: 17px;
++  padding: 20px 24px;
++}
++.intelligence {
++  margin-bottom: 38px;
++}
++.intel-heading {
++  display: flex;
++  gap: 10px;
++  align-items: center;
++}
++.intel-heading h2 {
++  font-size: 16px;
++}
++.live-dot {
++  width: 7px;
++  height: 7px;
++  border-radius: 50%;
++  background: #738198;
++}
++.intelligence[data-fresh="true"] .live-dot {
++  background: var(--accent);
++  box-shadow: 0 0 12px #70e7c060;
++}
++#updateStatus {
++  font-size: 13px;
++  color: var(--muted);
++  margin: 9px 0 14px;
++}
++.actions {
++  display: flex;
++  gap: 10px;
++  flex-wrap: wrap;
++  align-items: center;
++}
++.intelligence button {
++  font-size: 12px;
++  padding: 7px 13px;
++}
++.update-details {
++  font-size: 12px;
++  color: var(--muted);
++  margin-top: 14px;
++}
++.update-details summary,
++.raw-report summary {
++  cursor: pointer;
++  color: #b6c5d5;
++}
++.update-details p {
++  margin-top: 10px;
++  max-width: 740px;
++}
++#updateFacts {
++  overflow-wrap: anywhere;
++}
++.section-heading {
++  display: flex;
++  align-items: end;
++  justify-content: space-between;
++  gap: 15px;
++  margin-bottom: 20px;
++}
++.section-heading .eyebrow {
++  color: var(--muted);
++  font-size: 10px;
++}
++.private-label {
++  font-size: 11px;
++  color: var(--muted);
++}
++.scan-shell {
++  position: relative;
++  width: 100%;
++  min-height: 223px;
++  margin-inline: auto;
++  background: linear-gradient(145deg, #142335, #101a27);
++  border: 1px solid #345064;
++  border-radius: 19px;
++  transition:
++    width 0.5s cubic-bezier(0.2, 0.7, 0.3, 1),
++    border-radius 0.5s,
++    background 0.5s;
++  overflow: hidden;
++}
++.file-prompt {
++  text-align: center;
++  padding: 25px 28px;
++}
++.file-symbol {
++  width: 42px;
++  height: 42px;
++  border-radius: 12px;
++  border: 1px solid #3e5f72;
++  display: grid;
++  place-items: center;
++  margin: 0 auto 10px;
++  color: var(--accent);
++  font-size: 25px;
++}
++#filePath {
++  font-size: 16px;
++  font-weight: 600;
++  overflow-wrap: anywhere;
++  max-width: 740px;
++  margin: auto;
++}
++.hint {
++  font-size: 11px;
++  color: var(--muted);
++  margin-top: 8px;
++}
++.scan-actions {
++  justify-content: center;
++  margin-top: 19px;
++}
++.scan-status {
++  min-height: 24px;
++  text-align: center;
++  font-size: 12px;
++  color: var(--muted);
++  margin-top: 12px;
++}
++.scan-shell[data-phase="scanning"] {
++  width: 244px;
++  height: 244px;
++  min-height: 244px;
++  border-radius: 50%;
++  border-color: #284637;
++  background: radial-gradient(circle, #183829, #0e1c24 72%);
++}
++.scan-progress {
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  justify-content: center;
++  text-align: center;
++  position: absolute;
++  inset: 0;
++  padding: 34px;
++}
++.orbit {
++  position: absolute;
++  inset: 0;
++  border-radius: 50%;
++  background: conic-gradient(
++    from 0deg,
++    transparent 65%,
++    #70e7c035 85%,
++    var(--accent) 99%,
++    transparent
++  );
++  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0);
++  animation: orbit 2s linear infinite;
++}
++.progress-kicker {
++  font-size: 11px;
++  color: var(--accent);
++  letter-spacing: 1px;
++}
++#progressStage {
++  font-size: 17px;
++  font-weight: 550;
++  line-height: 1.45;
++  margin: 10px 0;
++  max-width: 195px;
++  min-height: 50px;
++}
++.progress-note {
++  font-size: 10px;
++  color: var(--muted);
++}
++@keyframes orbit {
++  to {
++    transform: rotate(360deg);
++  }
++}
++.scan-shell[data-phase="complete"] {
++  overflow: visible;
++  background: transparent;
++  border-color: transparent;
++  min-height: 0;
++}
++.report-flip {
++  position: relative;
++  transform-style: preserve-3d;
++  transition: transform 0.65s cubic-bezier(0.2, 0.7, 0.3, 1);
++}
++.report-face {
++  backface-visibility: hidden;
++  min-width: 0;
++}
++.report-front {
++  position: relative;
++  padding: 26px;
++  background: linear-gradient(140deg, #192a38, #111c2b);
++  border: 1px solid var(--line);
++  border-radius: 19px;
++}
++.report-back {
++  position: absolute;
++  inset: 0 auto auto 0;
++  width: 100%;
++  transform: rotateY(180deg);
++  visibility: hidden;
++}
++.report-flip.is-flipped {
++  transform: rotateY(180deg);
++}
++.report-flip.is-flipped .report-front {
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  visibility: hidden;
++}
++.report-flip.is-flipped .report-back {
++  position: relative;
++  visibility: visible;
++}
++.result-row {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 24px;
++}
++.result-copy {
++  max-width: 580px;
++}
++.result-copy h3 {
++  font-size: 26px;
++  font-weight: 650;
++  letter-spacing: -0.5px;
++}
++#verdict[data-verdict="MALICIOUS"] {
++  color: #ff8d94;
++}
++#verdict[data-verdict="SUSPICIOUS"] {
++  color: #f4cf76;
++}
++.filename {
++  overflow-wrap: anywhere;
++  unicode-bidi: plaintext;
++}
++#resultFilename {
++  font-size: 14px;
++  font-weight: 550;
++  margin-top: 12px;
++}
++#resultFacts,
++#resultAdvice {
++  font-size: 12px;
++  color: var(--muted);
++  margin-top: 7px;
++}
++.metrics {
++  font-size: 11px;
++  color: var(--muted);
++  padding-top: 17px;
++  margin-top: 15px;
++  border-top: 1px solid var(--line);
++}
++#detailsButton {
++  font-size: 12px;
++  margin-top: 16px;
++}
++.file-warning {
++  display: flex;
++  gap: 13px;
++  background: #3c1e2850;
++  border: 1px solid #914d60;
++  border-radius: 12px;
++  padding: 15px;
++  margin-bottom: 24px;
++  color: #ffc8ce;
++}
++.warning-mark {
++  width: 23px;
++  height: 23px;
++  flex: none;
++  background: #ffc8ce;
++  color: #421b27;
++  display: grid;
++  place-items: center;
++  border-radius: 50%;
++  font-weight: 800;
++}
++.file-warning h3 {
++  font-size: 15px;
++}
++.file-warning p {
++  font-size: 12px;
++  margin-top: 6px;
++}
++.warning-advice {
++  font-weight: 650;
++}
++.gauge {
++  flex: none;
++  width: 190px;
++  text-align: center;
++  direction: ltr;
++}
++.gauge svg {
++  width: 100%;
++  display: block;
++  overflow: visible;
++}
++.gauge .gauge-name {
++  font-size: 10px;
++  color: var(--muted);
++  margin-top: -6px;
++}
++.gauge .gauge-value {
++  font-size: 21px;
++  font-weight: 650;
++  line-height: 1.2;
++}
++.gauge .gauge-foot {
++  font-size: 9px;
++  color: var(--muted);
++  margin-top: 4px;
++}
++.gauge-needle {
++  transition: transform 0.65s ease;
++  stroke: currentColor;
++  stroke-width: 2.8;
++  stroke-linecap: round;
++}
++.gauge-label {
++  fill: currentColor;
++  font-size: 9px;
++  opacity: 0.7;
++}
++.gauge-hub {
++  fill: currentColor;
++}
++.report-card {
++  color: #203442;
++  background:
++    radial-gradient(circle at 90% 0%, #f5e4b2aa, transparent 40%), #f0f1e9;
++  padding: 34px;
++  border-radius: 19px;
++  border: 1px solid #d7cda8;
++  position: relative;
++  box-shadow: 0 14px 45px #0003;
++}
++.report-card:before {
++  content: "";
++  position: absolute;
++  inset: 10px;
++  pointer-events: none;
++  border: 1px solid #7d876830;
++  border-radius: 11px;
++}
++.card-top {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  gap: 20px;
++}
++.card-brand {
++  font-size: 16px;
++  letter-spacing: 3px;
++  font-weight: 750;
++}
++.card-brand span {
++  display: block;
++  font-size: 9px;
++  letter-spacing: 4px;
++  color: #617079;
++}
++.card-seal {
++  width: 49px;
++  height: 49px;
++  border-radius: 50%;
++  outline: 1px solid #ab914e;
++  outline-offset: 4px;
++  border: 1px dashed #aa914e;
++  background: #e9d99f;
++  color: #65501d;
++  display: grid;
++  place-items: center;
++  font-size: 26px;
++  font-weight: 650;
++}
++.card-kicker {
++  font-size: 10px;
++  letter-spacing: 3px;
++  margin-top: 25px;
++  color: #6f796f;
++}
++.report-card h3 {
++  font-size: 30px;
++  font-weight: 600;
++  letter-spacing: -0.5px;
++  margin-top: 9px;
++}
++#cardFilename {
++  font-size: 14px;
++  color: #64717a;
++  margin: 10px 0 15px;
++}
++.report-card .gauge {
++  width: 210px;
++  margin: 5px auto 20px;
++  color: #203442;
++}
++.report-card .gauge-name,
++.report-card .gauge-foot {
++  color: #637074;
++}
++.card-advice {
++  font-size: 13px;
++  text-align: center;
++  max-width: 650px;
++  margin: 0 auto 22px;
++}
++.card-facts {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 17px 24px;
++  margin: 0;
++  padding: 21px 0;
++  border-block: 1px solid #65797430;
++}
++.fact {
++  min-width: 0;
++}
++.fact.wide {
++  grid-column: 1/-1;
++}
++.card-facts dt {
++  font-size: 10px;
++  color: #64736f;
++  margin-bottom: 5px;
++}
++.card-facts dd {
++  margin: 0;
++  font-size: 12px;
++  font-weight: 550;
++  overflow-wrap: anywhere;
++  white-space: pre-wrap;
++}
++.card-facts .hash {
++  font-size: 10px;
++  font-family: Consolas, monospace;
++  direction: ltr;
++  unicode-bidi: plaintext;
++}
++.preview-box {
++  margin-top: 21px;
++  background: #dbe1d880;
++  border: 1px solid #bdc8bc;
++  border-radius: 10px;
++  padding: 14px;
++}
++.preview-box h4,
++.card-evidence h4 {
++  font-size: 12px;
++  font-weight: 650;
++}
++.preview-box pre {
++  font-family: Consolas, Tahoma, monospace;
++  font-size: 11px;
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++  margin: 10px 0;
++  color: #34443d;
++}
++.preview-box p {
++  font-size: 10px;
++  color: #66756c;
++}
++.card-evidence {
++  margin-top: 23px;
++}
++.card-evidence ul {
++  padding-inline-start: 18px;
++  font-size: 11px;
++  margin: 10px 0 0;
++}
++.card-evidence li {
++  margin: 5px 0;
++  overflow-wrap: anywhere;
++}
++.stage-list {
++  list-style: none;
++  padding: 0 !important;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 5px;
++}
++.stage-list li {
++  background: #dbe2d9;
++  border-radius: 5px;
++  padding: 4px 8px;
++  font-size: 9px;
++  margin: 0;
++}
++.stage-list li[data-state="COMPLETE"] {
++  background: #c5dfd0;
++}
++.stage-list li[data-state="FAILED"],
++.stage-list li[data-state="BLOCKED"] {
++  background: #ebcecb;
++}
++.card-disclaimer {
++  font-size: 10px;
++  color: #6a7671;
++  margin-top: 22px;
++  padding-top: 14px;
++  border-top: 1px solid #65797430;
++}
++.card-bottom {
++  display: flex;
++  justify-content: space-between;
++  gap: 15px;
++  font-size: 9px;
++  color: #6a7671;
++  margin-top: 17px;
++  overflow-wrap: anywhere;
++}
++.report-actions {
++  margin-top: 21px;
++  justify-content: center;
++}
++.report-actions button {
++  font-size: 12px;
++}
++.raw-report {
++  font-size: 12px;
++  color: var(--muted);
++  margin-top: 20px;
++}
++.raw-report pre {
++  font-size: 11px;
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++  background: #101a27;
++  border: 1px solid var(--line);
++  border-radius: 12px;
++  padding: 18px;
++  margin-top: 12px;
++}
++footer {
++  border-top: 1px solid var(--line);
++  display: flex;
++  align-items: center;
++  gap: 16px;
++  margin-top: 32px;
++  padding-top: 23px;
++  color: #75899b;
++  font-size: 10px;
++}
++footer p {
++  max-width: 735px;
++}
++.footer-mark {
++  width: 22px;
++  height: 26px;
++  font-size: 13px;
++  flex: none;
++  opacity: 0.6;
++}
++[dir="rtl"] h1,
++[dir="rtl"] h2,
++[dir="rtl"] h3,
++[dir="rtl"] .eyebrow,
++[dir="rtl"] .card-kicker {
++  letter-spacing: 0;
++}
++[dir="rtl"] .report-card {
++  font-family: "Segoe UI", Tahoma, Arial, sans-serif;
++}
++@media (max-width: 720px) {
++  .topbar {
++    padding: 18px 20px;
++    gap: 14px;
++  }
++  .local-pill {
++    display: none;
++  }
++  .language {
++    margin-inline-start: auto;
++  }
++  .language > span {
++    display: none;
++  }
++  main {
++    padding: 30px 20px 22px;
++  }
++  .panel {
++    padding: 18px;
++  }
++  .result-row {
++    flex-direction: column;
++    align-items: stretch;
++  }
++  .result-row .gauge {
++    align-self: center;
++    margin-top: 3px;
++  }
++  .report-front {
++    padding: 20px;
++  }
++  .report-card {
++    padding: 27px 23px;
++  }
++  .card-facts {
++    gap: 15px;
++  }
++  .private-label {
++    display: none;
++  }
++  .report-card h3 {
++    font-size: 25px;
++  }
++  .card-bottom {
++    flex-wrap: wrap;
++  }
++  h1 {
++    font-size: 36px;
++  }
++}
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *:before,
++  *:after {
++    animation: none !important;
++    transition: none !important;
++    scroll-behavior: auto !important;
++  }
++  .orbit {
++    background: conic-gradient(#70e7c0, transparent 65%);
++  }
++  .report-flip.is-flipped,
++  .report-back {
++    transform: none;
++  }
++}
+--- a/desktop/ui/app.js
++++ b/desktop/ui/app.js
+@@ -1,60 +1,1026 @@
+-'use strict';
+-const invoke=(name)=>window.__TAURI__.core.invoke(name);
+-const el=(id)=>document.getElementById(id);
+-const catalogs={
+- en:{version:'Desktop 1.2 · Windows',language:'Language',eyebrow:'GTA V mod file protection',title:'Inspect before you install.',intro:'Static analysis runs locally. Signed threat intelligence updates online; your files are never uploaded or executed.',intelligence:'Online threat intelligence',update:'Get signed update',status:'Check status',schedule:'Automatic updates run daily at 03:00 when Windows is running. Manual updates require administrator approval.',scanHeading:'Scan a mod file or package',noFile:'No file selected.',choose:'Choose file',scan:'Start scan',save:'Save JSON report',footer:'SAFE means no evidence of malicious behavior was found by completed analyses; it is not a safety guarantee. Stale data or incomplete required analysis blocks SAFE.',checking:'Checking updates…',fresh:'Threat data is up to date',hashes:'verified hashes',stale:'Online intelligence is missing or stale. Update it; SAFE remains blocked until fresh data is authenticated.',saved:'Report saved to a new file.',started:'Update requested. Check status after a few moments.',scanning:'Static analysis in progress; the file is never executed…',done:'Analysis complete.',metrics:'Risk: {risk} · Coverage: {coverage}% · Confidence: {confidence}%',invalidReport:'Invalid engine report',SAFE:'No evidence of malicious behavior',SUSPICIOUS:'Suspicious',MALICIOUS:'Malicious',INVALID:'Invalid structure',INCONCLUSIVE:'Inconclusive'},
+- fa:{version:'نسخهٔ گرافیکی ۱.۲ · Windows',language:'زبان',eyebrow:'حفاظت از فایل‌های ماد GTA V',title:'قبل از نصب ماد، بررسی کنید.',intro:'تحلیل ایستا روی دستگاه شما انجام می‌شود. اطلاعات تهدید امضاشده آنلاین به‌روز می‌شود؛ فایل شما آپلود یا اجرا نمی‌شود.',intelligence:'اطلاعات آنلاین تهدید',update:'دریافت به‌روزرسانی امضاشده',status:'بررسی وضعیت',schedule:'دریافت خودکار هر روز ساعت ۳، وقتی ویندوز روشن باشد. به‌روزرسانی دستی اجازهٔ مدیر سیستم می‌خواهد.',scanHeading:'بررسی فایل یا بستهٔ ماد',noFile:'فایلی انتخاب نشده است.',choose:'انتخاب فایل',scan:'شروع بررسی',save:'ذخیرهٔ گزارش JSON',footer:'نتیجهٔ SAFE یعنی در تحلیل‌های تکمیل‌شده شواهد مخرب پیدا نشده است؛ تضمین ایمنی نیست. اطلاعات قدیمی یا تحلیل ناقص، حکم سالم صادر نمی‌کند.',checking:'در حال بررسی به‌روزرسانی…',fresh:'اطلاعات تهدید به‌روز است',hashes:'هش تأییدشده',stale:'اطلاعات آنلاین آماده یا به‌روز نیست. به‌روزرسانی کنید؛ نتیجهٔ سالم تا تأیید اطلاعات جدید صادر نمی‌شود.',saved:'گزارش در فایل جدید ذخیره شد.',started:'دریافت درخواست شد. پس از چند لحظه وضعیت را بررسی کنید.',scanning:'در حال بررسی ایستا؛ فایل اجرا نمی‌شود…',done:'بررسی تمام شد.',metrics:'ریسک: {risk} · پوشش: {coverage}٪ · اطمینان: {confidence}٪',invalidReport:'گزارش موتور معتبر نیست',SAFE:'شواهد مخرب پیدا نشد',SUSPICIOUS:'مشکوک',MALICIOUS:'مخرب',INVALID:'ساختار نامعتبر',INCONCLUSIVE:'نتیجهٔ نامشخص'}
++"use strict";
++const el = (id) => document.getElementById(id);
++const invoke = (name, args = {}) => window.__TAURI__.core.invoke(name, args);
++const catalogs = {
++  en: {
++    local: "LOCAL · STATIC ANALYSIS",
++    version: "Desktop 1.3 · Windows",
++    language: "Language",
++    eyebrow: "GTA V · MOD INSPECTION",
++    title: "Inspect before you install.",
++    intro:
++      "Understand the file, examine the evidence, then decide. Analysis stays on your device. Your files are never uploaded or executed.",
++    intelligence: "Signed threat intelligence",
++    update: "Get signed update",
++    status: "Check status",
++    updateDetails: "How updates work",
++    schedule:
++      "Daily at 03:00 in your Windows local time, while the PC is on and online. The installer task may catch up after a missed run.",
++    admin:
++      "Manual updates ask for administrator approval to write signed data into the protected cache. They update threat hashes and rules, not the application. Your selected file is never sent to the updater.",
++    feedScope:
++      "The count is the number of verified SHA-256 records in this feed, not a count of every threat. A hash match identifies those exact bytes; no match does not prove safety.",
++    step: "01 / FILE INSPECTION",
++    scanHeading: "What are you installing?",
++    private: "Private by design",
++    noFile: "Choose a file to begin.",
++    formats: "ASI / DLL · ZIP / 7Z / RAR · Lua / C# · INI / CFG / XML",
++    typeFirst: "The contents are identified before a result is given.",
++    choose: "Choose file",
++    scan: "Start inspection →",
++    working: "Inspecting",
++    staticOnly: "Static analysis · no execution",
++    completed: "STATIC INSPECTION COMPLETE",
++    more: "View report card ↗",
++    back: "↶ Back to result",
++    save: "Save full JSON report",
++    downloadCard: "Download card · PNG",
++    cardKicker: "FILE INSPECTION RECORD",
++    preview: "Bounded text preview · secrets redacted",
++    previewSample:
++      "Preview from the first {bytes} bytes; this is not the full file.",
++    evidence: "Evidence & analysis coverage",
++    cardDisclaimer:
++      "This is a static inspection record, not a certificate of safety. The score measures collected evidence, not the probability of infection.",
++    fullReport: "Full analysis details",
++    footer:
++      "No evidence found is not a guarantee of safety. Missing intelligence, unsupported formats or incomplete required analysis prevent a SAFE result.",
++    checking: "Checking signed data…",
++    fresh: "Signed cache verified · current",
++    hashes: "unique SHA-256 records",
++    stale: "Signed cache verified · stale. Refresh it; SAFE remains blocked.",
++    missing:
++      "No authenticated online cache is available. SAFE remains blocked.",
++    signedFacts: "Signed: {date} · Signer: {key} · Version: {version}",
++    saved: "Report saved to a new file.",
++    cardSaved: "Report card saved to a new PNG file.",
++    started:
++      "Updater requested; completion is not yet confirmed. Check status to authenticate the cached data.",
++    starting: "Starting local engine",
++    scanning: "Inspecting captured bytes. File contents are never executed.",
++    done: "Inspection complete.",
++    failed: "Inspection did not complete. No safety approval was issued.",
++    invalidReport: "Invalid engine report",
++    metrics:
++      "Analysis coverage: {coverage}% · Verdict confidence: {confidence}%",
++    risk: "Evidence risk",
++    unknown: "Unknown",
++    riskNote: "0–100 · collected evidence",
++    unknownNote: "Not validated · no safety approval",
++    SAFE: "No malicious evidence found",
++    SUSPICIOUS: "Suspicious evidence found",
++    MALICIOUS: "Malicious evidence found",
++    INVALID: "Structure could not be validated",
++    INCONCLUSIVE: "Could not establish safety",
++    unsupportedTitle: "This file is outside GTA mod validation",
++    mismatchTitle: "File contents do not match its claimed format",
++    malformedTitle: "The recognized format has an invalid internal structure",
++    emptyTitle: "This file is empty",
++    unavailableTitle: "File contents could not be captured reliably",
++    unsupportedVerdict: "Outside mod validation",
++    unsupportedAdvice:
++      "Do not install this file as a GTA mod based on this result. Obtain the original mod package and inspect it.",
++    SAFEAdvice:
++      "No malicious evidence was found in completed checks. Review the source and permissions before installing; static analysis cannot guarantee safety.",
++    SUSPICIOUSAdvice:
++      "Do not install until the suspicious evidence has been investigated.",
++    MALICIOUSAdvice:
++      "Do not place this file in GTA or run it. The report retains the evidence.",
++    INVALIDAdvice:
++      "Obtain a complete original package and inspect it again. A format error does not establish that the file is safe.",
++    INCONCLUSIVEAdvice:
++      "Required checks did not establish safety. Resolve the listed limitations before installing.",
++    headerOnly:
++      "Identification is based on a format header; the media/document structure was not fully validated.",
++    filename: "File",
++    fileType: "Detected content",
++    size: "Size",
++    scope: "Validation scope",
++    scope_supported: "Recognized analysis format",
++    scope_unsupported: "Outside direct mod validation",
++    scope_mismatch: "Content / extension mismatch",
++    scope_malformed: "Internal structure invalid",
++    scope_empty: "Empty file",
++    scope_unavailable: "Content unavailable",
++    sha: "SHA-256 · captured bytes",
++    coverage: "Coverage",
++    confidence: "Verdict confidence",
++    engine: "Engine / ruleset",
++    threatData: "Threat data",
++    signature: "Signature",
++    verified: "Verified",
++    notVerified: "Unavailable",
++    encoding: "Text encoding",
++    reason: "Explanation",
++    supported: "Formats analyzed",
++    noEvidence:
++      "No malicious evidence was recorded. This alone does not establish safety.",
++    moreEvidence: "{count} more evidence records in the full JSON report.",
++    stage_COMPLETE: "Complete",
++    stage_PARTIAL: "Partial",
++    stage_FAILED: "Failed",
++    stage_BLOCKED: "Blocked",
++    stage_UNAVAILABLE: "Unavailable",
++    stage_SKIPPED_LIMIT: "Limit reached",
++    stage_TIMEOUT: "Timed out",
++    stage_NOT_APPLICABLE: "Not applicable",
++    stage_unknown: "Not complete",
++    updates: "Verifying signed intelligence",
++    capture: "Capturing bytes & identifying format",
++    reputation: "Checking authenticated hashes",
++    strings: "Inspecting strings & bounded decoding",
++    native: "Inspecting native indicators",
++    script: "Analysing script structure",
++    rules: "Matching static rules",
++    pe: "Parsing Windows PE structure",
++    dotnet: "Inspecting .NET metadata",
++    archive: "Inspecting archive & nested files",
++    context: "Assessing evidence & coverage",
++    finalizing: "Preparing the result",
++  },
++  fa: {
++    local: "تحلیل ایستا · روی دستگاه شما",
++    version: "نسخهٔ گرافیکی ۱.۳ · Windows",
++    language: "زبان",
++    eyebrow: "GTA V · بررسی فایل ماد",
++    title: "قبل از نصب ماد، بررسی کنید.",
++    intro:
++      "نوع فایل را بشناسید، شواهد را ببینید و سپس تصمیم بگیرید. تحلیل روی دستگاه شما می‌ماند؛ فایل شما هرگز آپلود یا اجرا نمی‌شود.",
++    intelligence: "اطلاعات تهدید امضاشده",
++    update: "دریافت به‌روزرسانی امضاشده",
++    status: "بررسی وضعیت",
++    updateDetails: "به‌روزرسانی چگونه کار می‌کند؟",
++    schedule:
++      "هر روز ساعت ۳ به وقت محلی ویندوز، وقتی رایانه روشن و آنلاین باشد. وظیفهٔ نصب‌کننده ممکن است نوبت ازدست‌رفته را پس از روشن‌شدن جبران کند.",
++    admin:
++      "به‌روزرسانی دستی برای نوشتن دادهٔ امضاشده در محل محافظت‌شده، اجازهٔ مدیر سیستم می‌خواهد. هش‌ها و قواعد تهدید به‌روز می‌شوند، نه خود برنامه. فایل انتخابی شما به به‌روزرسان ارسال نمی‌شود.",
++    feedScope:
++      "عدد نمایش‌داده‌شده تعداد رکوردهای SHA-256 تأییدشدهٔ همین فهرست است، نه تعداد همهٔ تهدیدها. تطبیق هش فقط همان بایت‌ها را شناسایی می‌کند؛ نبود تطبیق، ایمنی را ثابت نمی‌کند.",
++    step: "۰۱ / بررسی فایل",
++    scanHeading: "چه فایلی را نصب می‌کنید؟",
++    private: "با حفظ حریم خصوصی",
++    noFile: "برای شروع، یک فایل انتخاب کنید.",
++    formats: "ASI / DLL · ZIP / 7Z / RAR · Lua / C# · INI / CFG / XML",
++    typeFirst: "پیش از اعلام نتیجه، محتوای فایل شناسایی می‌شود.",
++    choose: "انتخاب فایل",
++    scan: "شروع بررسی ←",
++    working: "در حال بررسی",
++    staticOnly: "تحلیل ایستا · بدون اجرا",
++    completed: "بررسی ایستا تکمیل شد",
++    more: "نمایش کارت گزارش ↖",
++    back: "↷ بازگشت به نتیجه",
++    save: "ذخیرهٔ گزارش کامل JSON",
++    downloadCard: "دانلود کارت · PNG",
++    cardKicker: "گزارش بررسی فایل",
++    preview: "پیش‌نمایش محدود متن · اطلاعات حساس حذف شده",
++    previewSample: "نمونه از {bytes} بایت نخست؛ تمام محتوای فایل نیست.",
++    evidence: "شواهد و پوشش تحلیل",
++    cardDisclaimer:
++      "این کارت گزارش بررسی ایستا است، نه گواهی ایمنی. امتیاز میزان شواهد جمع‌آوری‌شده است، نه احتمال آلودگی.",
++    fullReport: "جزئیات کامل تحلیل",
++    footer:
++      "پیدانشدن شواهد، تضمین ایمنی نیست. اطلاعات تهدید ناموجود، قالب خارج از پوشش یا تحلیل ضروری ناقص، اجازهٔ صدور نتیجهٔ SAFE نمی‌دهد.",
++    checking: "در حال بررسی دادهٔ امضاشده…",
++    fresh: "فهرست ذخیره‌شده تأیید شد · به‌روز",
++    hashes: "رکورد یکتای SHA-256",
++    stale:
++      "امضای فهرست تأیید شد · داده قدیمی است. به‌روز کنید؛ نتیجهٔ سالم صادر نمی‌شود.",
++    missing: "فهرست آنلاین تأییدشده در دسترس نیست؛ نتیجهٔ سالم صادر نمی‌شود.",
++    signedFacts: "زمان امضا: {date} · کلید: {key} · نسخه: {version}",
++    saved: "گزارش در فایل جدید ذخیره شد.",
++    cardSaved: "کارت گزارش در فایل PNG جدید ذخیره شد.",
++    started:
++      "به‌روزرسان درخواست شد؛ پایان دریافت هنوز تأیید نشده است. با بررسی وضعیت، دادهٔ ذخیره‌شده را تأیید کنید.",
++    starting: "در حال آغاز موتور محلی",
++    scanning: "بایت‌های دریافت‌شده بررسی می‌شوند؛ محتوای فایل اجرا نمی‌شود.",
++    done: "بررسی تمام شد.",
++    failed: "بررسی تکمیل نشد؛ تأیید ایمنی صادر نشده است.",
++    invalidReport: "گزارش موتور معتبر نیست",
++    metrics: "پوشش تحلیل: {coverage}٪ · اطمینان به نتیجه: {confidence}٪",
++    risk: "ریسک بر پایهٔ شواهد",
++    unknown: "نامشخص",
++    riskNote: "۰ تا ۱۰۰ · شواهد جمع‌آوری‌شده",
++    unknownNote: "تأیید نشده · بدون تأیید ایمنی",
++    SAFE: "شواهد مخرب پیدا نشد",
++    SUSPICIOUS: "شواهد مشکوک پیدا شد",
++    MALICIOUS: "شواهد مخرب پیدا شد",
++    INVALID: "ساختار قابل تأیید نیست",
++    INCONCLUSIVE: "ایمنی قابل تأیید نیست",
++    unsupportedTitle: "این فایل خارج از پوشش تأیید ماد GTA است",
++    mismatchTitle: "محتوای فایل با قالب ادعاشده مطابقت ندارد",
++    malformedTitle: "ساختار داخلی قالب شناسایی‌شده معتبر نیست",
++    emptyTitle: "این فایل خالی است",
++    unavailableTitle: "محتوای فایل به‌طور قابل اتکا دریافت نشد",
++    unsupportedVerdict: "خارج از پوشش تأیید ماد",
++    unsupportedAdvice:
++      "با اتکا به این نتیجه، این فایل را به‌عنوان ماد در GTA نصب نکنید. بستهٔ اصلی ماد را دریافت و بررسی کنید.",
++    SAFEAdvice:
++      "در بررسی‌های تکمیل‌شده شواهد مخرب پیدا نشد. پیش از نصب، منبع و مجوزها را بررسی کنید؛ تحلیل ایستا تضمین ایمنی نیست.",
++    SUSPICIOUSAdvice: "تا بررسی شواهد مشکوک، این فایل را نصب نکنید.",
++    MALICIOUSAdvice:
++      "این فایل را در GTA قرار ندهید یا اجرا نکنید. شواهد در گزارش ثبت شده است.",
++    INVALIDAdvice:
++      "بستهٔ اصلی و کامل را دریافت و دوباره بررسی کنید. خطای قالب، ایمنی فایل را ثابت نمی‌کند.",
++    INCONCLUSIVEAdvice:
++      "بررسی‌های ضروری ایمنی را ثابت نکردند. پیش از نصب، محدودیت‌های گزارش را برطرف کنید.",
++    headerOnly:
++      "تشخیص از سرآیند قالب است؛ ساختار کامل رسانه یا سند تأیید نشده است.",
++    filename: "فایل",
++    fileType: "محتوای شناسایی‌شده",
++    size: "اندازه",
++    scope: "پوشش تأیید",
++    scope_supported: "قالب شناخته‌شده برای تحلیل",
++    scope_unsupported: "خارج از تأیید مستقیم ماد",
++    scope_mismatch: "ناهمخوانی محتوا و پسوند",
++    scope_malformed: "ساختار داخلی نامعتبر",
++    scope_empty: "فایل خالی",
++    scope_unavailable: "محتوا در دسترس نیست",
++    sha: "SHA-256 · بایت‌های دریافت‌شده",
++    coverage: "پوشش",
++    confidence: "اطمینان به نتیجه",
++    engine: "موتور / قواعد",
++    threatData: "اطلاعات تهدید",
++    signature: "امضا",
++    verified: "تأییدشده",
++    notVerified: "در دسترس نیست",
++    encoding: "کدگذاری متن",
++    reason: "توضیح",
++    supported: "قالب‌های قابل تحلیل",
++    noEvidence:
++      "شواهد مخرب ثبت نشده است. این موضوع به‌تنهایی ایمنی را ثابت نمی‌کند.",
++    moreEvidence: "{count} رکورد شواهد دیگر در گزارش کامل JSON موجود است.",
++    stage_COMPLETE: "کامل",
++    stage_PARTIAL: "ناقص",
++    stage_FAILED: "ناموفق",
++    stage_BLOCKED: "مسدود",
++    stage_UNAVAILABLE: "ناموجود",
++    stage_SKIPPED_LIMIT: "محدودیت بودجه",
++    stage_TIMEOUT: "پایان زمان",
++    stage_NOT_APPLICABLE: "نامرتبط",
++    stage_unknown: "تکمیل نشده",
++    updates: "تأیید اطلاعات امضاشده",
++    capture: "دریافت بایت‌ها و تشخیص قالب",
++    reputation: "تطبیق هش‌های تأییدشده",
++    strings: "بررسی رشته‌ها و رمزگشایی محدود",
++    native: "بررسی نشانه‌های بومی",
++    script: "تحلیل ساختار اسکریپت",
++    rules: "تطبیق قواعد ایستا",
++    pe: "تحلیل ساختار PE ویندوز",
++    dotnet: "بررسی فرادادهٔ دات‌نت",
++    archive: "بررسی آرشیو و فایل‌های داخل آن",
++    context: "سنجش شواهد و پوشش تحلیل",
++    finalizing: "آماده‌سازی نتیجه",
++  },
+ };
+-let language='en';
+-try{const saved=localStorage.getItem('malguard-language');if(Object.hasOwn(catalogs,saved))language=saved;}catch{}
+-let lastResult=null;
+-let lastStatus=null;
+-function t(key,values={}){let text=catalogs[language][key]||catalogs.en[key]||key;for(const [name,value] of Object.entries(values))text=text.replaceAll('{'+name+'}',String(value));return text;}
+-function renderResult(){
+- if(!lastResult)return;
+- const report=lastResult.report;
+- el('verdict').textContent=t(report.verdict);el('verdict').dataset.verdict=report.verdict;
+- el('metrics').textContent=t('metrics',{risk:report.risk_score,coverage:report.coverage_score,confidence:report.confidence});
+- el('summary').textContent=language==='fa'?lastResult.summary_fa:lastResult.summary_en;
+- el('summary').lang=language;el('summary').dir=language==='fa'?'rtl':'ltr';
+-}
+-function renderStatus(){if(lastStatus)el('updateStatus').textContent=lastStatus.fresh?t('fresh')+' · '+lastStatus.record_count+' '+t('hashes')+' · '+lastStatus.version:t('stale');}
+-function setLanguage(value){
+- language=Object.hasOwn(catalogs,value)?value:'en';
+- document.documentElement.lang=language;document.documentElement.dir=language==='fa'?'rtl':'ltr';
+- el('languageSelect').value=language;
+- for(const node of document.querySelectorAll('[data-i18n]'))node.textContent=t(node.dataset.i18n);
+- el('languageSelect').setAttribute('aria-label',t('language'));
+- renderResult();renderStatus();
+- try{localStorage.setItem('malguard-language',language);}catch{}
+-}
+-async function status(){
+- try{el('updateStatus').textContent=t('checking');lastStatus=await invoke('security_status');renderStatus();}
+- catch(error){el('updateStatus').textContent=String(error);}
+-}
+-el('languageSelect').addEventListener('change',event=>setLanguage(event.target.value));
+-el('statusButton').addEventListener('click',status);
+-el('saveButton').addEventListener('click',async()=>{
+- try{if(await invoke('save_report'))el('scanStatus').textContent=t('saved');}
+- catch(error){el('scanStatus').textContent=String(error);}
++const stages = new Set([
++  "updates",
++  "capture",
++  "reputation",
++  "strings",
++  "native",
++  "script",
++  "rules",
++  "pe",
++  "dotnet",
++  "archive",
++  "context",
++  "finalizing",
++]);
++let language = "en",
++  lastResult = null,
++  lastStatus = null,
++  activeScanId = null,
++  currentStage = null,
++  completedAt = null,
++  build = "";
++try {
++  const saved = localStorage.getItem("malguard-language");
++  if (Object.hasOwn(catalogs, saved)) language = saved;
++} catch {}
++function t(key, values = {}) {
++  let value = catalogs[language][key] || catalogs.en[key] || key;
++  for (const [name, text] of Object.entries(values))
++    value = value.replaceAll("{" + name + "}", String(text));
++  return value;
++}
++function number(value) {
++  return new Intl.NumberFormat(language === "fa" ? "fa-IR" : "en-US", {
++    maximumFractionDigits: 1,
++  }).format(value);
++}
++function size(value, known = true) {
++  if (known === false) return t("unknown");
++  return number(value) + " " + (language === "fa" ? "بایت" : "bytes");
++}
++function date(value) {
++  const parsed = new Date(value);
++  return Number.isFinite(parsed.getTime())
++    ? parsed.toLocaleString(language === "fa" ? "fa-IR" : "en-US")
++    : t("notVerified");
++}
++function txt(id, value) {
++  if (id === "scanStatus") el(id).removeAttribute("data-i18n");
++  el(id).textContent = value;
++}
++function scanMessage(key) {
++  txt("scanStatus", t(key));
++  el("scanStatus").dataset.i18n = key;
++}
++function phase(value) {
++  el("scanShell").dataset.phase = value;
++  el("filePrompt").hidden = value !== "ready";
++  el("scanProgress").hidden = value !== "scanning";
++  el("result").hidden = value !== "complete";
++}
++function flip(back) {
++  el("reportFlip").classList.toggle("is-flipped", back);
++  el("resultFront").inert = back;
++  el("resultFront").setAttribute("aria-hidden", String(back));
++  el("resultBack").inert = !back;
++  el("resultBack").setAttribute("aria-hidden", String(!back));
++  el("detailsButton").setAttribute("aria-expanded", String(back));
++}
++function reportRoot(report) {
++  return (
++    report.artifacts.find(
++      (item) => item.artifact_id === report.root_artifact_id,
++    ) ||
++    report.artifacts.find((item) => !item.parent_id) ||
++    report.artifacts[0]
++  );
++}
++function outside() {
++  return lastResult.file_inspection.scope_state !== "supported";
++}
++function riskValue() {
++  const r = lastResult.report;
++  return ["INVALID", "INCONCLUSIVE"].includes(r.verdict) ? null : r.risk_score;
++}
++function headline() {
++  const r = lastResult.report;
++  return outside() && r.verdict === "INCONCLUSIVE"
++    ? t("unsupportedVerdict")
++    : t(r.verdict);
++}
++function advice() {
++  return outside() &&
++    !["MALICIOUS", "SUSPICIOUS"].includes(lastResult.report.verdict)
++    ? t("unsupportedAdvice")
++    : t(lastResult.report.verdict + "Advice");
++}
++function svgNode(tag, attrs = {}) {
++  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
++  for (const [key, value] of Object.entries(attrs))
++    node.setAttribute(key, String(value));
++  return node;
++}
++function gauge(target) {
++  const risk = riskValue(),
++    unknown = risk === null,
++    svg = svgNode("svg", {
++      viewBox: "0 0 200 118",
++      role: "img",
++      "aria-label":
++        t("risk") + ": " + (unknown ? t("unknown") : risk + " / 100"),
++    });
++  const point = (angle) => [
++    100 + 78 * Math.cos((angle * Math.PI) / 180),
++    96 + 78 * Math.sin((angle * Math.PI) / 180),
++  ];
++  const arc = (a, b, color) => {
++    const p = point(a),
++      q = point(b);
++    svg.append(
++      svgNode("path", {
++        d: `M ${p[0]} ${p[1]} A 78 78 0 0 1 ${q[0]} ${q[1]}`,
++        fill: "none",
++        stroke: color,
++        "stroke-width": 9,
++        "stroke-linecap": "round",
++      }),
++    );
++  };
++  if (unknown) arc(180, 360, "#73818a");
++  else {
++    arc(180, 233, "#3cb98f");
++    arc(237, 296, "#ddb64c");
++    arc(300, 360, "#e17672");
++  }
++  for (const [label, angle] of [
++    [0, 180],
++    [50, 270],
++    [100, 360],
++  ]) {
++    const p = [
++      100 + 94 * Math.cos((angle * Math.PI) / 180),
++      96 + 94 * Math.sin((angle * Math.PI) / 180),
++    ];
++    const node = svgNode("text", {
++      x: p[0],
++      y: p[1] + 3,
++      "text-anchor": "middle",
++      class: "gauge-label",
++    });
++    node.textContent = label;
++    svg.append(node);
++  }
++  if (!unknown)
++    svg.append(
++      svgNode("line", {
++        x1: 100,
++        y1: 96,
++        x2: 40,
++        y2: 96,
++        transform: `rotate(${risk * 1.8} 100 96)`,
++        class: "gauge-needle",
++      }),
++    );
++  svg.append(svgNode("circle", { cx: 100, cy: 96, r: 5, class: "gauge-hub" }));
++  const label = document.createElement("p");
++  label.className = "gauge-name";
++  label.textContent = t("risk");
++  const value = document.createElement("p");
++  value.className = "gauge-value";
++  value.textContent = unknown
++    ? t("unknown")
++    : number(risk) + " / " + number(100);
++  const note = document.createElement("p");
++  note.className = "gauge-foot";
++  note.textContent = t(unknown ? "unknownNote" : "riskNote");
++  el(target).replaceChildren(svg, label, value, note);
++}
++function factRows() {
++  const f = lastResult.file_inspection,
++    r = lastResult.report,
++    root = reportRoot(r),
++    s = lastResult.updates;
++  return [
++    [t("fileType"), f["label_" + language]],
++    [t("size"), size(f.file_size, f.size_known)],
++    [t("scope"), t("scope_" + f.scope_state)],
++    [t("coverage"), number(r.coverage_score) + "%"],
++    [t("confidence"), number(r.confidence) + "%"],
++    [t("engine"), r.engine_version + " / " + r.ruleset_version, "code"],
++    [
++      t("threatData"),
++      s.signature_verified
++        ? s.version + " · " + number(s.record_count) + " " + t("hashes")
++        : t("notVerified"),
++    ],
++    [
++      t("signature"),
++      s.signature_verified
++        ? t("verified") + " · " + date(s.created_at)
++        : t("notVerified"),
++    ],
++    ...(f.encoding ? [[t("encoding"), f.encoding]] : []),
++    [t("sha"), root.hashes.sha256 || t("notVerified"), "hash"],
++    [
++      t("reason"),
++      f["note_" + language] + (f.header_only ? " " + t("headerOnly") : ""),
++      "wide",
++    ],
++    ...(outside()
++      ? [[t("supported"), f.supported_formats.join(" · "), "wide"]]
++      : []),
++  ];
++}
++function evidenceLines() {
++  const e = lastResult.report.evidence;
++  const lines = e
++    .slice(0, 5)
++    .map(
++      (item) =>
++        item.rule_id +
++        " · " +
++        (item["explanation_" + language] ||
++          item.explanation_en ||
++          item["description_" + language] ||
++          item.description_en ||
++          item.rule_id),
++    );
++  if (!lines.length) lines.push(t("noEvidence"));
++  if (e.length > 5)
++    lines.push(t("moreEvidence", { count: number(e.length - 5) }));
++  return lines;
++}
++function renderResult() {
++  if (!lastResult) return;
++  const r = lastResult.report,
++    f = lastResult.file_inspection,
++    root = reportRoot(r);
++  txt("verdict", headline());
++  el("verdict").dataset.verdict = r.verdict;
++  txt("resultFilename", f.filename);
++  txt(
++    "resultFacts",
++    f["label_" + language] + " · " + size(f.file_size, f.size_known),
++  );
++  txt("resultAdvice", advice());
++  txt(
++    "metrics",
++    t("metrics", {
++      coverage: number(r.coverage_score),
++      confidence: number(r.confidence),
++    }),
++  );
++  el("fileWarning").hidden = !outside();
++  const key = {
++    unsupported: "unsupportedTitle",
++    mismatch: "mismatchTitle",
++    malformed: "malformedTitle",
++    empty: "emptyTitle",
++    unavailable: "unavailableTitle",
++  }[f.scope_state];
++  txt("warningHeading", t(key || "unsupportedTitle"));
++  txt(
++    "warningFacts",
++    f.filename +
++      " · " +
++      f["label_" + language] +
++      " · " +
++      size(f.file_size, f.size_known),
++  );
++  txt(
++    "warningReason",
++    f["note_" + language] + (f.header_only ? " " + t("headerOnly") : ""),
++  );
++  txt("warningAdvice", advice());
++  gauge("riskGauge");
++  gauge("cardGauge");
++  txt("cardVerdict", headline());
++  txt("cardFilename", f.filename);
++  txt("cardAdvice", advice());
++  const facts = el("cardFacts");
++  facts.replaceChildren();
++  for (const [label, value, style] of factRows()) {
++    const row = document.createElement("div");
++    row.className = "fact" + (["hash", "wide"].includes(style) ? " wide" : "");
++    const dt = document.createElement("dt"),
++      dd = document.createElement("dd");
++    dt.textContent = label;
++    dd.textContent = value;
++    if (style === "hash") dd.className = "hash";
++    dd.dir = style === "hash" || style === "code" ? "ltr" : "auto";
++    row.append(dt, dd);
++    facts.append(row);
++  }
++  el("previewBox").hidden = !f.preview;
++  txt("contentPreview", f.preview || "");
++  txt("previewNote", t("previewSample", { bytes: number(f.preview_bytes) }));
++  el("evidenceList").replaceChildren();
++  for (const line of evidenceLines()) {
++    const li = document.createElement("li");
++    li.textContent = line;
++    el("evidenceList").append(li);
++  }
++  el("stageList").replaceChildren();
++  for (const entry of root.coverage) {
++    const li = document.createElement("li");
++    li.dataset.state = entry.state;
++    li.textContent =
++      entry.stage +
++      " · " +
++      t(
++        Object.hasOwn(catalogs.en, "stage_" + entry.state)
++          ? "stage_" + entry.state
++          : "stage_unknown",
++      );
++    el("stageList").append(li);
++  }
++  txt("summary", lastResult["summary_" + language]);
++  el("summary").lang = language;
++  el("summary").dir = language === "fa" ? "rtl" : "ltr";
++  txt("cardBuild", build);
++  txt("cardDate", date(completedAt));
++}
++function renderStatus() {
++  if (!lastStatus) return;
++  const valid =
++    lastStatus.available === true && lastStatus.signature_verified === true;
++  el("intelligenceHeading").closest(".intelligence").dataset.fresh = String(
++    valid && lastStatus.fresh,
++  );
++  txt(
++    "updateStatus",
++    valid
++      ? t(lastStatus.fresh ? "fresh" : "stale") +
++          " · " +
++          number(lastStatus.record_count) +
++          " " +
++          t("hashes")
++      : t("missing"),
++  );
++  txt(
++    "updateFacts",
++    valid
++      ? t("signedFacts", {
++          date: date(lastStatus.created_at),
++          key: lastStatus.key_id,
++          version: lastStatus.version,
++        })
++      : t("missing"),
++  );
++}
++function setLanguage(value) {
++  language = Object.hasOwn(catalogs, value) ? value : "en";
++  document.documentElement.lang = language;
++  document.documentElement.dir = language === "fa" ? "rtl" : "ltr";
++  el("languageSelect").value = language;
++  for (const node of document.querySelectorAll("[data-i18n]"))
++    node.textContent = t(node.dataset.i18n);
++  el("languageSelect").setAttribute("aria-label", t("language"));
++  renderResult();
++  renderStatus();
++  if (activeScanId) txt("progressStage", t(currentStage || "starting"));
++  try {
++    localStorage.setItem("malguard-language", language);
++  } catch {}
++}
++async function status() {
++  el("statusButton").disabled = true;
++  try {
++    txt("updateStatus", t("checking"));
++    lastStatus = await invoke("security_status");
++    renderStatus();
++  } catch {
++    lastStatus = null;
++    txt("updateStatus", t("missing"));
++    txt("updateFacts", "");
++  } finally {
++    el("statusButton").disabled = false;
++  }
++}
++function validate(data) {
++  const r = data?.report,
++    f = data?.file_inspection;
++  return (
++    r &&
++    ["SAFE", "SUSPICIOUS", "MALICIOUS", "INVALID", "INCONCLUSIVE"].includes(
++      r.verdict,
++    ) &&
++    [r.risk_score, r.coverage_score, r.confidence].every(
++      (n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 100,
++    ) &&
++    Array.isArray(r.artifacts) &&
++    r.artifacts.length &&
++    Array.isArray(r.evidence) &&
++    r.artifacts.every((a) => a.hashes && Array.isArray(a.coverage)) &&
++    typeof data.summary_fa === "string" &&
++    typeof data.summary_en === "string" &&
++    f &&
++    typeof f.filename === "string" &&
++    typeof f.label_en === "string" &&
++    typeof f.label_fa === "string" &&
++    typeof f.note_en === "string" &&
++    typeof f.note_fa === "string" &&
++    [
++      "supported",
++      "unsupported",
++      "mismatch",
++      "malformed",
++      "empty",
++      "unavailable",
++    ].includes(f.scope_state) &&
++    Number.isSafeInteger(f.file_size) &&
++    f.file_size >= 0 &&
++    Array.isArray(f.supported_formats) &&
++    data.updates &&
++    !(
++      r.verdict === "SAFE" &&
++      (f.scope_state !== "supported" ||
++        data.updates.available !== true ||
++        data.updates.fresh !== true ||
++        data.updates.signature_verified !== true)
++    )
++  );
++}
++const progressReady = Promise.resolve().then(() =>
++  window.__TAURI__.event.listen("scan-progress", (event) => {
++    const p = event.payload;
++    if (activeScanId && p?.scanId === activeScanId && stages.has(p.stage)) {
++      currentStage = p.stage;
++      txt("progressStage", t(p.stage));
++    }
++  }),
++);
++progressReady.catch(() => {});
++el("languageSelect").addEventListener("change", (event) =>
++  setLanguage(event.target.value),
++);
++el("statusButton").addEventListener("click", status);
++el("detailsButton").addEventListener("click", () => {
++  flip(true);
++  el("backButton").focus({ preventScroll: true });
+ });
+-el('updateButton').addEventListener('click',async()=>{
+- try{await invoke('refresh_security');el('updateStatus').textContent=t('started');}
+- catch(error){el('updateStatus').textContent=String(error);}
++el("backButton").addEventListener("click", () => {
++  flip(false);
++  el("detailsButton").focus({ preventScroll: true });
+ });
+-el('chooseButton').addEventListener('click',async()=>{
+- try{const path=await invoke('choose_file');if(path){el('filePath').removeAttribute('data-i18n');el('filePath').textContent=path;el('scanButton').disabled=false;el('result').hidden=true;el('scanStatus').textContent='';}}
+- catch(error){el('scanStatus').textContent=String(error);}
++el("saveButton").addEventListener("click", async () => {
++  try {
++    if (await invoke("save_report")) scanMessage("saved");
++  } catch (error) {
++    txt("scanStatus", String(error));
++  }
+ });
+-el('scanButton').addEventListener('click',async()=>{
+- el('scanButton').disabled=true;el('chooseButton').disabled=true;el('languageSelect').disabled=true;
+- el('result').hidden=true;el('scanStatus').textContent=t('scanning');
+- try{
+-  const data=await invoke('scan_selected');
+-  if(!data||!data.report||!['SAFE','SUSPICIOUS','MALICIOUS','INVALID','INCONCLUSIVE'].includes(data.report.verdict)||typeof data.summary_fa!=='string'||typeof data.summary_en!=='string')throw new Error(t('invalidReport'));
+-  lastResult=data;renderResult();el('result').hidden=false;el('scanStatus').textContent=t('done');
+- }catch(error){el('scanStatus').textContent=String(error);}
+- finally{el('scanButton').disabled=false;el('chooseButton').disabled=false;el('languageSelect').disabled=false;}
++el("updateButton").addEventListener("click", async () => {
++  el("updateButton").disabled = true;
++  try {
++    await invoke("refresh_security");
++    txt("updateStatus", t("started"));
++  } catch (error) {
++    txt("updateStatus", String(error));
++  } finally {
++    el("updateButton").disabled = false;
++  }
+ });
+-setLanguage(language);status();
+-invoke('release_info').then(data=>{if(typeof data.build==='string'&&data.build.length<=100)el('buildCode').textContent=data.build;}).catch(()=>{});
++el("chooseButton").addEventListener("click", async () => {
++  el("chooseButton").disabled = true;
++  try {
++    const path = await invoke("choose_file");
++    if (path) {
++      el("filePath").removeAttribute("data-i18n");
++      txt("filePath", path);
++      el("scanButton").disabled = false;
++      lastResult = null;
++      phase("ready");
++      flip(false);
++      txt("scanStatus", "");
++    }
++  } catch (error) {
++    txt("scanStatus", String(error));
++  } finally {
++    el("chooseButton").disabled = false;
++  }
++});
++el("scanButton").addEventListener("click", async () => {
++  for (const id of [
++    "scanButton",
++    "chooseButton",
++    "languageSelect",
++    "updateButton",
++    "statusButton",
++  ])
++    el(id).disabled = true;
++  lastResult = null;
++  activeScanId = crypto.randomUUID();
++  currentStage = null;
++  phase("scanning");
++  flip(false);
++  txt("progressStage", t("starting"));
++  scanMessage("scanning");
++  try {
++    await progressReady;
++    const data = await invoke("scan_selected", { scanId: activeScanId });
++    if (!validate(data)) throw new Error(t("invalidReport"));
++    activeScanId = null;
++    lastResult = data;
++    completedAt = new Date().toISOString();
++    renderResult();
++    phase("complete");
++    scanMessage("done");
++  } catch (error) {
++    activeScanId = null;
++    phase("ready");
++    txt("scanStatus", t("failed") + " " + String(error));
++  } finally {
++    for (const id of [
++      "scanButton",
++      "chooseButton",
++      "languageSelect",
++      "updateButton",
++      "statusButton",
++    ])
++      el(id).disabled = false;
++  }
++});
++// A standalone, local PNG. Text is drawn as text, never interpreted as markup.
++function cardCanvas() {
++  const canvas = document.createElement("canvas");
++  canvas.width = 1200;
++  canvas.height = 2600;
++  const ctx = canvas.getContext("2d"),
++    rtl = language === "fa",
++    margin = 85,
++    width = 1030;
++  let y = 84;
++  ctx.fillStyle = "#f0f1e9";
++  ctx.fillRect(0, 0, 1200, 2600);
++  const wash = ctx.createRadialGradient(1080, 100, 0, 1080, 100, 630);
++  wash.addColorStop(0, "#f5e4b2");
++  wash.addColorStop(1, "#f0f1e900");
++  ctx.fillStyle = wash;
++  ctx.fillRect(0, 0, 1200, 850);
++  function text(
++    value,
++    font = 24,
++    color = "#203442",
++    maxLines = 6,
++    forceLtr = false,
++    x = margin,
++    w = width,
++  ) {
++    ctx.font = `${font}px "Segoe UI",Tahoma,Arial,sans-serif`;
++    ctx.direction = rtl && !forceLtr ? "rtl" : "ltr";
++    ctx.textAlign = rtl && !forceLtr ? "right" : "left";
++    ctx.fillStyle = color;
++    const lines = [];
++    for (const paragraph of String(value).split("\n")) {
++      let line = "";
++      for (const word of paragraph.split(/\s+/)) {
++        const candidate = line ? line + " " + word : word;
++        if (ctx.measureText(candidate).width > w && line) {
++          lines.push(line);
++          line = word;
++        } else line = candidate;
++      }
++      lines.push(line);
++    }
++    const shown = lines.slice(0, maxLines);
++    if (lines.length > maxLines) shown[maxLines - 1] += " …";
++    for (const part of shown) {
++      ctx.fillText(part, rtl && !forceLtr ? x + w : x, y, w);
++      y += font * 1.5;
++    }
++    y += 8;
++  }
++  text("MALGUARD  /  GTA GUARD", 24, "#64736f", 1, true, margin, 850);
++  ctx.beginPath();
++  ctx.fillStyle = "#e9d99f";
++  ctx.arc(1070, 92, 36, 0, 2 * Math.PI);
++  ctx.fill();
++  ctx.strokeStyle = "#aa914e";
++  ctx.lineWidth = 2;
++  ctx.stroke();
++  ctx.beginPath();
++  ctx.arc(1070, 92, 42, 0, 2 * Math.PI);
++  ctx.stroke();
++  ctx.font = "32px Arial";
++  ctx.direction = "ltr";
++  ctx.textAlign = "center";
++  ctx.fillStyle = "#65501d";
++  ctx.fillText("M", 1070, 103);
++  y += 25;
++  text(t("cardKicker"), 18, "#6f796f");
++  text(headline(), 42, "#203442", 3);
++  text(lastResult.file_inspection.filename, 24, "#64736f", 2);
++  const risk = riskValue(),
++    unknown = risk === null,
++    cx = 600,
++    cy = y + 140,
++    rad = 120;
++  ctx.lineWidth = 13;
++  ctx.lineCap = "round";
++  for (const [a, b, color] of unknown
++    ? [[Math.PI, 2 * Math.PI, "#73818a"]]
++    : [
++        [Math.PI, 1.3 * Math.PI, "#3cb98f"],
++        [1.32 * Math.PI, 1.65 * Math.PI, "#ddb64c"],
++        [1.67 * Math.PI, 2 * Math.PI, "#e17672"],
++      ]) {
++    ctx.beginPath();
++    ctx.strokeStyle = color;
++    ctx.arc(cx, cy, rad, a, b);
++    ctx.stroke();
++  }
++  ctx.font = "16px Arial";
++  ctx.textAlign = "center";
++  ctx.direction = "ltr";
++  ctx.fillStyle = "#64736f";
++  for (const [label, x, yy] of [
++    ["0", cx - rad - 25, cy + 5],
++    ["50", cx, cy - rad - 20],
++    ["100", cx + rad + 32, cy + 5],
++  ])
++    ctx.fillText(label, x, yy);
++  if (!unknown) {
++    const a = Math.PI + (risk / 100) * Math.PI;
++    ctx.beginPath();
++    ctx.moveTo(cx, cy);
++    ctx.lineTo(cx + 95 * Math.cos(a), cy + 95 * Math.sin(a));
++    ctx.strokeStyle = "#203442";
++    ctx.lineWidth = 5;
++    ctx.stroke();
++  }
++  ctx.fillStyle = "#203442";
++  ctx.beginPath();
++  ctx.arc(cx, cy, 7, 0, 2 * Math.PI);
++  ctx.fill();
++  y = cy + 50;
++  text(
++    t("risk") +
++      ": " +
++      (unknown ? t("unknown") : number(risk) + " / " + number(100)),
++    26,
++    "#203442",
++    2,
++  );
++  text(t(unknown ? "unknownNote" : "riskNote"), 18, "#64736f", 2);
++  text(advice(), 22, "#203442", 3);
++  y += 12;
++  ctx.strokeStyle = "#bac3b5";
++  ctx.lineWidth = 1;
++  ctx.beginPath();
++  ctx.moveTo(margin, y);
++  ctx.lineTo(1115, y);
++  ctx.stroke();
++  y += 35;
++  const rows = factRows();
++  let pending = null;
++  for (const [label, value, style] of rows) {
++    if (style && style !== "code") {
++      if (pending !== null) {
++        y = pending + 16;
++        pending = null;
++      }
++      text(label, 17, "#64736f", 1);
++      text(value, style === "hash" ? 20 : 22, "#203442", 4, style === "hash");
++      y += 10;
++    } else {
++      const column =
++          pending === null ? (rtl ? 635 : margin) : rtl ? margin : 635,
++        top = y;
++      text(label, 17, "#64736f", 1, false, column, 480);
++      text(value, 22, "#203442", 3, style === "code", column, 480);
++      const bottom = y;
++      if (pending === null) {
++        pending = bottom;
++        y = top;
++      } else {
++        y = Math.max(pending, bottom) + 18;
++        pending = null;
++      }
++    }
++  }
++  if (pending !== null) y = pending + 18;
++  const preview = lastResult.file_inspection.preview;
++  if (preview && y < 1900) {
++    text(t("preview"), 17, "#64736f", 1);
++    text(preview, 20, "#34443d", 4, !/[\u0600-\u06ff]/u.test(preview));
++    text(
++      t("previewSample", {
++        bytes: number(lastResult.file_inspection.preview_bytes),
++      }),
++      16,
++      "#64736f",
++      2,
++    );
++  }
++  text(t("evidence"), 18, "#64736f", 1);
++  for (const line of evidenceLines().slice(0, 3)) {
++    text(line, 20, "#203442", 2);
++    if (y > 2210) break;
++  }
++  const root = reportRoot(lastResult.report);
++  text(
++    root.coverage
++      .map((s) => s.stage + " · " + t("stage_" + s.state))
++      .join("  /  "),
++    16,
++    "#64736f",
++    3,
++  );
++  y = Math.min(y + 22, 2350);
++  text(t("cardDisclaimer"), 18, "#64736f", 4);
++  text(build + " · " + date(completedAt), 16, "#64736f", 2, true);
++  const height = Math.min(2600, Math.ceil(y + 55));
++  ctx.strokeStyle = "#a6ab91";
++  ctx.lineWidth = 2;
++  ctx.strokeRect(28, 28, 1144, height - 56);
++  ctx.strokeStyle = "#c6c9b6";
++  ctx.strokeRect(38, 38, 1124, height - 76);
++  const output = document.createElement("canvas");
++  output.width = 1200;
++  output.height = height;
++  output.getContext("2d").drawImage(canvas, 0, 0);
++  return output;
++}
++el("downloadCard").addEventListener("click", async () => {
++  el("downloadCard").disabled = true;
++  try {
++    await document.fonts.ready;
++    const canvas = cardCanvas(),
++      blob = await new Promise((resolve) =>
++        canvas.toBlob(resolve, "image/png"),
++      );
++    if (!blob) throw new Error("PNG export unavailable");
++    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
++    if (await invoke("save_card", { bytes })) scanMessage("cardSaved");
++  } catch (error) {
++    txt("scanStatus", String(error));
++  } finally {
++    el("downloadCard").disabled = false;
++  }
++});
++setLanguage(language);
++status();
++invoke("release_info")
++  .then((data) => {
++    if (typeof data.build === "string" && data.build.length <= 100) {
++      build = data.build;
++      txt("buildCode", build);
++      if (lastResult) txt("cardBuild", build);
++    }
++  })
++  .catch(() => {});
+--- a/desktop/ui/index.html
++++ b/desktop/ui/index.html
+@@ -1,10 +1,220 @@
+ <!doctype html>
+ <html lang="en" dir="ltr">
+-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MalGuard / GTA Guard</title><link rel="stylesheet" href="app.css"><script src="app.js" defer></script></head>
+-<body><header><span class="brand">MalGuard <small>GTA Guard</small></span><span data-i18n="version">Desktop 1.2 · Windows</span><label><span data-i18n="language">Language</span> <select id="languageSelect" aria-label="Language"><option value="en">English</option><option value="fa">فارسی</option></select></label></header>
+-<main><section class="intro"><p class="eyebrow" data-i18n="eyebrow">GTA V mod file protection</p><h1 data-i18n="title">Inspect before you install.</h1><p data-i18n="intro">Static analysis runs locally. Signed threat intelligence updates online; your files are never uploaded or executed.</p><p><bdi id="buildCode" dir="ltr"></bdi></p></section>
+-<section class="card"><h2 data-i18n="intelligence">Online threat intelligence</h2><p id="updateStatus" role="status">Checking updates…</p><button id="updateButton" data-i18n="update">Get signed update</button><button id="statusButton" class="secondary" data-i18n="status">Check status</button><p class="hint" data-i18n="schedule">Automatic updates run daily at 03:00 when Windows is running. Manual updates require administrator approval.</p></section>
+-<section class="card"><h2 data-i18n="scanHeading">Scan a mod file or package</h2><p id="filePath" dir="auto" data-i18n="noFile">No file selected.</p><button id="chooseButton" data-i18n="choose">Choose file</button><button id="scanButton" disabled data-i18n="scan">Start scan</button><p id="scanStatus" role="status"></p></section>
+-<section id="result" class="card" hidden><h2 id="verdict"></h2><div id="metrics"></div><button id="saveButton" class="secondary" data-i18n="save">Save JSON report</button><pre id="summary"></pre></section>
+-<footer data-i18n="footer">SAFE means no evidence of malicious behavior was found by completed analyses; it is not a safety guarantee. Stale data or incomplete required analysis blocks SAFE.</footer>
+-</main></body></html>
++  <head>
++    <meta charset="utf-8" />
++    <meta name="viewport" content="width=device-width,initial-scale=1" />
++    <title>MalGuard / GTA Guard</title>
++    <link rel="stylesheet" href="app.css" />
++    <script src="app.js" defer></script>
++  </head>
++  <body>
++    <header class="topbar">
++      <a class="brand" href="#scanner" aria-label="MalGuard"
++        ><span class="brand-mark">M</span
++        ><span>MalGuard<small>GTA GUARD</small></span></a
++      ><span class="local-pill" data-i18n="local">LOCAL · STATIC ANALYSIS</span
++      ><label class="language"
++        ><span data-i18n="language">Language</span
++        ><select id="languageSelect" aria-label="Language">
++          <option value="en">English</option>
++          <option value="fa">فارسی</option>
++        </select></label
++      >
++    </header>
++    <main>
++      <section class="intro">
++        <p class="eyebrow" data-i18n="eyebrow">GTA V · MOD INSPECTION</p>
++        <h1 data-i18n="title">Inspect before you install.</h1>
++        <p class="intro-copy" data-i18n="intro">
++          Understand the file, examine the evidence, then decide. Analysis stays
++          on your device. Your files are never uploaded or executed.
++        </p>
++        <div class="build-line">
++          <span data-i18n="version">Desktop 1.3 · Windows</span
++          ><bdi id="buildCode" dir="ltr"></bdi>
++        </div>
++      </section>
++      <section class="intelligence panel" aria-labelledby="intelligenceHeading">
++        <div class="intel-heading">
++          <span class="live-dot" aria-hidden="true"></span>
++          <h2 id="intelligenceHeading" data-i18n="intelligence">
++            Signed threat intelligence
++          </h2>
++        </div>
++        <p id="updateStatus" role="status" data-i18n="checking">
++          Checking signed data…
++        </p>
++        <div class="actions">
++          <button id="updateButton" class="secondary" data-i18n="update">
++            Get signed update</button
++          ><button id="statusButton" class="quiet" data-i18n="status">
++            Check status
++          </button>
++        </div>
++        <details class="update-details">
++          <summary data-i18n="updateDetails">How updates work</summary>
++          <p id="updateFacts"></p>
++          <p data-i18n="schedule">
++            Daily at 03:00 in your Windows local time, while the PC is on and
++            online. The installer task may catch up after a missed run.
++          </p>
++          <p data-i18n="admin">
++            Manual updates ask for administrator approval to write signed data
++            into the protected cache. They update threat hashes and rules, not
++            the application. Your selected file is never sent to the updater.
++          </p>
++          <p data-i18n="feedScope">
++            The count is the number of verified SHA-256 records in this feed,
++            not a count of every threat. A hash match identifies those exact
++            bytes; no match does not prove safety.
++          </p>
++        </details>
++      </section>
++      <section id="scanner" class="scanner" aria-labelledby="scanHeading">
++        <div class="section-heading">
++          <div>
++            <p class="eyebrow" data-i18n="step">01 / FILE INSPECTION</p>
++            <h2 id="scanHeading" data-i18n="scanHeading">
++              What are you installing?
++            </h2>
++          </div>
++          <span class="private-label" data-i18n="private"
++            >Private by design</span
++          >
++        </div>
++        <div id="scanShell" class="scan-shell" data-phase="ready">
++          <div id="filePrompt" class="file-prompt">
++            <span class="file-symbol" aria-hidden="true">↗</span>
++            <p id="filePath" dir="auto" data-i18n="noFile">
++              Choose a file to begin.
++            </p>
++            <p class="hint" data-i18n="formats">
++              ASI / DLL · ZIP / 7Z / RAR · Lua / C# · INI / CFG / XML
++            </p>
++            <p class="hint" data-i18n="typeFirst">
++              The contents are identified before a result is given.
++            </p>
++          </div>
++          <div id="scanProgress" class="scan-progress" hidden>
++            <span class="orbit" aria-hidden="true"></span
++            ><span class="progress-kicker" data-i18n="working">Inspecting</span>
++            <p id="progressStage"></p>
++            <span class="progress-note" data-i18n="staticOnly"
++              >Static analysis · no execution</span
++            >
++          </div>
++          <section id="result" hidden aria-labelledby="verdict">
++            <div id="reportFlip" class="report-flip">
++              <div id="resultFront" class="report-face report-front">
++                <div id="fileWarning" class="file-warning" hidden role="note">
++                  <span class="warning-mark" aria-hidden="true">!</span>
++                  <div>
++                    <h3 id="warningHeading"></h3>
++                    <p id="warningFacts"></p>
++                    <p id="warningReason"></p>
++                    <p id="warningAdvice" class="warning-advice"></p>
++                  </div>
++                </div>
++                <div class="result-row">
++                  <div class="result-copy">
++                    <p class="eyebrow" data-i18n="completed">
++                      STATIC INSPECTION COMPLETE
++                    </p>
++                    <h3 id="verdict"></h3>
++                    <p id="resultFilename" class="filename" dir="auto"></p>
++                    <p id="resultFacts"></p>
++                    <p id="resultAdvice"></p>
++                  </div>
++                  <div id="riskGauge" class="gauge"></div>
++                </div>
++                <div id="metrics" class="metrics"></div>
++                <button
++                  id="detailsButton"
++                  class="secondary"
++                  aria-expanded="false"
++                  data-i18n="more"
++                >
++                  View report card ↗
++                </button>
++              </div>
++              <div
++                id="resultBack"
++                class="report-face report-back"
++                aria-hidden="true"
++                inert
++              >
++                <article id="reportCard" class="report-card">
++                  <div class="card-top">
++                    <span class="card-brand"
++                      >MALGUARD<span>GTA GUARD</span></span
++                    ><span class="card-seal" aria-hidden="true">M</span>
++                  </div>
++                  <p class="card-kicker" data-i18n="cardKicker">
++                    FILE INSPECTION RECORD
++                  </p>
++                  <h3 id="cardVerdict"></h3>
++                  <p id="cardFilename" class="filename" dir="auto"></p>
++                  <div id="cardGauge" class="gauge"></div>
++                  <p id="cardAdvice" class="card-advice"></p>
++                  <dl id="cardFacts" class="card-facts"></dl>
++                  <div id="previewBox" class="preview-box" hidden>
++                    <h4 data-i18n="preview">
++                      Bounded text preview · secrets redacted
++                    </h4>
++                    <pre id="contentPreview" dir="auto"></pre>
++                    <p id="previewNote"></p>
++                  </div>
++                  <div class="card-evidence">
++                    <h4 data-i18n="evidence">Evidence & analysis coverage</h4>
++                    <ul id="evidenceList"></ul>
++                    <ul id="stageList" class="stage-list"></ul>
++                  </div>
++                  <p class="card-disclaimer" data-i18n="cardDisclaimer">
++                    This is a static inspection record, not a certificate of
++                    safety. The score measures collected evidence, not the
++                    probability of infection.
++                  </p>
++                  <div class="card-bottom">
++                    <span id="cardBuild" dir="ltr"></span
++                    ><span id="cardDate"></span>
++                  </div>
++                </article>
++                <div class="actions report-actions">
++                  <button id="downloadCard" data-i18n="downloadCard">
++                    Download card · PNG</button
++                  ><button id="saveButton" class="secondary" data-i18n="save">
++                    Save full JSON report</button
++                  ><button id="backButton" class="quiet" data-i18n="back">
++                    ↶ Back to result
++                  </button>
++                </div>
++                <details class="raw-report">
++                  <summary data-i18n="fullReport">
++                    Full analysis details
++                  </summary>
++                  <pre id="summary"></pre>
++                </details>
++              </div>
++            </div>
++          </section>
++        </div>
++        <div class="actions scan-actions">
++          <button id="chooseButton" class="secondary" data-i18n="choose">
++            Choose file</button
++          ><button id="scanButton" disabled data-i18n="scan">
++            Start inspection →
++          </button>
++        </div>
++        <p id="scanStatus" class="scan-status" role="status"></p>
++      </section>
++      <footer>
++        <span class="footer-mark">M</span>
++        <p data-i18n="footer">
++          No evidence found is not a guarantee of safety. Missing intelligence,
++          unsupported formats or incomplete required analysis prevent a SAFE
++          result.
++        </p>
++      </footer>
++    </main>
++  </body>
++</html>
+--- a/docs/DESKTOP_INSPECTION.md
++++ b/docs/DESKTOP_INSPECTION.md
+@@ -0,0 +1,117 @@
++# Desktop inspection 1.3.0 (engine 1.2.0)
++
++This source candidate has not been released as a Windows installer. The public
++1.2.0 installer and download site remain unchanged.
++
++## File contents and validation scope
++
++Desktop metadata comes from the same bounded, immutable S0 byte snapshot as the
++report hashes. There is no second read after scanning. Standalone plain text,
++media and document content cannot receive SAFE as a validated GTA mod. Plain
++text inside a supported archive remains analysable context; a README does not
++by itself block a complete supported package. Malicious or suspicious evidence
++still takes precedence over unsupported or damaged formats.
++
++Common WAVE, MPEG, ID3, FLAC, Ogg, ISO media, PNG, JPEG, GIF, WebP and PDF headers
++are recognized independently of filename extensions. Header recognition does
++not fully validate a media/document container. A file named `example.asi` whose
++bytes are plain text gets a specific content/extension explanation, file size,
++SHA-256 and a bounded redacted text preview. UTF-8/UTF-16 prefix boundaries are
++handled without mistaking a split character for binary content. Previews use
++at most 8192 captured bytes and display at most 320 characters before redaction.
++Redaction happens before display truncation, including short assigned secrets.
++They are samples, not the complete file contents. Scripts and configuration
++analysis retain the existing conservative static pipeline.
++
++The public immutable Report schema and verdict precedence are retained. Root
++formats outside direct validation mark S0 partial with UNSUPPORTED_FORMAT.
++`Scanner.file_inspection` is supplementary desktop metadata, not a new public
++security verdict. INVALID/INCONCLUSIVE results show an unknown gauge, with no
++needle at zero. Other results display the engine's actual 0–100 evidence score.
++The score and confidence are engineering indicators, not measured probabilities.
++
++## Actual progress and report card
++
++The desktop CLI emits only fixed stage identifiers on stderr; stdout remains
++one JSON result. Stages are announced immediately before the corresponding
++operation. Required isolated parsers, shared ledgers and source-only analysis
++are unchanged. Child analysis is represented by the active archive stage,
++without a simulated percentage or timer that invents progress.
++
++The native bridge reads bounded telemetry, accepts a fixed allowlist of stages
++and sends events only to the main window. A per-scan identifier makes the UI
++ignore delayed events from earlier scans. File selection and scanning serialize
++through the native busy guard. New selections clear previous native reports.
++
++The scan rectangle morphs into a circle with a rotating light, then expands
++into the result. A flip reveals a report card with type, size, explanation,
++hash, preview, evidence, coverage and signed-data details. English remains the
++default, Persian uses RTL, hidden card faces are inert, and reduced motion is
++supported. All sample text is inserted with textContent or drawn on Canvas.
++
++PNG export is generated locally (1200px wide, at most 2600px high); it includes
++summary evidence and the static-analysis limitation. The JSON export carries
++all evidence. Native export accepts bounded PNG bytes and writes a newly chosen
++file with create_new; it cannot accept a sample path or overwrite an input.
++
++## Signed threat updates
++
++The online cache is authenticated using the pinned Ed25519 key; payload hashes,
++record schemas and rule compilation are checked. Status now exposes the signed
++creation time and key identifier, as well as available/fresh/count/version.
++An updater launch is a request, not proof of successful download. A status check
++authenticates the current cache, which may still be the previous good version.
++
++Scheduled updates use the Windows local clock at 03:00. The IExpress installer
++sets StartWhenAvailable, so a missed task can run later subject to Windows task
++conditions; it does not wake a powered-off machine. The legacy NSIS daily task
++does not configure that catch-up setting. Manual updates use UAC because only
++administrators/SYSTEM can write the protected update cache. The trusted updater
++receives no selected sample path. Updates supply hashes/rules, not an app upgrade.
++
++The feed verified on 2026-10-07 contained 1342 unique SHA-256 records, signed at
++2026-10-07T10:37:16.216051+00:00, version mb-37608574476001. This is the published
++feed's count, not confirmation of any user's local cache or a complete malware
++catalogue. No malware sample was downloaded. An exact-hash reputation lookup
++was verified to retain its hard malicious override.
++
++## Reproduce validation
++
++Install the locked Python graph and package before testing; installed subprocess
++checks deliberately do not import from an untrusted working directory:
++
++```sh
++python -m pip install --require-hashes -r requirements-lock.txt
++python -m pip install --no-deps --no-build-isolation .
++python -m pytest -q
++python -m ruff check .
++python -m mypy malguard_core malguard_cli
++cargo check --locked --manifest-path desktop/src-tauri/Cargo.toml
++```
++
++`cargo check` needs real platform development libraries and the resource directory
++normally supplied by the frozen-engine build. A check-only resource directory
++contains no executable engine and is excluded from source packaging. This check
++is not an installer or native Windows runtime test.
++
++Browser QA uses an actual installed Python scanner and Chromium, substituting
++only the native file picker, IPC transport, protected cache location and save
++dialog. Supply an existing hash-locked Playwright installation, a verified feed
++and an output directory outside the packaged source:
++
++```sh
++PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
++MALGUARD_PYTHON=/absolute/path/to/venv/bin/python \
++MALGUARD_QA_FEED=/absolute/path/to/latest.json \
++MALGUARD_QA_OUTPUT=/tmp/malguard-desktop-qa \
++node tests/desktop/browser.mjs
++```
++
++The test prevents external browser requests and uses harmless generated content.
++The live feed download is a separate read-only verification. Native Windows
++installation, UAC, Task Scheduler, WebView2 event permissions and PNG save dialogs
++must still pass Windows CI/manual testing before publication. Detection accuracy
++against a representative real malware/benign corpus has not been measured.
++
++The previously reported slow Windows download/installation is still an open
++separate issue; this change does not claim to fix it.
+--- a/malguard_cli/desktop.py
++++ b/malguard_cli/desktop.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import json
++import sys
+ from pathlib import Path
+ 
+ from malguard_cli.main import configure_output, write_output
+@@ -12,6 +13,15 @@
+ from malguard_core.reputation.trust import PUBLIC_KEYS
+ from malguard_core.rules import RulesManager
+ from malguard_core.updates import load_cached, refresh, status_json
++
++
++def _progress(stage: str) -> None:
++    # Separate bounded telemetry from the stable JSON report on stdout.
++    try:
++        sys.stderr.write(json.dumps({"event": "scan_stage", "stage": stage}) + "\n")
++        sys.stderr.flush()
++    except OSError:
++        pass
+ 
+ 
+ def main(arguments: list[str]) -> int:
+@@ -25,15 +35,18 @@
+         write_output(json.dumps(status_json(result), ensure_ascii=False))
+         return 0
+     if len(arguments) == 2 and arguments[0] == "--desktop-scan":
++        _progress("updates")
+         bundle, status = load_cached()
+         reputation = ReputationStore(bundle) if bundle else None
+         rules = RulesManager(bundle, BundleVerifier(PUBLIC_KEYS)) if bundle else None
+         with Scanner(reputation=reputation, rules_manager=rules,
+-                     reputation_fresh=status.fresh) as scanner:
++                     reputation_fresh=status.fresh, progress=_progress) as scanner:
+             report = scanner.scan_file(Path(arguments[1]))
++            inspection = scanner.file_inspection
+         write_output(json.dumps({"report": json.loads(report.to_json()),
+                                  "summary_fa": report.to_text(),
+                                  "summary_en": report.to_text(language="en"),
++                                 "file_inspection": inspection,
+                                  "updates": status_json(status)}, ensure_ascii=False))
+         return 0
+     raise ValueError("Unsupported desktop command")
+--- a/malguard_cli/device_license.py
++++ b/malguard_cli/device_license.py
+@@ -0,0 +1,116 @@
++"""Offline, signed authorization of a private frozen build on one Windows device."""
++
++from __future__ import annotations
++
++import base64
++import binascii
++import hashlib
++import hmac
++import json
++import re
++import sys
++from pathlib import Path
++
++from cryptography.exceptions import InvalidSignature
++from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
++
++from malguard_cli.license_policy import PRIVATE_APP_VERSION, PRIVATE_LICENSE_PUBLIC_KEY_HEX
++
++DOMAIN = b"MalGuard device license v1\x00"
++MAX_LICENSE_BYTES = 4096
++
++
++class LicenseError(ValueError):
++    """A bounded public failure code, never raw device or license contents."""
++
++
++def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
++    result: dict[str, object] = {}
++    for key, value in pairs:
++        if key in result:
++            raise LicenseError("LICENSE_INVALID")
++        result[key] = value
++    return result
++
++
++def verify_license(data: bytes, public_key_hex: str, fingerprint: str) -> None:
++    """Reject wrong devices, modified licenses, ambiguous JSON and other versions."""
++    if not 0 < len(data) <= MAX_LICENSE_BYTES:
++        raise LicenseError("LICENSE_INVALID")
++    try:
++        item = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_pairs)
++        if not isinstance(item, dict) or set(item) != {
++            "schema", "product", "app_version", "fingerprint", "signature"
++        }:
++            raise LicenseError("LICENSE_INVALID")
++        if (type(item["schema"]) is not int or item["schema"] != 1
++                or item["product"] != "MalGuard"
++                or item["app_version"] != PRIVATE_APP_VERSION
++                or not isinstance(item["fingerprint"], str)
++                or re.fullmatch(r"[a-f0-9]{64}", item["fingerprint"]) is None
++                or not isinstance(item["signature"], str)):
++            raise LicenseError("LICENSE_INVALID")
++        signature = base64.b64decode(item.pop("signature"), validate=True)
++        payload = json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")
++        Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex)).verify(
++            signature, DOMAIN + payload
++        )
++        if not hmac.compare_digest(item["fingerprint"], fingerprint):
++            raise LicenseError("DEVICE_MISMATCH")
++    except InvalidSignature as error:
++        raise LicenseError("LICENSE_SIGNATURE_INVALID") from error
++    except (UnicodeError, json.JSONDecodeError, binascii.Error, TypeError, ValueError) as error:
++        if isinstance(error, LicenseError):
++            raise
++        raise LicenseError("LICENSE_INVALID") from error
++
++
++def windows_fingerprint() -> str:
++    """Read the 64-bit registry view; do not accept environment overrides."""
++    if sys.platform != "win32":
++        raise LicenseError("WINDOWS_REQUIRED")
++    import winreg
++
++    try:
++        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography",
++                            0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
++            value, kind = winreg.QueryValueEx(key, "MachineGuid")
++        if kind != winreg.REG_SZ or not isinstance(value, str):
++            raise LicenseError("DEVICE_UNAVAILABLE")
++        value = value.strip().lower()
++        if re.fullmatch(r"[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}", value) is None:
++            raise LicenseError("DEVICE_UNAVAILABLE")
++        return hashlib.sha256(value.encode("utf-8")).hexdigest()
++    except OSError as error:
++        raise LicenseError("DEVICE_UNAVAILABLE") from error
++
++
++def license_path() -> Path:
++    """Use Windows' system ProgramData folder, independent of process variables."""
++    if sys.platform != "win32":
++        raise LicenseError("WINDOWS_REQUIRED")
++    import ctypes
++
++    buffer = ctypes.create_unicode_buffer(260)
++    if ctypes.windll.shell32.SHGetFolderPathW(None, 0x0023, None, 0, buffer) != 0:
++        raise LicenseError("DEVICE_UNAVAILABLE")
++    return Path(buffer.value) / "MalGuard" / "Licenses" / f"desktop-{PRIVATE_APP_VERSION}.json"
++
++
++def authorization() -> dict[str, object]:
++    """Public builds stay public; private builds require the pinned signed license."""
++    if PRIVATE_LICENSE_PUBLIC_KEY_HEX is None:
++        return {"private_build": False, "authorized": True, "reason": "PUBLIC_BUILD"}
++    try:
++        fingerprint = windows_fingerprint()
++        with license_path().open("rb") as stream:
++            data = stream.read(MAX_LICENSE_BYTES + 1)
++        verify_license(data, PRIVATE_LICENSE_PUBLIC_KEY_HEX, fingerprint)
++        return {"private_build": True, "authorized": True, "reason": "DEVICE_AUTHORIZED"}
++    except FileNotFoundError:
++        reason = "LICENSE_MISSING"
++    except OSError:
++        reason = "LICENSE_UNAVAILABLE"
++    except LicenseError as error:
++        reason = str(error)
++    return {"private_build": True, "authorized": False, "reason": reason}
+--- a/malguard_cli/frozen.py
++++ b/malguard_cli/frozen.py
+@@ -81,6 +81,18 @@
+ 
+ def main(argv: Sequence[str] | None = None) -> int:
+     arguments = list(sys.argv[1:] if argv is None else argv)
++    from malguard_cli.device_license import authorization
++
++    permission = authorization()
++    if arguments == ["--license-status"]:
++        configure_output()
++        write_output(json.dumps(permission))
++        return 0 if permission["authorized"] else 78
++    if not permission["authorized"]:
++        if arguments != ["--malguard-worker"]:
++            configure_output()
++            write_output(json.dumps(permission))
++        return 78
+     if arguments == ["--malguard-worker"]:
+         if sys.platform == "win32":
+             import msvcrt
+--- a/malguard_cli/license_policy.py
++++ b/malguard_cli/license_policy.py
+@@ -0,0 +1,4 @@
++"""Build-time policy; private Windows builds pin their delivery owner's key."""
++
++PRIVATE_LICENSE_PUBLIC_KEY_HEX: str | None = None
++PRIVATE_APP_VERSION = "1.3.0"
+--- a/malguard_core/api/scanner.py
++++ b/malguard_core/api/scanner.py
+@@ -9,12 +9,14 @@
+ import hashlib
+ import os
+ import threading
++from collections.abc import Callable
+ 
+ from malguard_core.budget import BudgetExceeded, BudgetLedger
+ from malguard_core.coverage import coverage_score
+ from malguard_core.intake import (
+     BoundedByteSource, IntakeError, analyze_filename, extension_of, identify, type_mismatch_evidence,
+ )
++from malguard_core.intake.description import describe
+ from malguard_core.model import (
+     Artifact, ArtifactStatus, CoverageEntry, CoverageState, ErrorCode, EvidenceDomain,
+     EvidenceLocation, Hashes, Report, Severity, StageResult, Verdict, make_evidence,
+@@ -74,7 +76,7 @@
+     """Reusable scanner. Concurrent calls serialize one isolated worker pool."""
+ 
+     def __init__(self, settings: ScanSettings | None = None, reputation=None, rules_manager=None,
+-                 reputation_fresh: bool = True):
++                 reputation_fresh: bool = True, progress: Callable[[str], None] | None = None):
+         self.settings = settings or ScanSettings()
+         self._reputation_error: str | None = None
+         try:
+@@ -98,6 +100,17 @@
+         self._pool = WorkerPool(self.settings)
+         self._verdict = VerdictEngine()
+         self._lock = threading.RLock()
++        self._progress = progress
++        self.file_inspection: dict = {}
++
++    def _notify(self, stage: str) -> None:
++        # Observers receive fixed stage identifiers, never sample content. A
++        # failed UI observer must not change analysis or its verdict.
++        if self._progress is not None:
++            try:
++                self._progress(stage)
++            except Exception:
++                return  # Telemetry is advisory and cannot affect analysis.
+ 
+     def __enter__(self):
+         return self
+@@ -120,6 +133,8 @@
+ 
+     def scan_file(self, path: str | os.PathLike[str]) -> Report:
+         with self._lock:
++            self.file_inspection = {}
++            self._notify("capture")
+             ledger = BudgetLedger(self.settings.budget_limits)
+             native_path = os.fspath(path)
+             if not isinstance(native_path, str):
+@@ -139,6 +154,7 @@
+             limitations: set[str] = set(_COMMON_LIMITATIONS)
+             root = self._scan_source(source, logical_path, None, 0, 0, ledger,
+                                      artifacts, decisions, classifications, limitations)
++            self._notify("finalizing")
+             # Parents inherit the strongest descendant decision. Families never
+             # combine across unrelated archive children to manufacture MALICIOUS.
+             strongest = max(decisions.values(), key=lambda decision: VERDICT_PRECEDENCE[decision.verdict])
+@@ -162,6 +178,8 @@
+         return self.rules_manager.active_bundle.ruleset_version if self.rules_manager else "1.0.0"
+ 
+     def _intake_failure(self, path: str, code: ErrorCode, reason: str) -> Report:
++        self.file_inspection = describe({"true_type": "UNKNOWN", "type_confidence": 0,
++                                         "structure_status": "BLOCKED"}, path, 0, False, size_known=False)
+         artifact_id = _artifact_id(None, path, "")
+         state = CoverageState.SKIPPED_LIMIT if code == ErrorCode.ITERATION_BUDGET_EXHAUSTED else CoverageState.BLOCKED
+         artifact = Artifact(artifact_id, path, _declared_type(path), "UNKNOWN", 0.0, 0,
+@@ -200,6 +218,20 @@
+         snapshot_available = len(data) == source.size
+         if intake_state != CoverageState.COMPLETE:
+             status = ArtifactStatus.BLOCKED
++        if parent_id is None:
++            self.file_inspection = describe(identity, path, source.size, snapshot_available)
++            if self.file_inspection["scope_state"] in {"unsupported", "empty"} and status == ArtifactStatus.VALID:
++                # Raw checks can retain malicious evidence, but a standalone
++                # text/media file cannot earn SAFE as a validated GTA mod.
++                status = ArtifactStatus.UNKNOWN
++            if self.file_inspection["scope_state"] in {"unsupported", "empty"} and intake_state == CoverageState.COMPLETE:
++                intake_state = CoverageState.PARTIAL
++                intake_errors.append(ErrorCode.UNSUPPORTED_FORMAT)
++                limitations.add("Root content was identified, but its format is outside direct mod validation.")
++
++        def progress(stage: str) -> None:
++            if parent_id is None:
++                self._notify(stage)
+ 
+         def run_isolated(stage: str, extra: dict | None = None) -> StageResult:
+             if snapshot_available:
+@@ -211,6 +243,7 @@
+         evidence.extend(type_mismatch_evidence(identity, path, artifact_id))
+         # S1 exact authenticated reputation must run before any deep parser and
+         # still runs when raw capture analysis was incomplete after hashing.
++        progress("reputation")
+         if self.reputation is not None and hashes.sha256:
+             reputation_result = self.reputation.analyze(hashes, artifact_id, path, identity["true_type"], source.size)
+         else:
+@@ -235,6 +268,7 @@
+         allowlisted = bool(reputation_result.facts.get("verified_allowlist", False))
+         strings: tuple = ()
+         if data:
++            progress("strings")
+             from malguard_core.strings import extract_strings
+             from malguard_core.decoding import decode_strings, decode_artifact_bytes
+             try:
+@@ -254,13 +288,17 @@
+                 intake_state = CoverageState.SKIPPED_LIMIT
+                 intake_errors.append(exc.error_code)
+                 limitations.add(f"Bounded decoding exhausted {exc.resource}; earlier candidates were retained.")
+-        coverage.append(CoverageEntry("S0", intake_state, "Raw intake or bounded decoding incomplete." if intake_errors else "",
++        intake_reason = ("File bytes captured; root format is outside direct mod validation."
++                         if ErrorCode.UNSUPPORTED_FORMAT in intake_errors and snapshot_available
++                         else "Raw intake or bounded decoding incomplete." if intake_errors else "")
++        coverage.append(CoverageEntry("S0", intake_state, intake_reason,
+                                       intake_errors[0] if intake_errors else None))
+         script_applicable = bool(identity.get("is_script"))
+         pe_applicable = bool(identity.get("is_pe") or extension_of(path) in _EXECUTABLE_EXTENSIONS)
+         native_applicable = pe_applicable or (not script_applicable and not identity.get("is_archive"))
+         native_result: StageResult | None = None
+         if native_applicable:
++            progress("native")
+             from malguard_core.native import analyze as analyze_native
+             native_result = (_local_stage("S3", analyze_native, data, artifact_id, path, ledger, strings)
+                              if snapshot_available else StageResult("S3", CoverageState.SKIPPED_LIMIT,
+@@ -268,6 +306,7 @@
+             evidence.extend(native_result.evidence)
+             limitations.update(native_result.limitations)
+         if script_applicable:
++            progress("script")
+             from malguard_core.scripts import analyze as analyze_script
+             script_result = _local_stage("S5", analyze_script, data, artifact_id, path, ledger, strings)
+             evidence.extend(script_result.evidence)
+@@ -276,6 +315,7 @@
+             limitations.update(script_result.limitations)
+         # YARA is raw-byte analysis and does not depend on valid PE metadata.
+         if self.settings.enable_yara:
++            progress("rules")
+             rules_extra = {"rules_source": self.rules_manager.worker_snapshot()} if self.rules_manager else None
+             rules_result = run_isolated("yara", rules_extra)
+         else:
+@@ -286,6 +326,7 @@
+         limitations.update(rules_result.limitations)
+         pe_result: StageResult | None = None
+         if pe_applicable:
++            progress("pe")
+             pe_result = run_isolated("pe", {"revoked_signers": sorted(getattr(self.reputation, "revoked_signers", ()))})
+             evidence.extend(pe_result.evidence)
+             coverage.append(_stage_entry(pe_result))
+@@ -311,6 +352,7 @@
+         if (identity.get("is_dotnet") or (pe_result and pe_result.facts.get("is_dotnet"))
+                 or (native_applicable and b"BSJB" in data
+                     and (not pe_result or pe_result.facts.get("structure_status") != "VALID"))):
++            progress("dotnet")
+             dotnet_result = run_isolated("dotnet", {"pe_facts": {key: value for key, value in pe_result.facts.items()
+                                                                 if key != "resources"} if pe_result else {}})
+             evidence.extend(dotnet_result.evidence)
+@@ -361,6 +403,7 @@
+         children: list[dict] = []
+         unreadable_child = False
+         if identity.get("is_archive"):
++            progress("archive")
+             archive_result = run_isolated("archives", {"depth": depth, "max_depth": self.settings.max_depth,
+                                                        "max_member_size": self.settings.max_file_size})
+             evidence.extend(archive_result.evidence)
+@@ -431,6 +474,7 @@
+             except (BudgetExceeded, ValueError):
+                 unreadable_child = True
+                 limitations.add("A child artifact could not pass bounded intake; completed parent evidence was retained.")
++        progress("context")
+         final_evidence = tuple({item.id: item for item in evidence}.values())
+         # Root-only generated filename evidence is also debited. Stage analyzers
+         # debit their own emissions, including retries that were actually run.
+@@ -440,6 +484,9 @@
+             coverage[coverage.index(next(entry for entry in coverage if entry.stage == "S0"))] = CoverageEntry("S0", CoverageState.SKIPPED_LIMIT, "Evidence budget exhausted.", exc.error_code)
+         artifact = Artifact(artifact_id, path, _declared_type(path), identity["true_type"], identity["type_confidence"],
+                             source.size, hashes, status, parent_id, depth, final_evidence, tuple(coverage), tuple(child_ids))
++        if parent_id is None:
++            self.file_inspection = describe({**identity, "structure_status": status.value},
++                                            path, source.size, snapshot_available)
+         artifacts.append(artifact)
+         assessment = assess(final_evidence)
+         decisions[artifact_id] = self._verdict.decide(artifact, assessment, coverage_score(coverage), final_evidence,
+--- a/malguard_core/intake/__init__.py
++++ b/malguard_core/intake/__init__.py
+@@ -1,5 +1,6 @@
+ """The only filesystem boundary, bounded byte access and minimal type validation."""
+ 
++import codecs
+ import hashlib
+ import os
+ from pathlib import Path
+@@ -262,6 +263,31 @@
+     if data.startswith(b"\x1bLJ"):
+         result.update(true_type="LUAJIT_BYTECODE", type_confidence=1.0, structure_status=ArtifactStatus.UNKNOWN, is_script=True)
+         return result
++    # These signatures identify content; no media/document parser is claimed.
++    # PE and archive recognition above still wins over a misleading filename.
++    media_types = ((b"\x89PNG\r\n\x1a\n", "PNG_IMAGE"),
++                   (b"\xff\xd8\xff", "JPEG_IMAGE"),
++                   (b"GIF87a", "GIF_IMAGE"), (b"GIF89a", "GIF_IMAGE"),
++                   (b"%PDF-", "PDF_DOCUMENT"), (b"fLaC", "FLAC_AUDIO"),
++                   (b"OggS", "OGG_MEDIA"), (b"ID3", "ID3_AUDIO_METADATA"))
++    media_type = next((kind for magic, kind in media_types if data.startswith(magic)), None)
++    if data.startswith(b"RIFF") and data[8:12] == b"WAVE":
++        media_type = "WAVE_AUDIO"
++    elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
++        media_type = "WEBP_IMAGE"
++    elif len(data) >= 12 and data[4:8] == b"ftyp":
++        media_type = "ISO_BASE_MEDIA"
++    elif (len(data) >= 4 and not data.startswith(b"\xff\xfe")
++          and data[0] == 0xff and data[1] & 0xe0 == 0xe0
++          and data[1] & 0x18 != 0x08 and data[1] & 0x06 != 0
++          and data[2] >> 4 not in {0, 15} and data[2] & 0x0c != 0x0c):
++        media_type = "MPEG_AUDIO"
++    if media_type:
++        result.update(true_type=media_type, type_confidence=0.95,
++                      structure_status=(ArtifactStatus.MALFORMED if extension in
++                                        {".asi", ".dll", ".exe", ".zip", ".7z", ".rar"}
++                                        else ArtifactStatus.UNKNOWN))
++        return result
+     if data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+         result.update(true_type="OLE_COMPOUND", type_confidence=1.0, structure_status=ArtifactStatus.UNKNOWN)
+         return result
+@@ -269,15 +295,21 @@
+                     ".bat": "BAT", ".cmd": "BAT", ".vbs": "VBS", ".ini": "INI", ".xml": "XML", ".cfg": "CFG"}
+     prefix = data[:8192]
+     text = None
++    encoding = None
+     try:
+         if prefix.startswith((b"\xff\xfe", b"\xfe\xff")):
+-            text = prefix[:len(prefix) - len(prefix) % 2].decode("utf-16")
++            encoding = "utf-16"
+         elif len(prefix) >= 8 and prefix[1::2].count(0) >= len(prefix) // 4:
+-            text = prefix[:len(prefix) - len(prefix) % 2].decode("utf-16le")
++            encoding = "utf-16le"
+         elif len(prefix) >= 8 and prefix[0::2].count(0) >= len(prefix) // 4:
+-            text = prefix[:len(prefix) - len(prefix) % 2].decode("utf-16be")
++            encoding = "utf-16be"
+         elif b"\0" not in prefix:
+-            text = prefix.decode("utf-8-sig")
++            encoding = "utf-8-sig"
++        if encoding:
++            # A bounded prefix may end inside a multi-byte character. Do not
++            # confuse that boundary with malformed content.
++            text = codecs.getincrementaldecoder(encoding)(errors="strict").decode(
++                prefix, final=len(data) <= len(prefix))
+     except UnicodeDecodeError:
+         text = None
+     if text is not None and (not prefix or sum(char.isprintable() or char in "\r\n\t" for char in text) >= len(text) * 0.9):
+@@ -288,8 +320,9 @@
+             elif re.search(r"\b(?:Invoke-WebRequest|Invoke-Expression|New-Object)\b", text, re.I):
+                 true_type = "POWERSHELL"
+         result.update(true_type=true_type, type_confidence=0.9 if extension in script_types else 0.7,
+-                      structure_status=ArtifactStatus.VALID, is_script=true_type != "TEXT")
+-        if extension in {".asi", ".dll", ".exe"}:
++                      structure_status=ArtifactStatus.VALID, is_script=true_type != "TEXT",
++                      text_encoding=encoding, text_preview=text, preview_bytes=len(prefix))
++        if extension in {".asi", ".dll", ".exe", ".zip", ".7z", ".rar"}:
+             result["structure_status"] = ArtifactStatus.MALFORMED
+         return result
+     if extension in {".asi", ".dll", ".exe", ".zip", ".7z", ".rar"}:
+@@ -305,7 +338,9 @@
+                               EvidenceLocation(artifact_id, member=logical_path[:8192]),
+                               "The PE header identifies an executable although the filename claims a DLL or ASI plugin.",
+                               "ساختار PE فایل اجرایی را نشان می‌دهد، ولی نام فایل پسوند DLL یا افزونه ASI دارد."),)
+-    if identity.get("is_pe") and extension in {".txt", ".png", ".jpg", ".cfg", ".ini", ".xml", ".lua"}:
++    if identity.get("is_pe") and extension in {".txt", ".png", ".jpg", ".jpeg", ".gif",
++                                               ".cfg", ".ini", ".xml", ".lua", ".pdf",
++                                               ".wav", ".mp3", ".ogg", ".flac", ".mp4"}:
+         return (make_evidence("S0.EXECUTABLE_DISGUISE", "S0", EvidenceDomain.STRUCTURE, "MASQUERADE", "executable_disguise", Severity.CRITICAL,
+                               EvidenceLocation(artifact_id, member=logical_path[:8192]),
+                               "Executable bytes are disguised with a source, configuration or media extension.",
+--- a/malguard_core/intake/description.py
++++ b/malguard_core/intake/description.py
+@@ -0,0 +1,111 @@
++"""Bounded, redacted descriptions of the exact bytes already captured by S0."""
++
++import re
++
++from malguard_core.reporting import redact
++from malguard_core.intake import extension_of
++
++_SHORT_SECRET = re.compile(
++    r"(?i)(\b(?:token|password|secret|api[_-]?key|authorization)\s*[=:]\s*"
++    r"(?:(?:Bearer|Basic)\s+)?)[^\s\"'&;,<>]+"
++)
++
++_LABELS = {
++    "TEXT": ("Plain text", "متن ساده"),
++    "WAVE_AUDIO": ("WAVE audio header", "سرآیند فایل صوتی WAVE"),
++    "MPEG_AUDIO": ("MPEG audio frame header", "سرآیند فریم صوتی MPEG"),
++    "ID3_AUDIO_METADATA": ("ID3 audio metadata", "فرادادهٔ صوتی ID3"),
++    "FLAC_AUDIO": ("FLAC audio header", "سرآیند صوتی FLAC"),
++    "OGG_MEDIA": ("Ogg media container", "ظرف رسانه‌ای Ogg"),
++    "ISO_BASE_MEDIA": ("ISO media container (MP4 family)", "ظرف رسانه‌ای خانوادهٔ MP4"),
++    "PNG_IMAGE": ("PNG image header", "سرآیند تصویر PNG"),
++    "JPEG_IMAGE": ("JPEG image header", "سرآیند تصویر JPEG"),
++    "GIF_IMAGE": ("GIF image header", "سرآیند تصویر GIF"),
++    "WEBP_IMAGE": ("WebP image header", "سرآیند تصویر WebP"),
++    "PDF_DOCUMENT": ("PDF document header", "سرآیند سند PDF"),
++    "OLE_COMPOUND": ("OLE compound container", "ظرف مرکب OLE"),
++    "UNKNOWN": ("Unrecognized binary content", "محتوای دودویی تشخیص‌داده‌نشده"),
++    "MALFORMED_PE": ("Incomplete Windows PE structure", "ساختار ناقص PE ویندوز"),
++    "LUA_SOURCE": ("Lua source text", "متن کد Lua"),
++    "CS_SOURCE": ("C# source text", "متن کد C#"),
++    "VB_SOURCE": ("Visual Basic source text", "متن کد ویژوال بیسیک"),
++    "POWERSHELL": ("PowerShell source text", "متن کد PowerShell"),
++    "BAT": ("Batch command text", "متن فرمان Batch"),
++    "VBS": ("VBScript source text", "متن کد VBScript"),
++    "INI": ("INI configuration text", "متن تنظیمات INI"),
++    "CFG": ("CFG configuration text", "متن تنظیمات CFG"),
++    "XML": ("XML text", "متن XML"),
++    "ZIP": ("ZIP archive", "آرشیو ZIP"),
++    "7Z": ("7Z archive", "آرشیو 7Z"),
++    "RAR": ("RAR archive", "آرشیو RAR"),
++}
++
++
++def _display(value: str) -> str:
++    return "".join(char if (char.isprintable() and char not in
++                            "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
++                   or char in "\n\t" else f"\\u{ord(char):04x}"
++                   for char in _SHORT_SECRET.sub(r"\1[REDACTED]", redact(value)))
++
++
++def describe(identity: dict, path: str, size: int, snapshot_available: bool,
++             *, size_known: bool = True) -> dict:
++    kind = identity["true_type"]
++    declared = path.replace("\\", "/").rsplit("/", 1)[-1]
++    supported = bool(identity.get("is_pe") or identity.get("is_archive")
++                     or identity.get("is_script"))
++    extension = extension_of(path)
++    mismatched = ((extension in {".asi", ".dll", ".exe"} and not identity.get("is_pe"))
++                  or (extension in {".zip", ".7z", ".rar"} and kind not in {"ZIP", "7Z", "RAR"}))
++    state = "supported" if supported else "unsupported"
++    if not snapshot_available:
++        state = "unavailable"
++    elif not size:
++        state = "empty"
++    elif mismatched or (not supported and identity["structure_status"] == "MALFORMED"):
++        state = "mismatch"
++    elif supported and identity["structure_status"] == "MALFORMED":
++        state = "malformed"
++    label_en, label_fa = _LABELS.get(kind, (kind.replace("_", " "), kind.replace("_", " ")))
++    if state == "empty":
++        label_en, label_fa = "Empty file", "فایل خالی"
++    elif state == "unavailable":
++        label_en, label_fa = "Content unavailable", "محتوا در دسترس نیست"
++    notes = {
++        "supported": (
++            "The captured content can enter the static mod-analysis pipeline; identification alone does not establish safety.",
++            "محتوای دریافت‌شده وارد مسیر تحلیل ایستای ماد می‌شود؛ تشخیص نوع به‌تنهایی ایمنی را تأیید نمی‌کند."),
++        "unsupported": (
++            "This content is outside direct GTA mod validation. Raw checks do not validate its format or approve it for installation.",
++            "این محتوا خارج از پوشش تأیید مستقیم ماد GTA است. بررسی بایت‌ها، اعتبار این قالب یا مناسب‌بودن آن برای نصب را ثابت نمی‌کند."),
++        "mismatch": (
++            "The captured bytes do not have the structure required by the claimed mod/archive extension. Renaming a file does not convert its contents.",
++            "بایت‌های فایل ساختار لازم برای پسوند ادعاشدهٔ ماد یا آرشیو را ندارند. تغییر نام یا پسوند، محتوای فایل را تبدیل نمی‌کند."),
++        "empty": ("The file contains zero bytes; there is no mod content to inspect.",
++                  "این فایل صفر بایت دارد؛ محتوای مادی برای بررسی وجود ندارد."),
++        "malformed": (
++            "A supported format header was recognized, but its internal structure could not be parsed as valid. The file may be truncated, damaged or incorrectly packaged.",
++            "سرآیند یک قالب پشتیبانی‌شده شناسایی شد، اما ساختار داخلی معتبر نبود. فایل ممکن است ناقص، آسیب‌دیده یا نادرست بسته‌بندی شده باشد."),
++        "unavailable": (
++            "A complete stable byte snapshot could not be captured; file content was not identified reliably.",
++            "نسخهٔ کامل و پایدار بایت‌ها دریافت نشد؛ محتوای فایل به‌طور قابل اتکا شناسایی نشده است."),
++    }
++    note_en, note_fa = notes[state]
++    return {
++        "filename": _display(declared[:8192]), "file_size": size,
++        "size_known": size_known,
++        "claimed_extension": extension,
++        "detected_type": kind, "label_en": label_en, "label_fa": label_fa,
++        "scope_state": state, "note_en": note_en, "note_fa": note_fa,
++        "encoding": identity.get("text_encoding") if snapshot_available else None,
++        # Redact the bounded decoded prefix before display truncation, so a
++        # token crossing the 320-character display edge cannot leak a prefix.
++        "preview": _display(identity.get("text_preview", ""))[:320] if snapshot_available else "",
++        "preview_bytes": identity.get("preview_bytes", 0) if snapshot_available else 0,
++        "identification_confidence": identity["type_confidence"] if snapshot_available else 0,
++        "supported_formats": ["ASI/DLL (Windows PE)", "ZIP", "7Z", "RAR",
++                              "Lua", "C#", "INI/CFG/XML"],
++        "header_only": kind in {"WAVE_AUDIO", "MPEG_AUDIO", "ID3_AUDIO_METADATA", "FLAC_AUDIO",
++                                "OGG_MEDIA", "ISO_BASE_MEDIA", "PNG_IMAGE", "JPEG_IMAGE",
++                                "GIF_IMAGE", "WEBP_IMAGE", "PDF_DOCUMENT", "OLE_COMPOUND"},
++    }
+--- a/malguard_core/updates/__init__.py
++++ b/malguard_core/updates/__init__.py
+@@ -8,7 +8,7 @@
+ import sys
+ import tempfile
+ from contextlib import contextmanager
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ from datetime import UTC, datetime, timedelta
+ from pathlib import Path
+ from urllib.request import HTTPRedirectHandler, Request, build_opener
+@@ -47,6 +47,9 @@
+     epoch: int
+     record_count: int
+     reason: str
++    signature_verified: bool = False
++    created_at: str = ""
++    key_id: str = ""
+ 
+ 
+ def default_cache_directory() -> Path:
+@@ -135,7 +138,8 @@
+     fresh = -timedelta(minutes=15) <= age <= timedelta(hours=48)
+     records = _object(bundle.payloads["blocklist.json"])["records"]
+     return UpdateStatus(True, fresh, bundle.version, bundle.epoch, len(records),
+-                        "" if fresh else "Signed reputation is older than 48 hours or future-dated")
++                        "" if fresh else "Signed reputation is older than 48 hours or future-dated",
++                        True, manifest["created_at"], bundle.key_id)
+ 
+ 
+ def load_cached(directory: Path | None = None) -> tuple[VerifiedBundle | None, UpdateStatus]:
+@@ -228,8 +232,7 @@
+         return install(download(), default_cache_directory(), ProtectedEpochState())
+     except (OSError, ValueError) as error:
+         _, existing = load_cached()
+-        return UpdateStatus(existing.available, False, existing.version, existing.epoch,
+-                            existing.record_count, "Update failed: " + type(error).__name__)
++        return replace(existing, fresh=False, reason="Update failed: " + type(error).__name__)
+ 
+ 
+ def status_json(status: UpdateStatus) -> dict:
+--- a/malguard_core/version.py
++++ b/malguard_core/version.py
+@@ -1,4 +1,4 @@
+ """Engine and report schema versions shared by trusted entry points."""
+ 
+-ENGINE_VERSION = "1.1.0"
++ENGINE_VERSION = "1.2.0"
+ SCHEMA_VERSION = "1"
+--- a/packaging/online/build_iexpress.ps1
++++ b/packaging/online/build_iexpress.ps1
+@@ -30,7 +30,7 @@
+     if (($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {throw 'Build payload reparse point forbidden'}
+     @{path=($_.FullName.Substring($package.Length).TrimStart('\') -replace '\\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+   })
+-  @{schema=1;product='MalGuard clean-room desktop';version='1.2.0';files=$records} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $package 'install-manifest.json') -Encoding UTF8
++  @{schema=1;product='MalGuard clean-room desktop';version='1.3.0';files=$records} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $package 'install-manifest.json') -Encoding UTF8
+   $payload=Join-Path $work 'payload.zip'
+   Compress-Archive -Path (Join-Path $package '*') -DestinationPath $payload -CompressionLevel Optimal
+   $digest=(Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
+@@ -146,7 +146,7 @@
+   New-Item -ItemType Directory -Path $DiagnosticDirectory -Force | Out-Null
+   Copy-Item -LiteralPath $payload -Destination (Join-Path $DiagnosticDirectory 'payload.zip')
+   Copy-Item -LiteralPath (Join-Path $work 'install.ps1') -Destination (Join-Path $DiagnosticDirectory 'install.ps1')
+-  @{payloadHash=$digest;format='IExpress-PowerShell';engineVersion='1.1.0';appVersion='1.2.0'} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $DiagnosticDirectory 'build.json') -Encoding UTF8
++  @{payloadHash=$digest;format='IExpress-PowerShell';engineVersion='1.2.0';appVersion='1.3.0'} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $DiagnosticDirectory 'build.json') -Encoding UTF8
+   Write-Output ('IExpress installer built: '+$outputPath)
+ } finally {Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue}
+ exit 0
+--- a/packaging/online/configure_private_policy.py
++++ b/packaging/online/configure_private_policy.py
+@@ -0,0 +1,55 @@
++"""Build-time policy selection; no runtime environment bypass is available."""
++
++import argparse
++import base64
++import json
++from pathlib import Path
++
++from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
++
++from malguard_cli.device_license import DOMAIN, license_path, windows_fingerprint
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser()
++    choice = parser.add_mutually_exclusive_group(required=True)
++    choice.add_argument("--test-device", action="store_true")
++    choice.add_argument("--public-key-file", type=Path)
++    args = parser.parse_args()
++    if args.test_device:
++        # Ephemeral CI signer is never the production release authority.
++        key = Ed25519PrivateKey.generate()
++        public = key.public_key().public_bytes_raw().hex()
++        payload = {"schema": 1, "product": "MalGuard", "app_version": "1.3.0",
++                   "fingerprint": windows_fingerprint()}
++        signature = key.sign(DOMAIN + json.dumps(payload, sort_keys=True,
++                                                separators=(",", ":")).encode())
++        path = license_path()
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(json.dumps({**payload, "signature": base64.b64encode(signature).decode()}),
++                        encoding="utf-8")
++        fixtures = Path(__file__).resolve().parents[2] / "desktop/license-test-fixtures"
++        fixtures.mkdir(parents=True, exist_ok=True)
++        wrong = {**payload, "fingerprint": "0" * 64}
++        wrong_signature = key.sign(DOMAIN + json.dumps(wrong, sort_keys=True,
++                                                      separators=(",", ":")).encode())
++        (fixtures / "wrong-device.json").write_text(json.dumps({
++            **wrong, "signature": base64.b64encode(wrong_signature).decode()
++        }), encoding="utf-8")
++        (fixtures / "tampered.json").write_text(json.dumps({
++            **wrong, "signature": base64.b64encode(signature).decode()
++        }), encoding="utf-8")
++    else:
++        public = args.public_key_file.read_text(encoding="ascii").strip()
++        assert len(public) == 64 and len(bytes.fromhex(public)) == 32
++    root = Path(__file__).resolve().parents[2]
++    (root / "malguard_cli/license_policy.py").write_text(
++        '"""Immutable private Windows release policy."""\n'
++        f'PRIVATE_LICENSE_PUBLIC_KEY_HEX: str | None = "{public}"\n'
++        'PRIVATE_APP_VERSION = "1.3.0"\n', encoding="utf-8"
++    )
++    print("Private policy configured; no private signing key stored in the build")
++
++
++if __name__ == "__main__":
++    main()
+--- a/packaging/online/install_iexpress.ps1
++++ b/packaging/online/install_iexpress.ps1
+@@ -104,6 +104,8 @@
+   foreach ($required in @('malguard-desktop.exe','engine/MalGuard.exe','engine/protect-install.ps1','uninstall.ps1','webview2-bootstrapper.exe')) {
+     if (-not (Test-Path -LiteralPath (Join-Path $stage $required) -PathType Leaf)) {throw ('Installer component missing: '+$required)}
+   }
++  $license=& (Join-Path $stage 'engine\MalGuard.exe') --license-status | ConvertFrom-Json
++  if ($LASTEXITCODE -ne 0 -or -not $license.authorized) {throw 'This private build is not authorized for this Windows device. / این نسخه برای این دستگاه مجوز ندارد.'}
+   $runtimeFound=$false
+   foreach ($runtimeKey in @('HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}','HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}','HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}')) {
+     $runtime=Get-ItemProperty -LiteralPath $runtimeKey -ErrorAction SilentlyContinue
+@@ -152,12 +154,12 @@
+   $uninstallKey='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MalGuard'
+   New-Item -Path $uninstallKey -Force | Out-Null
+   $uninstallCommand='"'+$powershell+'" -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $target 'uninstall.ps1')+'"'
+-  foreach ($entry in @{DisplayName='MalGuard / GTA Guard';DisplayVersion='1.2.0';Publisher='MalGuard';InstallLocation=$target;DisplayIcon=(Join-Path $target 'malguard-desktop.exe');UninstallString=$uninstallCommand;QuietUninstallString=($uninstallCommand+' -Quiet')}.GetEnumerator()) {
++  foreach ($entry in @{DisplayName='MalGuard / GTA Guard';DisplayVersion='1.3.0';Publisher='MalGuard';InstallLocation=$target;DisplayIcon=(Join-Path $target 'malguard-desktop.exe');UninstallString=$uninstallCommand;QuietUninstallString=($uninstallCommand+' -Quiet')}.GetEnumerator()) {
+     Set-ItemProperty -LiteralPath $uninstallKey -Name $entry.Key -Value $entry.Value
+   }
+   # Preserve the previous installation as a rollback copy instead of deleting
+   # files or reports that may have been added by the user.
+-  $result=@{schema=1;installed=$true;format='IExpress-PowerShell';version='1.2.0';target=$target;setupProcess64Bit=[Environment]::Is64BitProcess;previousInstallation=$(if ($replaced) {$backup} else {''});warning=$message}
++  $result=@{schema=1;installed=$true;format='IExpress-PowerShell';version='1.3.0';target=$target;setupProcess64Bit=[Environment]::Is64BitProcess;previousInstallation=$(if ($replaced) {$backup} else {''});warning=$message}
+   $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $target 'installation-result.json') -Encoding UTF8
+   if (-not $noLaunchMode) {Start-Process -FilePath (Join-Path $target 'malguard-desktop.exe') -WorkingDirectory $target}
+   if (-not $quietMode) {
+--- a/packaging/online/package_source.py
++++ b/packaging/online/package_source.py
+@@ -16,6 +16,8 @@
+     for folder in ("malguard_core", "malguard_cli", "tests", "rules", "data", "packaging",
+                    "desktop", "docs"):
+         for path in (root / folder).rglob("*"):
++            if path.relative_to(root).parts[:3] == ("desktop", "src-tauri", "gen"):
++                continue  # Platform ACL schemas are generated by tauri-build.
+             if path.is_file() and not any(part in {"__pycache__", "node_modules", "target", "engine"}
+                                           for part in path.relative_to(root).parts):
+                 if path.is_symlink():
+@@ -28,7 +30,7 @@
+             archive.write(path, path.relative_to(root).as_posix())
+     data = args.output.read_bytes()
+     manifest = {"sha256": hashlib.sha256(data).hexdigest(), "files": len(files), "bytes": len(data),
+-                "app_version": "1.2.0", "engine_version": "1.1.0", "cleanroom": True,
++                "app_version": "1.3.0", "engine_version": "1.2.0", "cleanroom": True,
+                 "synthetic_tests_only": True}
+     args.output.with_suffix(".json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+     print(json.dumps(manifest))
+--- a/packaging/online/seal_private_build.py
++++ b/packaging/online/seal_private_build.py
+@@ -0,0 +1,55 @@
++"""Encrypt the genuine Windows installer to the private delivery recipient."""
++
++import hashlib
++import json
++import os
++import struct
++from pathlib import Path
++
++from cryptography.hazmat.primitives import hashes
++from cryptography.hazmat.primitives.asymmetric import padding, rsa
++from cryptography.hazmat.primitives.ciphers.aead import AESGCM
++from cryptography.hazmat.primitives.serialization import load_pem_public_key
++
++
++def main() -> None:
++    source = os.environ["GITHUB_SHA"]
++    assert len(source) == 40 and len(bytes.fromhex(source)) == 20
++    root = Path("verified-desktop")
++    exe = root / "MalGuard-Online-Setup-x64.exe"
++    data = exe.read_bytes()
++    assert 1024 < len(data) <= 64 * 1024 * 1024 and data[:2] == b"MZ"
++    offset = struct.unpack_from("<I", data, 0x3C)[0]
++    assert 64 <= offset < len(data) - 4 and data[offset:offset + 4] == b"PE\x00\x00"
++    public = load_pem_public_key(Path(".private-build/delivery-recipient.pem").read_bytes())
++    assert isinstance(public, rsa.RSAPublicKey) and public.key_size >= 3072
++    key, nonce = os.urandom(32), os.urandom(12)
++    wrapped = public.encrypt(key, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),
++                                             algorithm=hashes.SHA256(), label=None))
++    aad = b"MalGuard private desktop 1.3.0:" + source.encode("ascii")
++    sealed = b"MGBUILD2" + struct.pack(">I", len(wrapped)) + wrapped + nonce + AESGCM(key).encrypt(
++        nonce, data, aad
++    )
++    (root / (exe.name + ".sealed")).write_bytes(sealed)
++    policy = Path("cleanroom-source/malguard_cli/license_policy.py").read_text(encoding="utf-8")
++    license_public = Path(".private-build/license-public.hex").read_text().strip()
++    assert f'"{license_public}"' in policy
++    manifest = {
++        "schema": 1, "status": "private-windows-build-verified", "app_version": "1.3.0",
++        "engine_version": "1.2.0", "source_commit": source,
++        "build": "MG-1.3.0-WIN64-" + source[:12], "filename": exe.name,
++        "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
++        "sealed_sha256": hashlib.sha256(sealed).hexdigest(),
++        "license_public_key": license_public, "requires_device_license": True,
++        "authenticode_signed": False, "run_id": os.environ["GITHUB_RUN_ID"],
++        "source_archive_sha256": hashlib.sha256(Path("cleanroom-v1/source.zip").read_bytes()).hexdigest(),
++    }
++    (root / "private-release.json").write_text(json.dumps(manifest, indent=2) + "\n")
++    exe.unlink()
++    for name in ("setup-stdout.txt", "setup-stderr.txt"):
++        (root / name).unlink(missing_ok=True)
++    print("Verified installer encrypted; only ciphertext and test evidence may be published")
++
++
++if __name__ == "__main__":
++    main()
+--- a/packaging/online/test_frozen_license.ps1
++++ b/packaging/online/test_frozen_license.ps1
+@@ -0,0 +1,24 @@
++param([Parameter(Mandatory=$true)][string]$Engine, [Parameter(Mandatory=$true)][string]$Output)
++$ErrorActionPreference='Stop'
++$license=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'MalGuard/Licenses/desktop-1.3.0.json'
++$original=[IO.File]::ReadAllBytes($license)
++$checks=@()
++try {
++  $status=& $Engine --license-status | ConvertFrom-Json
++  if ($LASTEXITCODE -ne 0 -or -not $status.authorized -or -not $status.private_build) {throw 'Authorized private frozen engine failed'}
++  $checks+=@{name='signed-same-device-accepted';passed=$true}
++  foreach ($case in @(@{file='wrong-device.json';reason='DEVICE_MISMATCH'},@{file='tampered.json';reason='LICENSE_SIGNATURE_INVALID'})) {
++    Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('../../desktop/license-test-fixtures/'+$case.file)) -Destination $license -Force
++    $status=& $Engine --license-status | ConvertFrom-Json
++    if ($LASTEXITCODE -ne 78 -or $status.authorized -or $status.reason -ne $case.reason) {throw ('Invalid license accepted: '+$case.file)}
++    $checks+=@{name=$case.reason;passed=$true}
++  }
++  Remove-Item -LiteralPath $license
++  foreach ($mode in @('--license-status','--self-test','--refresh-security','--malguard-worker')) {
++    $text=& $Engine $mode
++    if ($LASTEXITCODE -ne 78) {throw ('Missing license did not block: '+$mode)}
++    $checks+=@{name=('missing-license-blocks-'+$mode);passed=$true}
++  }
++} finally {[IO.File]::WriteAllBytes($license,$original)}
++@{checks=$checks;passed=$checks.Count;failed=0} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Output -Encoding UTF8
++exit 0
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@
+ 
+ [project]
+ name = "malguard"
+-version = "1.1.0"
++version = "1.2.0"
+ description = "Defensive static analysis of GTA V mods with authenticated online intelligence"
+ requires-python = ">=3.12,<3.13"
+ dependencies = [
+--- a/tests/desktop/browser.mjs
++++ b/tests/desktop/browser.mjs
+@@ -0,0 +1,538 @@
++/** Real Chromium UI + real installed Python engine. Only native picker, IPC,
++ *  cache location and save dialog are substituted; no sample is executed.
++ *  PLAYWRIGHT_MODULE must point to an installed pinned Playwright module.
++ */
++import assert from "node:assert/strict";
++import fs from "node:fs/promises";
++import path from "node:path";
++import os from "node:os";
++import http from "node:http";
++import { spawn } from "node:child_process";
++import { fileURLToPath, pathToFileURL } from "node:url";
++const root = path.resolve(
++  path.dirname(fileURLToPath(import.meta.url)),
++  "../..",
++);
++const output = path.resolve(
++  process.env.MALGUARD_QA_OUTPUT ||
++    path.join(os.tmpdir(), "malguard-desktop-qa"),
++);
++const python = process.env.MALGUARD_PYTHON || "python";
++const feed = process.env.MALGUARD_QA_FEED;
++if (!feed || !process.env.PLAYWRIGHT_MODULE)
++  throw new Error("Set MALGUARD_QA_FEED and PLAYWRIGHT_MODULE");
++const { chromium } = await import(
++  pathToFileURL(process.env.PLAYWRIGHT_MODULE).href
++);
++await fs.mkdir(output, { recursive: true });
++const cache = path.join(output, "cache");
++await fs.mkdir(cache, { recursive: true, mode: 0o700 });
++await fs.chmod(cache, 0o700);
++await fs.copyFile(feed, path.join(cache, "latest.json"));
++const fixtures = path.join(output, "fixtures");
++await fs.mkdir(fixtures, { recursive: true });
++for (const [name, data] of [
++  [
++    "notes.txt",
++    'Plain text fixture.\npassword="private-value-12345678"\nHello.',
++  ],
++  ["fake.asi", "Harmless plain text, not a plugin."],
++  ["mod.lua", "print('harmless fixture')"],
++  [
++    "attack-text.txt",
++    "<img src=x onerror=globalThis.compromised=true>\n<script>alert(1)</script>",
++  ],
++  [
++    "harmful.bin",
++    "Login Data\0Local State\0password_value\0CryptUnprotectData\0HttpSendRequest\0POST\0",
++  ],
++])
++  await fs.writeFile(path.join(fixtures, name), data);
++await fs.writeFile(
++  path.join(fixtures, "sound.wav"),
++  Buffer.concat([
++    Buffer.from("RIFF"),
++    Buffer.from([196, 0, 0, 0]),
++    Buffer.from("WAVEfmt "),
++    Buffer.alloc(188),
++  ]),
++);
++const cli =
++  "from pathlib import Path; import sys; from malguard_cli import desktop; from malguard_core.updates import load_cached; desktop.load_cached=lambda:load_cached(Path(sys.argv[1])); raise SystemExit(desktop.main(sys.argv[2:]))";
++let page,
++  chosen = "notes.txt",
++  gate = null,
++  lastScan = null;
++const stages = [],
++  results = [],
++  errors = [];
++let savedCard = null,
++  savedReport = null,
++  tests = 0;
++const check = (value, message) => {
++  assert.ok(value, message);
++  tests++;
++};
++async function engine(mode, file, scanId) {
++  return await new Promise((resolve, reject) => {
++    const child = spawn(
++      python,
++      ["-I", "-c", cli, cache, mode, ...(file ? [file] : [])],
++      { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
++    );
++    let stdout = "",
++      stderr = "",
++      pending = "";
++    child.stdout.on("data", (data) => (stdout += data));
++    child.stderr.on("data", (data) => {
++      stderr += data;
++      pending += data;
++      const lines = pending.split("\n");
++      pending = lines.pop();
++      for (const line of lines) {
++        try {
++          const event = JSON.parse(line);
++          if (event.event === "scan_stage") {
++            stages.push({ scanId, stage: event.stage });
++            page
++              ?.evaluate((payload) => window.__emitScan(payload), {
++                scanId,
++                stage: event.stage,
++              })
++              .catch(() => {});
++          }
++        } catch {}
++      }
++    });
++    child.on("error", reject);
++    child.on("exit", (code) => {
++      if (code) reject(new Error(stderr || "Engine failed"));
++      else
++        try {
++          resolve(JSON.parse(stdout));
++        } catch (error) {
++          reject(error);
++        }
++    });
++  });
++}
++const server = http.createServer(async (req, res) => {
++  const name = new URL(req.url, "http://localhost").pathname;
++  const files = {
++    "/": "index.html",
++    "/app.css": "app.css",
++    "/app.js": "app.js",
++  };
++  if (!files[name]) {
++    res.writeHead(404);
++    res.end();
++    return;
++  }
++  res.setHeader(
++    "Content-Type",
++    name.endsWith(".js")
++      ? "text/javascript"
++      : name.endsWith(".css")
++        ? "text/css"
++        : "text/html",
++  );
++  res.setHeader(
++    "Content-Security-Policy",
++    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
++  );
++  res.end(await fs.readFile(path.join(root, "desktop/ui", files[name])));
++});
++await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
++const url = "http://127.0.0.1:" + server.address().port;
++const browser = await chromium.launch({
++  executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
++  headless: true,
++});
++try {
++  const context = await browser.newContext({
++    viewport: { width: 1120, height: 900 },
++  });
++  page = await context.newPage();
++  page.on("pageerror", (e) => errors.push(String(e)));
++  page.on("dialog", async (dialog) => {
++    errors.push("Unexpected dialog: " + dialog.message());
++    await dialog.dismiss();
++  });
++  await page.route("**/*", (route) =>
++    route.request().url().startsWith(url) ? route.continue() : route.abort(),
++  );
++  await page.exposeBinding("__nativeInvoke", async (_source, name, args) => {
++    if (name === "release_info") return { build: "MG-1.3.0-WIN64-development" };
++    if (name === "security_status") return engine("--security-status");
++    if (name === "choose_file") return path.join(fixtures, chosen);
++    if (name === "refresh_security") return null;
++    if (name === "scan_selected") {
++      if (gate) await gate.promise;
++      lastScan = await engine(
++        "--desktop-scan",
++        path.join(fixtures, chosen),
++        args.scanId,
++      );
++      results.push({
++        file: chosen,
++        verdict: lastScan.report.verdict,
++        type: lastScan.file_inspection.detected_type,
++        scope: lastScan.file_inspection.scope_state,
++      });
++      return lastScan;
++    }
++    if (name === "save_report") {
++      savedReport = lastScan;
++      await fs.writeFile(
++        path.join(output, "report.json"),
++        JSON.stringify(savedReport, null, 2),
++      );
++      return true;
++    }
++    if (name === "save_card") {
++      savedCard = Buffer.from(args.bytes);
++      await fs.writeFile(path.join(output, "report-card.png"), savedCard);
++      return true;
++    }
++    throw new Error("Unknown command " + name);
++  });
++  await page.addInitScript(() => {
++    const listeners = [];
++    window.__emitScan = (payload) => listeners.forEach((fn) => fn({ payload }));
++    window.__TAURI__ = {
++      core: { invoke: (name, args) => window.__nativeInvoke(name, args) },
++      event: {
++        listen: async (name, fn) => {
++          if (name !== "scan-progress") throw new Error("Unknown event");
++          listeners.push(fn);
++          return () => {};
++        },
++      },
++    };
++  });
++  await page.goto(url);
++  await page.waitForFunction(() =>
++    document.getElementById("updateStatus").textContent.includes("SHA-256"),
++  );
++  check((await page.getAttribute("html", "lang")) === "en", "English default");
++  check(
++    (await page.textContent("#updateStatus")).includes("1,342"),
++    "Real verified 1342 records",
++  );
++  await page.locator(".update-details summary").click();
++  check(
++    (await page.textContent("#updateFacts")).includes(
++      "malguard-online-2026-10",
++    ),
++    "Pinned signer exposed",
++  );
++  check(
++    (await page.textContent(".update-details")).includes("Windows local time"),
++    "Schedule explains local time",
++  );
++  await page.locator(".update-details summary").click();
++  await page.screenshot({
++    path: path.join(output, "ready-en.png"),
++    fullPage: true,
++    animations: "disabled",
++  });
++  await page.click("#chooseButton");
++  gate = {};
++  gate.promise = new Promise((resolve) => (gate.resolve = resolve));
++  await page.click("#scanButton");
++  await page.waitForFunction(
++    () => document.getElementById("scanShell").dataset.phase === "scanning",
++  );
++  check(await page.isDisabled("#chooseButton"), "No selection races");
++  check(
++    (await page.textContent("#progressStage")) === "Starting local engine",
++    "No fabricated stage before engine telemetry",
++  );
++  await page.evaluate(() =>
++    window.__emitScan({ scanId: "old-scan", stage: "pe" }),
++  );
++  check(
++    (await page.textContent("#progressStage")) === "Starting local engine",
++    "Stale progress ignored",
++  );
++  await page.screenshot({
++    path: path.join(output, "scanning-en.png"),
++    fullPage: true,
++    animations: "disabled",
++  });
++  gate.resolve();
++  gate = null;
++  await page.waitForFunction(
++    () => document.getElementById("scanShell").dataset.phase === "complete",
++  );
++  check(lastScan.report.verdict === "INCONCLUSIVE", "Plain text never SAFE");
++  check(await page.isVisible("#fileWarning"), "Specific red warning");
++  check(
++    (await page.textContent("#warningFacts")).includes("Plain text"),
++    "Byte type in warning",
++  );
++  check(
++    (await page.textContent("#riskGauge")).includes("Unknown"),
++    "Unmeasured risk is unknown",
++  );
++  check(
++    (await page.locator("#riskGauge .gauge-needle").count()) === 0,
++    "Unknown is not a false zero needle",
++  );
++  check(
++    stages.some((x) => x.stage === "strings") &&
++      !stages.some((x) => x.stage === "pe"),
++    "Only actual applicable stages emitted",
++  );
++  await page.screenshot({
++    path: path.join(output, "text-result-en.png"),
++    fullPage: true,
++    animations: "disabled",
++  });
++  await page.click("#detailsButton");
++  check(
++    (await page.getAttribute("#detailsButton", "aria-expanded")) === "true",
++    "Card flips open",
++  );
++  check(
++    await page.evaluate(() => document.getElementById("resultFront").inert),
++    "Hidden face cannot receive focus",
++  );
++  check(
++    !(await page.textContent("#contentPreview")).includes("private-value"),
++    "Secrets redacted",
++  );
++  check(
++    (await page.textContent("#contentPreview")).includes("[REDACTED]"),
++    "Redaction visible",
++  );
++  await page.screenshot({
++    path: path.join(output, "card-en.png"),
++    fullPage: true,
++    animations: "disabled",
++  });
++  await page.click("#downloadCard");
++  await page.waitForFunction(() =>
++    document.getElementById("scanStatus").textContent.includes("PNG"),
++  );
++  check(
++    savedCard
++      .subarray(0, 8)
++      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
++    "Real PNG saved",
++  );
++  check(
++    savedCard.readUInt32BE(16) === 1200 && savedCard.readUInt32BE(20) <= 2600,
++    "Bounded card dimensions",
++  );
++  await page.click("#saveButton");
++  check(
++    savedReport.file_inspection.scope_state === "unsupported",
++    "Full JSON includes byte description",
++  );
++  await page.selectOption("#languageSelect", "fa");
++  check((await page.getAttribute("html", "dir")) === "rtl", "Persian RTL");
++  check(
++    (await page.textContent("#cardVerdict")).includes("خارج از پوشش"),
++    "Localized accurate verdict",
++  );
++  await page.screenshot({
++    path: path.join(output, "card-fa.png"),
++    fullPage: true,
++    animations: "disabled",
++  });
++  await page.click("#downloadCard");
++  await page.waitForFunction(
++    () => !document.getElementById("downloadCard").disabled,
++  );
++  await fs.copyFile(
++    path.join(output, "report-card.png"),
++    path.join(output, "report-card-fa.png"),
++  );
++  await page.click("#backButton");
++  check(
++    (await page.getAttribute("#detailsButton", "aria-expanded")) === "false",
++    "Card returns to compact result",
++  );
++  for (const [file, type, verdict] of [
++    ["fake.asi", "TEXT", "INVALID"],
++    ["sound.wav", "WAVE_AUDIO", "INCONCLUSIVE"],
++    ["mod.lua", "LUA_SOURCE", "SAFE"],
++    ["harmful.bin", "UNKNOWN", "MALICIOUS"],
++    ["attack-text.txt", "TEXT", "INCONCLUSIVE"],
++  ]) {
++    chosen = file;
++    await page.click("#chooseButton");
++    check(
++      (await page.getAttribute("#scanShell", "data-phase")) === "ready",
++      "New selection clears previous result",
++    );
++    await page.click("#scanButton");
++    await page.waitForFunction(
++      () => document.getElementById("scanShell").dataset.phase === "complete",
++      {},
++      { timeout: 30000 },
++    );
++    check(lastScan.report.verdict === verdict, file + " actual verdict");
++    check(
++      lastScan.file_inspection.detected_type === type,
++      file + " actual type",
++    );
++    if (verdict === "SAFE") {
++      check(
++        await page.isHidden("#fileWarning"),
++        "Valid supported script has no unsupported warning",
++      );
++      check(
++        (await page.locator("#riskGauge .gauge-needle").count()) === 1,
++        "Measured evidence score uses needle",
++      );
++    }
++    if (file === "sound.wav")
++      check(
++        (await page.textContent("#warningReason")).includes("سرآیند"),
++        "Audio header limitation explained",
++      );
++    if (file === "harmful.bin") {
++      check(lastScan.report.risk_score > 0, "Real malicious score retained");
++      await page.click("#detailsButton");
++      check(
++        (await page.textContent("#evidenceList")).includes(
++          lastScan.report.evidence[0].rule_id,
++        ),
++        "Evidence identifiers retained",
++      );
++      await page.screenshot({
++        path: path.join(output, "malicious-card-fa.png"),
++        fullPage: true,
++        animations: "disabled",
++      });
++      await page.click("#backButton");
++    }
++    if (file === "attack-text.txt") {
++      await page.click("#detailsButton");
++      check(
++        (await page.locator("#contentPreview img").count()) === 0,
++        "Sample markup displayed only as text",
++      );
++      check(
++        !(await page.evaluate(() => window.compromised)),
++        "No sample script execution",
++      );
++      await page.click("#backButton");
++    }
++  }
++  await page.setViewportSize({ width: 700, height: 800 });
++  await page.screenshot({
++    path: path.join(output, "compact-fa.png"),
++    fullPage: true,
++    animations: "disabled",
++  });
++  check(
++    await page.evaluate(
++      () => document.documentElement.scrollWidth <= innerWidth,
++    ),
++    "No minimum-window horizontal overflow",
++  );
++  await page.emulateMedia({ reducedMotion: "reduce" });
++  chosen = "mod.lua";
++  await page.click("#chooseButton");
++  await page.click("#scanButton");
++  await page.waitForFunction(
++    () => document.getElementById("scanShell").dataset.phase === "complete",
++  );
++  await page.click("#detailsButton");
++  check(
++    await page.isVisible("#reportCard"),
++    "Card accessible with reduced motion",
++  );
++  check(
++    (await page.evaluate(
++      () =>
++        getComputedStyle(document.getElementById("reportFlip"))
++          .transitionDuration,
++    )) === "0s",
++    "Reduced motion respected",
++  );
++  const corrupted = JSON.parse(
++    await fs.readFile(path.join(cache, "latest.json"), "utf8"),
++  );
++  corrupted.signature_b64 = Buffer.alloc(64).toString("base64");
++  await fs.writeFile(
++    path.join(cache, "latest.json"),
++    JSON.stringify(corrupted),
++  );
++  await page.click("#statusButton");
++  await page.waitForFunction(
++    () => !document.getElementById("statusButton").disabled,
++  );
++  check(
++    !(await page.textContent("#updateStatus")).includes("1,342"),
++    "Invalid signature cannot retain a verified count",
++  );
++  check(
++    (await page.textContent("#updateStatus")).includes("تأییدشده"),
++    "Missing authenticated cache is explained",
++  );
++  await page.click("#chooseButton");
++  await page.click("#scanButton");
++  await page.waitForFunction(
++    () => document.getElementById("scanShell").dataset.phase === "complete",
++  );
++  check(
++    lastScan.report.verdict === "INCONCLUSIVE",
++    "Tampered online cache blocks SAFE for a benign supported script",
++  );
++  check(
++    !lastScan.updates.signature_verified,
++    "Bad signature is never reported as verified",
++  );
++  check(
++    (await page.locator("#riskGauge .gauge-needle").count()) === 0,
++    "Missing trust uses an unknown gauge",
++  );
++  await fs.copyFile(feed, path.join(cache, "latest.json"));
++  chosen = "removed-before-scan.txt";
++  await page.click("#chooseButton");
++  await page.click("#scanButton");
++  await page.waitForFunction(
++    () => document.getElementById("scanShell").dataset.phase === "complete",
++  );
++  check(
++    lastScan.report.verdict === "INCONCLUSIVE",
++    "Unavailable file receives no approval",
++  );
++  check(
++    lastScan.file_inspection.size_known === false,
++    "Unread file size is unknown, not invented zero",
++  );
++  check(
++    (await page.textContent("#warningFacts")).includes("نامشخص"),
++    "Unknown size is explained in the warning",
++  );
++  check(
++    errors.length === 0,
++    "No JavaScript errors or unexpected dialogs: " + errors.join("; "),
++  );
++  await fs.writeFile(
++    path.join(output, "browser-results.json"),
++    JSON.stringify(
++      {
++        checks: tests,
++        engine: "actual installed Python scanner",
++        native: "picker, IPC, cache path and save dialog substituted",
++        results,
++        stages,
++        errors,
++      },
++      null,
++      2,
++    ),
++  );
++  console.log(
++    JSON.stringify({ checks: tests, results, errors, output }, null, 2),
++  );
++} finally {
++  await browser.close();
++  await new Promise((resolve) => server.close(resolve));
++}
+--- a/tests/security/test_online_updates.py
++++ b/tests/security/test_online_updates.py
+@@ -50,6 +50,7 @@
+     state = ProtectedEpochState(tmp_path / "epochs")
+     status = install(data, directory, state)
+     assert status.fresh and status.record_count == 1
++    assert status.signature_verified and status.created_at and status.key_id == "malguard-online-2026-10"
+     bundle, status = load_cached(directory)
+     sample = tmp_path / "broken.asi"
+     sample.write_bytes(content)
+@@ -126,6 +127,7 @@
+     directory.mkdir(mode=0o700)
+     (directory / "latest.json").write_text('{"allowlist":["any"]}')
+     assert not load_cached(directory)[1].available
++    assert not load_cached(directory)[1].signature_verified
+ 
+ 
+ def test_stale_online_analysis_blocks_safe_but_retains_malicious(tmp_path):
+--- a/tests/unit/test_device_license.py
++++ b/tests/unit/test_device_license.py
+@@ -0,0 +1,101 @@
++"""Private release authorization uses only signed, bounded device licenses."""
++
++import base64
++import json
++
++import pytest
++from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
++
++from malguard_cli import device_license, frozen
++
++FINGERPRINT = "a" * 64
++
++
++def signed_license(key, **updates):
++    payload = {"schema": 1, "product": "MalGuard", "app_version": "1.3.0",
++               "fingerprint": FINGERPRINT}
++    payload.update(updates)
++    message = device_license.DOMAIN + json.dumps(
++        payload, sort_keys=True, separators=(",", ":")
++    ).encode()
++    return json.dumps({**payload, "signature": base64.b64encode(key.sign(message)).decode()}).encode()
++
++
++def test_signed_license_accepts_only_the_named_device():
++    key = Ed25519PrivateKey.generate()
++    data = signed_license(key)
++    public = key.public_key().public_bytes_raw().hex()
++    device_license.verify_license(data, public, FINGERPRINT)
++    with pytest.raises(device_license.LicenseError, match="DEVICE_MISMATCH"):
++        device_license.verify_license(data, public, "b" * 64)
++
++
++def test_fingerprint_replacement_and_another_signer_are_rejected():
++    key = Ed25519PrivateKey.generate()
++    public = key.public_key().public_bytes_raw().hex()
++    data = signed_license(key).replace(FINGERPRINT.encode(), b"b" * 64)
++    with pytest.raises(device_license.LicenseError, match="SIGNATURE_INVALID"):
++        device_license.verify_license(data, public, "b" * 64)
++    with pytest.raises(device_license.LicenseError, match="SIGNATURE_INVALID"):
++        device_license.verify_license(signed_license(Ed25519PrivateKey.generate()), public,
++                                     FINGERPRINT)
++
++
++@pytest.mark.parametrize("updates", [
++    {"schema": True}, {"app_version": "1.2.0"}, {"product": "other"},
++    {"fingerprint": "A" * 64}, {"fingerprint": "short"}, {"extra": "field"},
++])
++def test_signed_but_wrong_schema_or_version_is_rejected(updates):
++    key = Ed25519PrivateKey.generate()
++    with pytest.raises(device_license.LicenseError, match="LICENSE_INVALID"):
++        device_license.verify_license(signed_license(key, **updates),
++                                     key.public_key().public_bytes_raw().hex(), FINGERPRINT)
++
++
++@pytest.mark.parametrize("data", [b"{}", b"null", b"\xff", b"x" * 4097,
++                                  b'{"schema":1,"schema":1}', b'{"signature":"!"}'])
++def test_malformed_oversized_or_ambiguous_license_is_rejected(data):
++    key = Ed25519PrivateKey.generate()
++    with pytest.raises(device_license.LicenseError):
++        device_license.verify_license(data, key.public_key().public_bytes_raw().hex(), FINGERPRINT)
++
++
++def test_missing_private_license_cannot_scan_refresh_evaluate_or_launch_worker(monkeypatch, tmp_path,
++                                                                             capsys):
++    key = Ed25519PrivateKey.generate()
++    monkeypatch.setattr(device_license, "PRIVATE_LICENSE_PUBLIC_KEY_HEX",
++                        key.public_key().public_bytes_raw().hex())
++    monkeypatch.setattr(device_license, "windows_fingerprint", lambda: FINGERPRINT)
++    monkeypatch.setattr(device_license, "license_path", lambda: tmp_path / "missing.json")
++    for args in ([], ["--desktop-scan", "sample.lua"], ["--self-test"],
++                 ["--refresh-security"], ["--evaluate"], ["--license-status"]):
++        assert frozen.main(args) == 78
++        assert json.loads(capsys.readouterr().out) == {
++            "private_build": True, "authorized": False, "reason": "LICENSE_MISSING"
++        }
++    assert frozen.main(["--malguard-worker"]) == 78
++    assert not capsys.readouterr().out
++
++
++def test_private_status_returns_no_machine_identifier(monkeypatch, tmp_path):
++    key = Ed25519PrivateKey.generate()
++    path = tmp_path / "license.json"
++    path.write_bytes(signed_license(key))
++    monkeypatch.setattr(device_license, "PRIVATE_LICENSE_PUBLIC_KEY_HEX",
++                        key.public_key().public_bytes_raw().hex())
++    monkeypatch.setattr(device_license, "windows_fingerprint", lambda: FINGERPRINT)
++    monkeypatch.setattr(device_license, "license_path", lambda: path)
++    assert device_license.authorization() == {
++        "private_build": True, "authorized": True, "reason": "DEVICE_AUTHORIZED"
++    }
++    path.write_bytes(b"x" * 4097)
++    assert device_license.authorization()["authorized"] is False
++
++
++def test_environment_has_no_license_or_machine_override(monkeypatch, tmp_path):
++    monkeypatch.setattr(device_license, "PRIVATE_LICENSE_PUBLIC_KEY_HEX", "0" * 64)
++    monkeypatch.setattr(device_license, "windows_fingerprint", lambda: "b" * 64)
++    monkeypatch.setattr(device_license, "license_path", lambda: tmp_path / "missing.json")
++    monkeypatch.setenv("MALGUARD_LICENSE_BYPASS", "1")
++    monkeypatch.setenv("MALGUARD_DEVICE_FINGERPRINT", FINGERPRINT)
++    assert device_license.authorization()["authorized"] is False
+--- a/tests/unit/test_file_inspection.py
++++ b/tests/unit/test_file_inspection.py
+@@ -0,0 +1,174 @@
++"""Actual byte identification, honest scope, snapshot identity and telemetry."""
++
++import hashlib
++import io
++import zipfile
++
++import pytest
++
++from malguard_core.api.scanner import Scanner
++from malguard_core.intake import identify, type_mismatch_evidence
++from malguard_core.intake.description import describe
++from malguard_core.model import ArtifactStatus, Verdict
++from tests.unit.test_foundation import synthetic_pe
++
++
++@pytest.mark.parametrize(('content', 'kind'), [
++    (b'RIFF'+bytes(4)+b'WAVEfmt ', 'WAVE_AUDIO'),
++    (b'ID3'+bytes(20), 'ID3_AUDIO_METADATA'),
++    (b'\xff\xfb\x90\x00'+bytes(12), 'MPEG_AUDIO'),
++    (b'fLaC'+bytes(10), 'FLAC_AUDIO'),
++    (b'OggS'+bytes(10), 'OGG_MEDIA'),
++    (bytes(4)+b'ftypisom'+bytes(10), 'ISO_BASE_MEDIA'),
++    (b'\x89PNG\r\n\x1a\n'+bytes(10), 'PNG_IMAGE'),
++    (b'\xff\xd8\xff'+bytes(10), 'JPEG_IMAGE'),
++    (b'GIF89a'+bytes(10), 'GIF_IMAGE'),
++    (b'RIFF'+bytes(4)+b'WEBP'+bytes(10), 'WEBP_IMAGE'),
++    (b'%PDF-1.7\n', 'PDF_DOCUMENT'),
++])
++def test_content_headers_override_misleading_mod_extension(content, kind):
++    identity = identify(content, '.asi')
++    assert identity['true_type'] == kind
++    assert identity['structure_status'] == ArtifactStatus.MALFORMED
++    info = describe(identity, 'sample.asi', len(content), True)
++    assert info['scope_state'] == 'mismatch'
++    assert info['header_only']
++    assert not info['preview']
++
++
++@pytest.mark.parametrize('extension', ['.txt', '.wav', '.mp3', '.bin'])
++def test_plain_text_is_described_from_bytes_and_never_approved_as_mod(tmp_path, extension):
++    content = 'سلام، این یک متن آزمایشی است.\n'.encode()
++    path = tmp_path / ('sample'+extension)
++    path.write_bytes(content)
++    with Scanner() as scanner:
++        report = scanner.scan_file(path)
++        info = scanner.file_inspection
++    assert report.verdict == Verdict.INCONCLUSIVE
++    assert report.coverage_score < 100
++    assert info['detected_type'] == 'TEXT'
++    assert info['scope_state'] == 'unsupported'
++    assert info['file_size'] == len(content)
++    assert 'سلام' in info['preview']
++    assert report.hashes.sha256 == hashlib.sha256(content).hexdigest()
++
++
++@pytest.mark.parametrize('extension', ['.asi', '.dll', '.zip', '.7z', '.rar'])
++def test_text_claiming_plugin_or_archive_gets_specific_mismatch(tmp_path, extension):
++    path = tmp_path / ('fake'+extension)
++    path.write_text('A harmless plain text description.')
++    with Scanner() as scanner:
++        report = scanner.scan_file(path)
++        assert scanner.file_inspection['scope_state'] == 'mismatch'
++    assert report.verdict == Verdict.INVALID
++
++
++def test_multibyte_character_split_at_prefix_boundary_is_still_text():
++    content = b'a'*8191+'سلام'.encode()
++    identity = identify(content, '.txt')
++    assert identity['true_type'] == 'TEXT'
++    assert identity['preview_bytes'] == 8192
++    assert len(describe(identity, 'notes.txt', len(content), True)['preview']) == 320
++
++
++@pytest.mark.parametrize('encoding', ['utf-16', 'utf-16le', 'utf-16be'])
++def test_unicode_preview_and_secrets_are_bounded_and_redacted(encoding):
++    content = ('password="private-value-12345678"\nhello\u202efile.txt\n'+'x'*9000).encode(encoding)
++    info = describe(identify(content, '.txt'), 'x\u202etest.txt', len(content), True)
++    assert 'private-value' not in info['preview']
++    assert '[REDACTED]' in info['preview']
++    assert '\u202e' not in info['preview']
++    assert '\\u202e' in info['filename']
++    assert info['preview_bytes'] <= 8192
++
++
++def test_description_and_hash_use_same_snapshot_despite_original_change(tmp_path):
++    path = tmp_path / 'sample.txt'
++    original = b'original captured content'
++    path.write_bytes(original)
++    def mutate(stage):
++        if stage == 'reputation':
++            path.write_bytes(b'changed original file')
++    with Scanner(progress=mutate) as scanner:
++        report = scanner.scan_file(path)
++        assert scanner.file_inspection['preview'] == original.decode()
++    assert report.hashes.sha256 == hashlib.sha256(original).hexdigest()
++
++
++def test_observer_failure_cannot_change_verdict_and_no_fake_pe_stage(tmp_path):
++    path = tmp_path / 'mod.lua'
++    path.write_text("print('harmless')")
++    seen = []
++    def observer(stage):
++        seen.append(stage)
++        raise RuntimeError('UI observer unavailable')
++    with Scanner(progress=observer) as scanner:
++        report = scanner.scan_file(path)
++    assert report.verdict == Verdict.SAFE
++    assert seen[0] == 'capture' and seen[-1] == 'finalizing'
++    assert 'script' in seen and 'rules' in seen
++    assert not {'pe', 'dotnet', 'archive'} & set(seen)
++
++
++def test_reuse_resets_inspection_after_missing_file(tmp_path):
++    path = tmp_path / 'test.txt'
++    path.write_text('test')
++    with Scanner() as scanner:
++        scanner.scan_file(path)
++        path.unlink()
++        report = scanner.scan_file(path)
++        assert scanner.file_inspection['scope_state'] == 'unavailable'
++        assert not scanner.file_inspection['size_known']
++        assert not scanner.file_inspection['preview']
++    assert report.verdict == Verdict.INCONCLUSIVE
++
++
++def test_archive_readme_does_not_block_supported_package(tmp_path):
++    stream = io.BytesIO()
++    with zipfile.ZipFile(stream, 'w') as archive:
++        archive.writestr('mod.lua', "print('harmless')")
++        archive.writestr('README.txt', 'Harmless installation notes')
++    path = tmp_path / 'mod.zip'
++    path.write_bytes(stream.getvalue())
++    with Scanner() as scanner:
++        report = scanner.scan_file(path)
++        assert scanner.file_inspection['scope_state'] == 'supported'
++    assert report.verdict == Verdict.SAFE
++
++
++def test_media_disguised_executable_retains_evidence(tmp_path):
++    content = synthetic_pe()
++    identity = identify(content, '.mp3')
++    assert identity['is_pe']
++    assert type_mismatch_evidence(identity, 'sample.mp3', 'x'*64)
++    path = tmp_path / 'sample.mp3'
++    path.write_bytes(content)
++    with Scanner() as scanner:
++        assert scanner.scan_file(path).verdict != Verdict.SAFE
++
++
++def test_empty_file_is_not_identified_as_useful_text(tmp_path):
++    path = tmp_path / 'empty.txt'
++    path.touch()
++    with Scanner() as scanner:
++        assert scanner.scan_file(path).verdict == Verdict.INCONCLUSIVE
++        assert scanner.file_inspection['label_en'] == 'Empty file'
++        assert scanner.file_inspection['scope_state'] == 'empty'
++
++
++def test_short_unquoted_credentials_are_redacted_from_preview():
++    content = b'password=abc\nauthorization=Basic YTo=\napi_key=xyz'
++    info = describe(identify(content, '.txt'), 'notes.txt', len(content), True)
++    assert 'abc' not in info['preview']
++    assert 'YTo=' not in info['preview']
++    assert 'xyz' not in info['preview']
++    assert info['preview'].count('[REDACTED]') == 3
++
++
++def test_secret_crossing_preview_edge_is_redacted_before_truncation():
++    token = 'a'*24+'.'+'b'*6+'.'+'c'*27
++    content = ('readme '*41+token+'\n').encode()
++    info = describe(identify(content, '.txt'), 'notes.txt', len(content), True)
++    assert '[REDACTED]' in info['preview']
++    assert 'a'*24 not in info['preview']
++    assert len(info['preview']) <= 320
