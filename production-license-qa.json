@@ -1,0 +1,7 @@
+{
+  "failed": 0,
+  "passed": 6,
+  "production_uses_ci_signer": false,
+  "installation_denied": true,
+  "requires_owner_license": true
+}

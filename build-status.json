@@ -1,1 +1,7 @@
-{"schema":1,"result":"awaiting-build","app_version":"1.3.0","plaintext_installer_published":false}
+{
+  "schema": 1,
+  "result": "success",
+  "windows_runner": "windows-2025",
+  "source_commit": "5c8f84dec75c0332c23a91ad62e274e1d680da1b",
+  "run_id": "37651686039"
+}

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "status": "private-windows-build-verified",
+  "app_version": "1.3.0",
+  "engine_version": "1.2.0",
+  "source_commit": "5c8f84dec75c0332c23a91ad62e274e1d680da1b",
+  "build": "MG-1.3.0-WIN64-5c8f84dec75c",
+  "filename": "MalGuard-Online-Setup-x64.exe",
+  "size": 34263040,
+  "sha256": "4d319c327b687395df8887ad8219507aa62967b9be808e5b745244e04663e50a",
+  "sealed_sha256": "c3b0fb9039744fa24eec9b0ee4927fee979cbdccc04a232773d88507670755a3",
+  "license_public_key": "73b81b0f639c2237e4db6c560d04611318a24616d6d05ed7f95425286c505733",
+  "requires_device_license": true,
+  "authenticode_signed": false,
+  "run_id": "37651686039",
+  "source_archive_sha256": "fe5895d84b4808c4df3fc877e72346e98ebb305eb047f00d1cbe22a0b23a3486"
+}
