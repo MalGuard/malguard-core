@@ -1,7 +1,7 @@
 {
+  "run_id": "37783511896",
+  "windows_runner": "windows-2025",
+  "source_commit": "22511e7870347733b982262eb9efe7f1430a0f4e",
   "schema": 1,
-  "run_id": "37782014188",
-  "source_commit": "45d48d9af826cbd1378cf17fb79a72a2c1a892d6",
-  "result": "failure",
-  "windows_runner": "windows-2025"
+  "result": "success"
 }

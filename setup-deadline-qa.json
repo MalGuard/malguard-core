@@ -1,0 +1,11 @@
+﻿{
+    "checks":  [
+                   "actual-install-stage-serialization",
+                   "completed-engine-result",
+                   "bounded-update-timeout",
+                   "timed-out-child-terminated",
+                   "temporary-output-cleaned"
+               ],
+    "failed":  0,
+    "passed":  5
+}

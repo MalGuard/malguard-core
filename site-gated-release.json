@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "status": "site-gated-windows-build-verified",
+  "app_version": "1.3.1",
+  "engine_version": "1.2.1",
+  "source_commit": "22511e7870347733b982262eb9efe7f1430a0f4e",
+  "build": "MG-1.3.1-WIN64-22511e787034",
+  "filename": "MalGuard-Setup-x64.exe",
+  "size": 34254848,
+  "sha256": "c0c2bf7b4121ae091d75bb13feedd0c80fa45dd6a53d4ea8021b8705ebff945d",
+  "sealed_sha256": "b068cc5d373e62f870dd618c9413a7967700cea6923b8e4a88dd1e4c8a885fb1",
+  "requires_device_license": false,
+  "installer_password_required": false,
+  "authenticode_signed": false,
+  "run_id": "37783511896",
+  "source_archive_sha256": "b89f245cb2e8a68c066d0aef41fee841dc97cc98869d2f6f22accc3bc60445fc"
+}

@@ -1,0 +1,111 @@
+{
+  "sample_execution": false,
+  "passed": 16,
+  "checks": [
+    {
+      "passed": true,
+      "name": "iexpress-payload-tampering-rejected"
+    },
+    {
+      "passed": true,
+      "name": "native-install-paths"
+    },
+    {
+      "passed": true,
+      "name": "iexpress-powershell-exe-install"
+    },
+    {
+      "stages": [
+        {
+          "stage": "verify-package",
+          "elapsedMs": 270
+        },
+        {
+          "stage": "extract-files",
+          "elapsedMs": 3108
+        },
+        {
+          "stage": "verify-components",
+          "elapsedMs": 1748
+        },
+        {
+          "stage": "webview-runtime",
+          "elapsedMs": 45
+        },
+        {
+          "stage": "install-engine",
+          "elapsedMs": 3670
+        },
+        {
+          "stage": "self-test",
+          "elapsedMs": 1087
+        },
+        {
+          "stage": "signed-update",
+          "elapsedMs": 642
+        },
+        {
+          "stage": "configure-shortcuts",
+          "elapsedMs": 537
+        }
+      ],
+      "elapsedMs": 11342,
+      "name": "no-device-license-or-installer-password",
+      "passed": true
+    },
+    {
+      "passed": true,
+      "name": "microsoft-signed-webview2-prerequisite"
+    },
+    {
+      "passed": true,
+      "name": "system-updater-code-acl"
+    },
+    {
+      "passed": true,
+      "name": "installed-python315-self-test"
+    },
+    {
+      "epoch": 37743664029001,
+      "record_count": 1680,
+      "name": "installed-signed-online-feed",
+      "passed": true
+    },
+    {
+      "fixtures": 6,
+      "name": "installed-static-detection-and-bilingual-reports",
+      "passed": true
+    },
+    {
+      "passed": true,
+      "name": "daily-system-update-task"
+    },
+    {
+      "passed": true,
+      "name": "gui-desktop-shortcut"
+    },
+    {
+      "passed": true,
+      "name": "native-tauri-window-startup"
+    },
+    {
+      "passed": true,
+      "name": "iexpress-repeat-install-preserves-rollback"
+    },
+    {
+      "passed": true,
+      "name": "iexpress-failed-replacement-preserves-engine"
+    },
+    {
+      "passed": true,
+      "name": "native-uninstall-task-removal"
+    },
+    {
+      "passed": true,
+      "name": "uninstall-preserves-user-files"
+    }
+  ],
+  "gui_visual_interaction_tested": false,
+  "platform": "Microsoft Windows Server 2025 Datacenter",
+  "failed": 0
+}
