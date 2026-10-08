@@ -1,111 +1,111 @@
 {
-  "sample_execution": false,
-  "passed": 16,
   "checks": [
     {
-      "passed": true,
-      "name": "iexpress-payload-tampering-rejected"
+      "name": "iexpress-payload-tampering-rejected",
+      "passed": true
     },
     {
-      "passed": true,
-      "name": "native-install-paths"
+      "name": "native-install-paths",
+      "passed": true
     },
     {
-      "passed": true,
-      "name": "iexpress-powershell-exe-install"
+      "name": "iexpress-powershell-exe-install",
+      "passed": true
     },
     {
       "stages": [
         {
           "stage": "verify-package",
-          "elapsedMs": 270
+          "elapsedMs": 251
         },
         {
           "stage": "extract-files",
-          "elapsedMs": 3108
+          "elapsedMs": 2884
         },
         {
           "stage": "verify-components",
-          "elapsedMs": 1748
+          "elapsedMs": 1484
         },
         {
           "stage": "webview-runtime",
-          "elapsedMs": 45
+          "elapsedMs": 49
         },
         {
           "stage": "install-engine",
-          "elapsedMs": 3670
+          "elapsedMs": 3203
         },
         {
           "stage": "self-test",
-          "elapsedMs": 1087
+          "elapsedMs": 1081
         },
         {
           "stage": "signed-update",
-          "elapsedMs": 642
+          "elapsedMs": 978
         },
         {
           "stage": "configure-shortcuts",
-          "elapsedMs": 537
+          "elapsedMs": 434
         }
       ],
-      "elapsedMs": 11342,
-      "name": "no-device-license-or-installer-password",
+      "passed": true,
+      "elapsedMs": 10577,
+      "name": "no-device-license-or-installer-password"
+    },
+    {
+      "name": "microsoft-signed-webview2-prerequisite",
+      "passed": true
+    },
+    {
+      "name": "system-updater-code-acl",
+      "passed": true
+    },
+    {
+      "name": "installed-python315-self-test",
       "passed": true
     },
     {
       "passed": true,
-      "name": "microsoft-signed-webview2-prerequisite"
+      "epoch": 37786055652001,
+      "record_count": 1812,
+      "name": "installed-signed-online-feed"
     },
     {
       "passed": true,
-      "name": "system-updater-code-acl"
-    },
-    {
-      "passed": true,
-      "name": "installed-python315-self-test"
-    },
-    {
-      "epoch": 37743664029001,
-      "record_count": 1680,
-      "name": "installed-signed-online-feed",
-      "passed": true
-    },
-    {
       "fixtures": 6,
-      "name": "installed-static-detection-and-bilingual-reports",
+      "name": "installed-static-detection-and-bilingual-reports"
+    },
+    {
+      "name": "daily-system-update-task",
       "passed": true
     },
     {
-      "passed": true,
-      "name": "daily-system-update-task"
+      "name": "gui-desktop-shortcut",
+      "passed": true
     },
     {
-      "passed": true,
-      "name": "gui-desktop-shortcut"
+      "name": "native-tauri-window-startup",
+      "passed": true
     },
     {
-      "passed": true,
-      "name": "native-tauri-window-startup"
+      "name": "iexpress-repeat-install-preserves-rollback",
+      "passed": true
     },
     {
-      "passed": true,
-      "name": "iexpress-repeat-install-preserves-rollback"
+      "name": "iexpress-failed-replacement-preserves-engine",
+      "passed": true
     },
     {
-      "passed": true,
-      "name": "iexpress-failed-replacement-preserves-engine"
+      "name": "native-uninstall-task-removal",
+      "passed": true
     },
     {
-      "passed": true,
-      "name": "native-uninstall-task-removal"
-    },
-    {
-      "passed": true,
-      "name": "uninstall-preserves-user-files"
+      "name": "uninstall-preserves-user-files",
+      "passed": true
     }
   ],
+  "sample_execution": false,
   "gui_visual_interaction_tested": false,
+  "failed": 0,
   "platform": "Microsoft Windows Server 2025 Datacenter",
-  "failed": 0
+  "passed": 16
 }
