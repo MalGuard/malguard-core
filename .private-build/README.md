@@ -1,4 +1,27 @@
-# Private desktop delivery
+# Current delivery: website password only
+
+The current 1.3.1 / engine 1.2.1 source has no device license gate. The
+site-gated-windows workflow builds it without a private-policy override, verifies
+16 native installation checks and five stage/deadline checks, and publishes only
+RSA-OAEP/AES-GCM installer ciphertext and bounded evidence to
+`codex/malguard-site-gated-1-3-1-artifacts`. The RSA public recipient remains useful
+for confidential delivery; it does not impose any installation license.
+
+`private-delivery/package_site_gated_release.py` verifies the exact build and
+acceptance evidence, unwraps the installer in the local private vault, and reseals
+it for the website using the new random 160-bit download code. The installer has
+no archive or installation password and may be copied after download. Only the
+website server asks for the download code. No code, derived key, device identifier
+or plaintext installer belongs in Git. The production website lives in
+MalGuard/malguard.github.io; its private-download-service directory deploys through
+the owner's existing Vercel Git connection.
+
+The private-windows/private-activation workflows, licensing public key and earlier
+activation scripts describe the historical device-bound 1.3.0 release. They are
+not part of the current release. The previous delivery design is retained below
+for historical reproducibility.
+
+# Historical private desktop delivery
 
 This branch builds MalGuard desktop 1.3.0 / engine 1.2.0 with the owner's
 Ed25519 public licensing key compiled into the frozen engine. The source
