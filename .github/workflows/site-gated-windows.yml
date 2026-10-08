@@ -217,7 +217,18 @@ jobs:
       - name: Verify native GUI installation, startup, scheduler and uninstall
         shell: pwsh
         run: |
-          & cleanroom-source/packaging/online/smoke_gui_install.ps1 -Setup verified-desktop/MalGuard-Setup-x64.exe -Output verified-desktop/gui-install-qa.json
+          $ErrorActionPreference='Stop'
+          try {
+            & cleanroom-source/packaging/online/smoke_gui_install.ps1 -Setup verified-desktop/MalGuard-Setup-x64.exe -Output verified-desktop/gui-install-qa.json
+          } catch {
+            Write-Output ('::error::Native setup check: '+$_.Exception.Message)
+            $diagnostic=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MalGuard-install-error.txt'
+            if (Test-Path -LiteralPath $diagnostic) {
+              $text=[IO.File]::ReadAllText($diagnostic)
+              if ($text.Length -le 1024) {Write-Output ('::error::Installer diagnostic: '+$text.Trim())}
+            }
+            throw
+          }
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - name: Copy bounded setup evidence
         run: Copy-Item setup-deadline-qa.json verified-desktop/
