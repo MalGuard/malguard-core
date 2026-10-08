@@ -43,6 +43,16 @@ jobs:
           if ($LASTEXITCODE -ne 41 -or (Get-Content -LiteralPath $errorFile -Raw) -notmatch 'Installer payload integrity mismatch') {throw 'Native module-path isolation preflight failed'}
           Write-Output 'Native Windows PowerShell modules loaded with poisoned inherited search path; corrupt fixture rejected before execution'
           exit 0
+      - name: Check setup engine timeout boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          try {
+            & cleanroom-source/packaging/online/test_setup_deadlines.ps1 -Output probe-deadline-qa.json
+          } catch {
+            Write-Output ('::error::Setup deadline check: '+$_.Exception.Message)
+            throw
+          }
 
   windows-desktop:
     needs: windows-packaging-probe
