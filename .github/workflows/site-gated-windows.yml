@@ -1,0 +1,264 @@
+name: MalGuard 1.3.1 Windows installer for password-gated website
+
+on:
+  push:
+    branches: [codex/malguard-site-gated-1-3-1]
+    paths: ['cleanroom-v1/**', '.private-build/**', '.github/workflows/site-gated-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: malguard-site-gated-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-packaging-probe:
+    if: github.event_name != 'schedule'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify own source and build an inert IExpress fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $manifest=Get-Content cleanroom-v1/source.json -Raw | ConvertFrom-Json
+          if ((Get-FileHash cleanroom-v1/source.zip).Hash.ToLowerInvariant() -ne $manifest.sha256) {throw 'Source integrity mismatch'}
+          Expand-Archive -LiteralPath cleanroom-v1/source.zip -DestinationPath cleanroom-source
+          New-Item -ItemType Directory -Path inert-payload/engine -Force | Out-Null
+          Set-Content -LiteralPath inert-payload/malguard-desktop.exe -Value 'Harmless packaging fixture; not executable'
+          Set-Content -LiteralPath inert-payload/engine/MalGuard.exe -Value 'Harmless packaging fixture; not executable'
+          Copy-Item cleanroom-source/desktop/protect-install.ps1 inert-payload/engine/protect-install.ps1
+          & cleanroom-source/packaging/online/build_iexpress.ps1 -PackageRoot inert-payload -Output (Join-Path (Get-Location) 'probe-output/MalGuard-fixture-Setup.exe') -DiagnosticDirectory probe-diagnostics
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          Write-Output 'Inert IExpress build fixture passed; fixture installer was not executed or published'
+          $env:PSModulePath=Join-Path $env:RUNNER_TEMP 'intentionally-unavailable-modules'
+          $errorFile=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MalGuard-install-error.txt'
+          Remove-Item -LiteralPath $errorFile -ErrorAction SilentlyContinue
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File probe-diagnostics/install.ps1 -PayloadHash ('0'*64) -Quiet -NoLaunch
+          if ($LASTEXITCODE -ne 41 -or (Get-Content -LiteralPath $errorFile -Raw) -notmatch 'Installer payload integrity mismatch') {throw 'Native module-path isolation preflight failed'}
+          Write-Output 'Native Windows PowerShell modules loaded with poisoned inherited search path; corrupt fixture rejected before execution'
+          exit 0
+
+  windows-desktop:
+    needs: windows-packaging-probe
+    if: github.event_name != 'schedule'
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Verify and unpack the clean-room source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $manifest=Get-Content cleanroom-v1/source.json -Raw | ConvertFrom-Json
+          $actual=(Get-FileHash cleanroom-v1/source.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $manifest.sha256) {throw 'Source integrity mismatch'}
+          Expand-Archive -LiteralPath cleanroom-v1/source.zip -DestinationPath cleanroom-source
+      - name: Verify privileged installation ACL helper before building
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixture=Join-Path $env:ProgramFiles 'MalGuard'
+          if (Test-Path $fixture) {throw 'Installation fixture already exists'}
+          New-Item -ItemType Directory -Path (Join-Path $fixture 'engine') -Force | Out-Null
+          try {
+            Set-Content -LiteralPath (Join-Path $fixture 'engine/harmless.txt') -Value 'Harmless permission fixture'
+            $script=(Resolve-Path cleanroom-source/desktop/protect-install.ps1).Path
+            & "$env:SystemRoot\SysWOW64\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Directory $fixture
+            if ($LASTEXITCODE -ne 0) {throw '32-bit installer ACL helper failed'}
+            foreach ($path in @($fixture,(Join-Path $fixture 'engine'),(Join-Path $fixture 'engine/harmless.txt'))) {
+              $acl=Get-Acl -LiteralPath $path
+              if ($acl.Owner -notmatch 'Administrators$|SYSTEM$' -or -not $acl.AreAccessRulesProtected) {throw 'Fixture ACL owner/protection invalid'}
+              foreach ($ace in $acl.Access) {
+                if ($ace.IdentityReference -match 'Users$' -and ($ace.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -ne 0) {throw 'Fixture grants user write'}
+              }
+            }
+            Write-Output 'Protected directory/file ACLs verified through the installer PowerShell architecture'
+          } finally {Remove-Item -LiteralPath $fixture -Recurse -Force}
+      - name: Parse packaging scripts using Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach ($file in @('install_iexpress.ps1','uninstall_iexpress.ps1','build_iexpress.ps1','smoke_gui_install.ps1')) {
+            $tokens=$null;$errors=$null
+            [Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) ('cleanroom-source/packaging/online/'+$file)),[ref]$tokens,[ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) {throw ($errors | Out-String)}
+          }
+          Write-Output 'All IExpress packaging scripts parsed by Windows PowerShell 5.1'
+      - name: Provision verified CPython 3.12.15 Windows runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Invoke-WebRequest -Uri 'https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15%2B20261003-x86_64-pc-windows-msvc-install_only.tar.gz' -OutFile python-runtime.tar.gz
+          $hash=(Get-FileHash python-runtime.tar.gz -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '4b6f0beebbb695a0f3ea237b8c3eaa5bd424f47a7bc25b2fbe3a43390c770f08') {throw 'Python runtime integrity mismatch'}
+          New-Item -ItemType Directory -Path runtime315 | Out-Null
+          tar -xzf python-runtime.tar.gz -C runtime315
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          $runtime=Join-Path (Get-Location) 'runtime315/python/python.exe'
+          & $runtime -I -c "import sys; assert sys.version_info[:3] == (3,12,15)"
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          & $runtime -I -m pip install --require-hashes -r cleanroom-source/requirements-lock.txt
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          & $runtime -I -m pip install --require-hashes -r cleanroom-source/packaging/windows/build-requirements-lock.txt
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          & $runtime -I -m pip install --no-deps --no-build-isolation ./cleanroom-source
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          "MALGUARD_RUNTIME=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install locked Python engine and packager
+        working-directory: cleanroom-source
+        run: |
+          python -m pip install --require-hashes -r requirements-lock.txt
+          python -m pip install --require-hashes -r packaging/windows/build-requirements-lock.txt
+          python -m pip install --no-deps --no-build-isolation .
+          python -m pip check
+      - name: Synthetic tests and type checks on native Windows
+        working-directory: cleanroom-source
+        run: |
+          python -m pytest -q --junitxml=windows-tests.xml
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          python -m ruff check .
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          python -m mypy --platform win32 malguard_core malguard_cli
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Verify bounded setup waits using inert Windows processes
+        shell: powershell
+        run: |
+          & cleanroom-source/packaging/online/test_setup_deadlines.ps1 -Output setup-deadline-qa.json
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Build and test trusted frozen engine
+        working-directory: cleanroom-source
+        run: |
+          & $env:MALGUARD_RUNTIME -I -m PyInstaller --noconfirm --clean --distpath desktop/engine --workpath windows-work packaging/windows/MalGuard.spec
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          & desktop/engine/MalGuard/MalGuard.exe --self-test
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          & desktop/engine/MalGuard/MalGuard.exe --security-status
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          Copy-Item desktop/protect-install.ps1 desktop/engine/MalGuard/protect-install.ps1
+      - name: Select pinned Rust
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup default 1.99.0
+      - name: Install locked native UI builder
+        working-directory: cleanroom-source/desktop
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Fetch checksum-locked native dependencies
+        working-directory: cleanroom-source/desktop
+        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+      - name: Bundle Python and native dependency license notices
+        shell: pwsh
+        run: |
+          @'
+          import importlib.util,shutil,sys
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('trusted_packager','cleanroom-source/packaging/windows/package_release.py')
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          runtime=Path(__import__('os').environ['MALGUARD_RUNTIME']).parent
+          target=Path('cleanroom-source/desktop/engine/MalGuard/THIRD-PARTY-NOTICES')
+          module.copy_notices(runtime,target,None)
+          for path in Path('cleanroom-source/packaging/windows/notices').iterdir():shutil.copy2(path,target/path.name)
+          for directory in (Path.home()/'.cargo/registry/src').glob('*/*'):
+              for path in directory.glob('*'):
+                  if path.is_file() and any(word in path.name.upper() for word in ['LICENSE','NOTICE','COPYING']):
+                      dest=target/'Rust'/directory.name/path.name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,dest)
+          print('Redistribution notices bundled')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Generate brand icons and build native installer
+        working-directory: cleanroom-source/desktop
+        run: |
+          npx --no-install tauri icon icon.svg
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 | Out-File cargo-metadata.json
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          npm run build -- --no-bundle -- --locked
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Build IExpress PowerShell package using the existing graphical engine
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Path graphical-payload | Out-Null
+          Copy-Item cleanroom-source/desktop/src-tauri/target/release/malguard-desktop.exe graphical-payload/
+          Copy-Item cleanroom-source/desktop/engine/MalGuard graphical-payload/engine -Recurse
+          & cleanroom-source/packaging/online/build_iexpress.ps1 -PackageRoot graphical-payload -Output (Join-Path (Get-Location) 'verified-desktop/MalGuard-Setup-x64.exe') -DiagnosticDirectory iexpress-diagnostics
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Hash the installer and prepare verification artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if (-not (Test-Path -LiteralPath verified-desktop/MalGuard-Setup-x64.exe)) {throw 'IExpress installer missing'}
+          $hash=(Get-FileHash verified-desktop/MalGuard-Setup-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  MalGuard-Setup-x64.exe" | Set-Content verified-desktop/MalGuard-Setup-x64.exe.sha256 -Encoding ascii
+          Copy-Item cleanroom-source/windows-tests.xml verified-desktop/
+          Copy-Item cleanroom-source/desktop/src-tauri/Cargo.lock verified-desktop/
+      - name: Verify native GUI installation, startup, scheduler and uninstall
+        shell: pwsh
+        run: |
+          & cleanroom-source/packaging/online/smoke_gui_install.ps1 -Setup verified-desktop/MalGuard-Setup-x64.exe -Output verified-desktop/gui-install-qa.json
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Copy bounded setup evidence
+        run: Copy-Item setup-deadline-qa.json verified-desktop/
+      - name: Encrypt genuine production installer for the delivery owner
+        run: |
+          python cleanroom-source/packaging/online/seal_gated_build.py
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Checkout ciphertext delivery branch
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: codex/malguard-site-gated-1-3-1-artifacts
+          path: delivery-output
+          persist-credentials: false
+      - name: Publish ciphertext and bounded verification metadata
+        if: always()
+        shell: pwsh
+        env:
+          BUILD_OUTCOME: ${{ job.status }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          # Explicit allowlist prevents publishing installers, payload ZIPs or keys.
+          $files=@('MalGuard-Setup-x64.exe.sealed','site-gated-release.json','windows-tests.xml','gui-install-qa.json','setup-deadline-qa.json')
+          if ($env:BUILD_OUTCOME -eq 'success') {
+            foreach ($name in $files) {
+              if (-not (Test-Path -LiteralPath (Join-Path 'verified-desktop' $name) -PathType Leaf)) {throw ('Missing verified delivery file: '+$name)}
+              Copy-Item -LiteralPath (Join-Path 'verified-desktop' $name) -Destination (Join-Path 'delivery-output' $name) -Force
+            }
+          }
+          @{schema=1;source_commit=$env:GITHUB_SHA;run_id=$env:GITHUB_RUN_ID;result=$env:BUILD_OUTCOME;windows_runner='windows-2025'} | ConvertTo-Json | Set-Content delivery-output/build-status.json -Encoding UTF8
+          # Authenticate this Git process only; no credential is saved in .git.
+          $authorization=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('x-access-token:'+$env:GH_TOKEN))
+          Write-Output ('::add-mask::'+$authorization)
+          $env:GIT_CONFIG_COUNT='1'
+          $env:GIT_CONFIG_KEY_0='http.https://github.com/.extraheader'
+          $env:GIT_CONFIG_VALUE_0='AUTHORIZATION: basic '+$authorization
+          Push-Location delivery-output
+          try {
+            git config user.name 'MalGuard site-gated build'
+            git config user.email 'malguard-build@users.noreply.github.com'
+            git add -- $files build-status.json
+            if ($LASTEXITCODE -ne 0 -and $env:BUILD_OUTCOME -ne 'success') {git add -- build-status.json}
+            git diff --cached --quiet
+            if ($LASTEXITCODE -ne 0) {
+              git commit -m "Site-gated Windows build evidence $env:GITHUB_RUN_ID"
+              if ($LASTEXITCODE -ne 0) {throw 'Delivery evidence commit failed'}
+              git push origin HEAD:codex/malguard-site-gated-1-3-1-artifacts
+              if ($LASTEXITCODE -ne 0) {throw 'Encrypted delivery push failed'}
+            }
+          } finally {
+            Pop-Location
+            Remove-Item Env:GIT_CONFIG_COUNT,Env:GIT_CONFIG_KEY_0,Env:GIT_CONFIG_VALUE_0 -ErrorAction SilentlyContinue
+          }
