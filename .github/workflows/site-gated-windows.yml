@@ -1,8 +1,8 @@
-name: MalGuard 1.3.1 Windows installer for password-gated website
+name: MalGuard 1.3.2 Windows installer for password-gated website
 
 on:
   push:
-    branches: [codex/malguard-site-gated-1-3-1]
+    branches: [codex/malguard-site-gated-1-3-2]
     paths: ['cleanroom-v1/**', '.private-build/**', '.github/workflows/site-gated-windows.yml']
   workflow_dispatch:
 
@@ -168,6 +168,9 @@ jobs:
       - name: Fetch checksum-locked native dependencies
         working-directory: cleanroom-source/desktop
         run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+      - name: Test bounded native progress bridge
+        working-directory: cleanroom-source/desktop
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: Bundle Python and native dependency license notices
         shell: pwsh
         run: |
@@ -240,7 +243,7 @@ jobs:
         if: always()
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: codex/malguard-site-gated-1-3-1-artifacts
+          ref: codex/malguard-site-gated-1-3-2-artifacts
           path: delivery-output
           persist-credentials: false
       - name: Publish ciphertext and bounded verification metadata
@@ -276,7 +279,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               git commit -m "Site-gated Windows build evidence $env:GITHUB_RUN_ID"
               if ($LASTEXITCODE -ne 0) {throw 'Delivery evidence commit failed'}
-              git push origin HEAD:codex/malguard-site-gated-1-3-1-artifacts
+              git push origin HEAD:codex/malguard-site-gated-1-3-2-artifacts
               if ($LASTEXITCODE -ne 0) {throw 'Encrypted delivery push failed'}
             }
           } finally {

@@ -1,0 +1,1573 @@
+--- a/desktop/package-lock.json
++++ b/desktop/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "malguard-cleanroom-desktop",
+-  "version": "1.3.1",
++  "version": "1.3.2",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "malguard-cleanroom-desktop",
+-      "version": "1.3.1",
++      "version": "1.3.2",
+       "devDependencies": {
+         "@tauri-apps/cli": "2.12.1"
+       }
+--- a/desktop/package.json
++++ b/desktop/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "malguard-cleanroom-desktop",
+-  "version": "1.3.1",
++  "version": "1.3.2",
+   "private": true,
+   "scripts": { "build": "tauri build", "tauri": "tauri" },
+   "devDependencies": { "@tauri-apps/cli": "2.12.1" }
+--- a/desktop/src-tauri/Cargo.lock
++++ b/desktop/src-tauri/Cargo.lock
+@@ -1769,7 +1769,7 @@
+ 
+ [[package]]
+ name = "malguard-desktop"
+-version = "1.3.1"
++version = "1.3.2"
+ dependencies = [
+  "rfd",
+  "serde",
+--- a/desktop/src-tauri/Cargo.toml
++++ b/desktop/src-tauri/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "malguard-desktop"
+-version = "1.3.1"
++version = "1.3.2"
+ edition = "2021"
+ description = "Clean-room GTA mod static scanner with signed online intelligence"
+ license = "MIT"
+--- a/desktop/src-tauri/src/bridge.rs
++++ b/desktop/src-tauri/src/bridge.rs
+@@ -1,4 +1,52 @@
+ //! Narrow validation for engine telemetry and generated report images.
++
++pub fn update_id(id: &str) -> bool {
++    id.len() == 36
++        && id.bytes().enumerate().all(|(i, b)| {
++            if [8, 13, 18, 23].contains(&i) {
++                b == b'-'
++            } else {
++                b.is_ascii_digit() || (b'a'..=b'f').contains(&b)
++            }
++        })
++}
++
++#[cfg(any(windows, test))]
++pub fn update_progress(bytes: &[u8], id: &str) -> Option<serde_json::Value> {
++    if bytes.len() > 8192 || !update_id(id) {
++        return None;
++    }
++    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
++    if value.get("requestId")?.as_str()? != id {
++        return None;
++    }
++    let stage = value.get("stage")?.as_str()?;
++    if ![
++        "preparing",
++        "downloading",
++        "verifying",
++        "comparing",
++        "installing",
++        "complete",
++        "failed",
++    ]
++    .contains(&stage)
++    {
++        return None;
++    }
++    let received = value.get("receivedBytes").and_then(|v| v.as_u64());
++    let total = value.get("totalBytes").and_then(|v| v.as_u64());
++    if stage == "downloading"
++        && (received.is_none()
++            || received? > 23 * 1024 * 1024
++            || total.is_some_and(|n| n == 0 || n > 23 * 1024 * 1024 || received.unwrap() > n))
++    {
++        return None;
++    }
++    Some(
++        serde_json::json!({"requestId": id, "stage": stage, "receivedBytes": received, "totalBytes": total}),
++    )
++}
+ 
+ pub fn scan_stage(line: &[u8]) -> Option<&'static str> {
+     if line.len() > 128 {
+@@ -44,6 +92,29 @@
+ mod tests {
+     use super::*;
+     #[test]
++    fn update_progress_is_bound_to_job_and_actual_bounded_bytes() {
++        let id = "12345678-abcd-abcd-abcd-123456789abc";
++        assert!(update_id(id));
++        assert!(!update_id("../outside"));
++        let bytes = serde_json::to_vec(&serde_json::json!({"requestId": id,
++            "stage": "downloading", "receivedBytes": 1024, "totalBytes": 2048}))
++        .unwrap();
++        let parsed = update_progress(&bytes, id).unwrap();
++        assert_eq!(parsed["receivedBytes"], 1024);
++        assert!(update_progress(&bytes, "12345678-abcd-abcd-abcd-123456789abd").is_none());
++        for (stage, received, total) in [
++            ("execute", 1, 2),
++            ("downloading", 3, 2),
++            ("downloading", 1, 30 * 1024 * 1024),
++        ] {
++            let bytes = serde_json::to_vec(&serde_json::json!({"requestId": id,
++                "stage": stage, "receivedBytes": received, "totalBytes": total}))
++            .unwrap();
++            assert!(update_progress(&bytes, id).is_none());
++        }
++        assert!(update_progress(&[b' '; 8193], id).is_none());
++    }
++    #[test]
+     fn telemetry_accepts_known_stages_only() {
+         assert_eq!(
+             scan_stage(br#"{"event":"scan_stage","stage":"pe"}"#),
+--- a/desktop/src-tauri/src/main.rs
++++ b/desktop/src-tauri/src/main.rs
+@@ -12,6 +12,7 @@
+ use tauri::{Emitter, Manager};
+ 
+ mod bridge;
++mod updater;
+ 
+ #[derive(Clone, serde::Serialize)]
+ #[serde(rename_all = "camelCase")]
+@@ -290,48 +291,22 @@
+ }
+ 
+ #[tauri::command]
+-fn refresh_security(app: tauri::AppHandle) -> Result<(), String> {
++async fn refresh_security(
++    app: tauri::AppHandle,
++    state: tauri::State<'_, Selection>,
++    request_id: String,
++) -> Result<serde_json::Value, String> {
++    if !bridge::update_id(&request_id) {
++        return Err("Invalid update request identifier".into());
++    }
++    if state.busy.swap(true, Ordering::AcqRel) {
++        return Err("An operation is already running".into());
++    }
++    let _guard = BusyGuard(state.busy.clone());
+     let exe = engine(&app)?;
+-    #[cfg(windows)]
+-    {
+-        use std::os::windows::ffi::OsStrExt;
+-        #[link(name = "shell32")]
+-        extern "system" {
+-            fn ShellExecuteW(
+-                hwnd: isize,
+-                operation: *const u16,
+-                file: *const u16,
+-                parameters: *const u16,
+-                directory: *const u16,
+-                show: i32,
+-            ) -> isize;
+-        }
+-        let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+-        let verb = wide(std::ffi::OsStr::new("runas"));
+-        let file = wide(exe.as_os_str());
+-        let args = wide(std::ffi::OsStr::new("--refresh-security"));
+-        let directory = wide(exe.parent().ok_or("Invalid engine directory")?.as_os_str());
+-        // Elevate the installed trusted updater only; sample paths are absent.
+-        let result = unsafe {
+-            ShellExecuteW(
+-                0,
+-                verb.as_ptr(),
+-                file.as_ptr(),
+-                args.as_ptr(),
+-                directory.as_ptr(),
+-                0,
+-            )
+-        };
+-        if result <= 32 {
+-            return Err("Update approval was not granted".into());
+-        }
+-        Ok(())
+-    }
+-    #[cfg(not(windows))]
+-    {
+-        let _ = exe;
+-        Err("This package requires Windows".into())
+-    }
++    tauri::async_runtime::spawn_blocking(move || updater::run(&exe, &request_id, &app))
++        .await
++        .map_err(|_| "Update failed")?
+ }
+ 
+ fn main() {
+--- /dev/null
++++ b/desktop/src-tauri/src/updater.rs
+@@ -0,0 +1,151 @@
++//! Wait for the fixed installed administrator updater, then authenticate its result.
++use std::path::Path;
++
++#[cfg(windows)]
++pub fn run(exe: &Path, id: &str, app: &tauri::AppHandle) -> Result<serde_json::Value, String> {
++    use std::ffi::{c_void, OsStr};
++    use std::io::Read;
++    use std::os::windows::ffi::OsStrExt;
++    use std::path::PathBuf;
++    use std::time::{Duration, Instant};
++    use tauri::Emitter;
++
++    #[repr(C)]
++    struct ShellExecuteInfo {
++        size: u32,
++        mask: u32,
++        window: isize,
++        verb: *const u16,
++        file: *const u16,
++        arguments: *const u16,
++        directory: *const u16,
++        show: i32,
++        instance: isize,
++        id_list: *mut c_void,
++        class: *const u16,
++        class_key: isize,
++        hotkey: u32,
++        icon: isize,
++        process: isize,
++    }
++    #[link(name = "shell32")]
++    extern "system" {
++        fn ShellExecuteExW(info: *mut ShellExecuteInfo) -> i32;
++        fn SHGetFolderPathW(
++            window: isize,
++            folder: i32,
++            token: isize,
++            flags: u32,
++            path: *mut u16,
++        ) -> i32;
++    }
++    #[link(name = "kernel32")]
++    extern "system" {
++        fn WaitForSingleObject(handle: isize, timeout: u32) -> u32;
++        fn GetExitCodeProcess(handle: isize, code: *mut u32) -> i32;
++        fn TerminateProcess(handle: isize, code: u32) -> i32;
++        fn CloseHandle(handle: isize) -> i32;
++    }
++    struct Handle(isize);
++    impl Drop for Handle {
++        fn drop(&mut self) {
++            unsafe {
++                CloseHandle(self.0);
++            }
++        }
++    }
++    let wide = |s: &OsStr| s.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
++    let verb = wide(OsStr::new("runas"));
++    let file = wide(exe.as_os_str());
++    let arguments = wide(OsStr::new(&format!("--desktop-update {}", id)));
++    let directory = wide(exe.parent().ok_or("Invalid engine directory")?.as_os_str());
++    let mut info = ShellExecuteInfo {
++        size: std::mem::size_of::<ShellExecuteInfo>() as u32,
++        mask: 0x40 | 0x100,
++        window: 0,
++        verb: verb.as_ptr(),
++        file: file.as_ptr(),
++        arguments: arguments.as_ptr(),
++        directory: directory.as_ptr(),
++        show: 0,
++        instance: 0,
++        id_list: std::ptr::null_mut(),
++        class: std::ptr::null(),
++        class_key: 0,
++        hotkey: 0,
++        icon: 0,
++        process: 0,
++    };
++    if unsafe { ShellExecuteExW(&mut info) } == 0 || info.process == 0 {
++        return Err("UPDATE_APPROVAL_DECLINED".into());
++    }
++    let process = Handle(info.process);
++    let mut folder = vec![0u16; 32768];
++    if unsafe { SHGetFolderPathW(0, 0x23, 0, 0, folder.as_mut_ptr()) } != 0 {
++        return Err("UPDATE_PROGRESS_UNAVAILABLE".into());
++    }
++    let end = folder
++        .iter()
++        .position(|c| *c == 0)
++        .ok_or("Invalid ProgramData path")?;
++    let path =
++        PathBuf::from(String::from_utf16(&folder[..end]).map_err(|_| "Invalid ProgramData path")?)
++            .join("MalGuardSecurityUpdates")
++            .join(format!("refresh-{}.json", id));
++    let started = Instant::now();
++    let mut trusted_directory = false;
++    let mut last = Vec::new();
++    loop {
++        // The first read uses the engine's owner/DACL checks. Ordinary users
++        // cannot replace subsequent records in this protected directory.
++        let bytes = if path.is_file() && !trusted_directory {
++            match super::run_engine(exe, "--desktop-update-status", Some(Path::new(id)), None) {
++                Ok(value) => {
++                    trusted_directory = true;
++                    serde_json::to_vec(&value).unwrap_or_default()
++                }
++                Err(_) => Vec::new(),
++            }
++        } else if trusted_directory {
++            let mut bytes = Vec::new();
++            if let Ok(file) = std::fs::File::open(&path) {
++                let _ = file.take(8193).read_to_end(&mut bytes);
++            }
++            bytes
++        } else {
++            Vec::new()
++        };
++        if bytes != last {
++            if let Some(progress) = super::bridge::update_progress(&bytes, id) {
++                let _ = app.emit_to("main", "update-progress", progress);
++            }
++            last = bytes;
++        }
++        match unsafe { WaitForSingleObject(process.0, 200) } {
++            0 => break,
++            258 => {}
++            _ => return Err("UPDATE_PROCESS_UNAVAILABLE".into()),
++        }
++        if started.elapsed() > Duration::from_secs(150) {
++            unsafe {
++                TerminateProcess(process.0, 4);
++                WaitForSingleObject(process.0, 2000);
++            }
++            return Err("UPDATE_TIMED_OUT".into());
++        }
++    }
++    let mut exit = 0;
++    if unsafe { GetExitCodeProcess(process.0, &mut exit) } == 0 || ![0, 4].contains(&exit) {
++        return Err("UPDATE_DID_NOT_COMPLETE".into());
++    }
++    let result = super::run_engine(exe, "--desktop-update-status", Some(Path::new(id)), None)?;
++    if ![Some("complete"), Some("failed")].contains(&result.get("stage").and_then(|s| s.as_str())) {
++        return Err("UPDATE_DID_NOT_COMPLETE".into());
++    }
++    Ok(result)
++}
++
++#[cfg(not(windows))]
++pub fn run(_: &Path, _: &str, _: &tauri::AppHandle) -> Result<serde_json::Value, String> {
++    Err("This package requires Windows".into())
++}
+--- a/desktop/src-tauri/tauri.conf.json
++++ b/desktop/src-tauri/tauri.conf.json
+@@ -1,7 +1,7 @@
+ {
+   "$schema": "https://schema.tauri.app/config/2",
+   "productName": "MalGuard",
+-  "version": "1.3.1",
++  "version": "1.3.2",
+   "identifier": "io.github.malguard.cleanroom",
+   "build": { "frontendDist": "../ui" },
+   "app": {
+--- a/desktop/ui/app.css
++++ b/desktop/ui/app.css
+@@ -821,3 +821,25 @@
+     transform: none;
+   }
+ }
++
++/* A real update job drives the labels and byte progress; animation measures no time. */
++.update-activity {display:grid;grid-template-columns:48px 1fr;gap:16px;margin-top:20px;padding:18px;border-radius:14px;background:#0a2027;border:1px solid #26454c}
++.update-activity[hidden],.update-counts[hidden]{display:none}
++.update-orbit {position:relative;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:#112c34;color:var(--accent);font-size:24px}
++.update-orbit::before {content:"";position:absolute;inset:-3px;border:2px solid transparent;border-top-color:var(--accent);border-inline-end-color:#70e7c040;border-radius:50%;animation:update-light 1.4s linear infinite}
++@keyframes update-light {to{transform:rotate(360deg)}}
++.update-work p {font-size:13px;line-height:1.6}
++#updateBytes {font-size:11px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
++#updateTransfer {width:100%;height:7px;margin-top:10px;accent-color:var(--accent)}
++.update-steps {grid-column:1/-1;list-style:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:0;margin:4px 0 0;font-size:10px;color:#75879b}
++.update-steps li {border-top:2px solid #233841;padding-top:8px}
++.update-steps li[data-state=active] {color:var(--accent);border-color:var(--accent)}
++.update-steps li[data-state=done] {color:#b6c5d5;border-color:#437a70}
++.update-counts {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:18px}
++.update-counts div {border:1px solid var(--line);border-radius:12px;padding:14px;background:#0c1a23}
++.update-counts dt {font-size:11px;color:var(--muted)}
++.update-counts dd {font-size:24px;color:#dcebe6;font-variant-numeric:tabular-nums;margin:5px 0 0}
++.update-counts div:first-child dd {color:var(--accent)}
++.intelligence[data-update-error=true] #updateStatus {color:#ffc1a6}
++@media(max-width:700px){.update-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.update-counts dd{font-size:20px}}
++@media(prefers-reduced-motion:reduce){.update-orbit::before{animation:none}}
+--- a/desktop/ui/app.js
++++ b/desktop/ui/app.js
+@@ -4,15 +4,31 @@
+ const catalogs = {
+   en: {
+     local: "LOCAL · STATIC ANALYSIS",
+-    version: "Desktop 1.3.1 · Windows",
++    version: "Desktop 1.3.2 · Windows",
+     language: "Language",
+     eyebrow: "GTA V · MOD INSPECTION",
+     title: "Inspect before you install.",
+     intro:
+       "Understand the file, examine the evidence, then decide. Analysis stays on your device. Your files are never uploaded or executed.",
+     intelligence: "Signed threat intelligence",
+-    update: "Get signed update",
+-    status: "Check status",
++    update: "Get latest threat data",
++    updateApproving: "Waiting for administrator approval",
++    update_preparing: "Connecting to the signed feed",
++    update_downloading: "Receiving signed threat data",
++    update_verifying: "Verifying the signature and rules",
++    update_comparing: "Comparing unique hashes with your current data",
++    update_installing: "Saving verified threat data",
++    update_complete: "Threat data verified",
++    update_failed: "Update did not complete",
++    updateNew: "New information received · {count} new unique SHA-256 records added.",
++    updateCurrent: "No new information is available. Your threat data is up to date.",
++    updateRules: "Verified detection rules updated. No new threat hashes were added.",
++    updateFailed: "Update did not complete. No unverified data was accepted; try again.",
++    updateDeclined: "Administrator approval was cancelled. No update was performed.",
++    updateTimeout: "The update exceeded its time limit. Try again when the connection is available.",
++    updateNewCount: "New hashes", updateKnownCount: "Already present", updateTotalCount: "Verified total",
++    updateBytes: "{received} / {total} received · {percent}%",
++    updateUnknownBytes: "{received} received · total size is not provided",
+     updateDetails: "How updates work",
+     schedule:
+       "Daily at 03:00 in your Windows local time, while the PC is on and online. The installer task may catch up after a missed run.",
+@@ -54,8 +70,6 @@
+     signedFacts: "Signed: {date} · Signer: {key} · Version: {version}",
+     saved: "Report saved to a new file.",
+     cardSaved: "Report card saved to a new PNG file.",
+-    started:
+-      "Updater requested; completion is not yet confirmed. Check status to authenticate the cached data.",
+     starting: "Starting local engine",
+     scanning: "Inspecting captured bytes. File contents are never executed.",
+     done: "Inspection complete.",
+@@ -140,15 +154,31 @@
+   },
+   fa: {
+     local: "تحلیل ایستا · روی دستگاه شما",
+-    version: "نسخهٔ گرافیکی ۱.۳.۱ · ویندوز",
++    version: "نسخهٔ گرافیکی ۱.۳.۲ · ویندوز",
+     language: "زبان",
+     eyebrow: "GTA V · بررسی فایل ماد",
+     title: "قبل از نصب ماد، بررسی کنید.",
+     intro:
+       "نوع فایل را بشناسید، شواهد را ببینید و سپس تصمیم بگیرید. تحلیل روی دستگاه شما می‌ماند؛ فایل شما هرگز آپلود یا اجرا نمی‌شود.",
+     intelligence: "اطلاعات تهدید امضاشده",
+-    update: "دریافت به‌روزرسانی امضاشده",
+-    status: "بررسی وضعیت",
++    update: "دریافت اطلاعات جدید",
++    updateApproving: "در انتظار اجازهٔ مدیر سیستم",
++    update_preparing: "در حال اتصال به منبع امضاشده",
++    update_downloading: "در حال دریافت اطلاعات تهدید امضاشده",
++    update_verifying: "در حال تأیید امضا و قواعد",
++    update_comparing: "در حال مقایسهٔ هش‌های یکتا با اطلاعات فعلی",
++    update_installing: "در حال ذخیرهٔ اطلاعات تأییدشده",
++    update_complete: "اطلاعات تهدید تأیید شد",
++    update_failed: "به‌روزرسانی کامل نشد",
++    updateNew: "اطلاعات جدید دریافت شد · {count} رکورد یکتای SHA-256 جدید اضافه شد.",
++    updateCurrent: "اطلاعات جدیدی وجود ندارد؛ نسخهٔ اطلاعات شما به‌روز است.",
++    updateRules: "قواعد تشخیص تأییدشده به‌روز شد؛ هش تهدید جدیدی اضافه نشد.",
++    updateFailed: "به‌روزرسانی کامل نشد. هیچ دادهٔ تأییدنشده‌ای پذیرفته نشد؛ دوباره تلاش کنید.",
++    updateDeclined: "اجازهٔ مدیر سیستم لغو شد؛ به‌روزرسانی انجام نشد.",
++    updateTimeout: "مهلت به‌روزرسانی تمام شد. با اتصال مناسب دوباره تلاش کنید.",
++    updateNewCount: "هش جدید", updateKnownCount: "از قبل موجود", updateTotalCount: "مجموع تأییدشده",
++    updateBytes: "{received} از {total} دریافت شد · {percent}٪",
++    updateUnknownBytes: "{received} دریافت شد · اندازهٔ کل اعلام نشده است",
+     updateDetails: "به‌روزرسانی چگونه کار می‌کند؟",
+     schedule:
+       "هر روز ساعت ۳ به وقت محلی ویندوز، وقتی رایانه روشن و آنلاین باشد. وظیفهٔ نصب‌کننده ممکن است نوبت ازدست‌رفته را پس از روشن‌شدن جبران کند.",
+@@ -189,8 +219,6 @@
+     signedFacts: "زمان امضا: {date} · کلید: {key} · نسخه: {version}",
+     saved: "گزارش در فایل جدید ذخیره شد.",
+     cardSaved: "کارت گزارش در فایل PNG جدید ذخیره شد.",
+-    started:
+-      "به‌روزرسان درخواست شد؛ پایان دریافت هنوز تأیید نشده است. با بررسی وضعیت، دادهٔ ذخیره‌شده را تأیید کنید.",
+     starting: "در حال آغاز موتور محلی",
+     scanning: "بایت‌های دریافت‌شده بررسی می‌شوند؛ محتوای فایل اجرا نمی‌شود.",
+     done: "بررسی تمام شد.",
+@@ -292,7 +320,11 @@
+   activeScanId = null,
+   currentStage = null,
+   completedAt = null,
+-  build = "";
++  build = "",
++  activeUpdateId = null,
++  updateProgress = null,
++  lastUpdate = null,
++  updateError = null;
+ try {
+   const saved = localStorage.getItem("malguard-language");
+   if (Object.hasOwn(catalogs, saved)) language = saved;
+@@ -595,33 +627,47 @@
+   txt("cardDate", date(completedAt));
+ }
+ function renderStatus() {
+-  if (!lastStatus) return;
+-  const valid =
+-    lastStatus.available === true && lastStatus.signature_verified === true;
+-  el("intelligenceHeading").closest(".intelligence").dataset.fresh = String(
+-    valid && lastStatus.fresh,
+-  );
+-  txt(
+-    "updateStatus",
+-    valid
+-      ? t(lastStatus.fresh ? "fresh" : "stale") +
+-          " · " +
+-          number(lastStatus.record_count) +
+-          " " +
+-          t("hashes")
+-      : t("missing"),
+-  );
+-  txt(
+-    "updateFacts",
+-    valid
+-      ? t("signedFacts", {
+-          date: date(lastStatus.created_at),
+-          key: lastStatus.key_id,
+-          version: lastStatus.version,
+-        })
+-      : t("missing"),
+-  );
+-}
++  const valid = lastStatus?.available === true && lastStatus?.signature_verified === true;
++  const panel = el("intelligenceHeading").closest(".intelligence");
++  panel.dataset.fresh = String(valid && lastStatus.fresh);
++  panel.dataset.updating = String(Boolean(activeUpdateId));
++  panel.dataset.updateError = String(Boolean(updateError));
++  el("updateActivity").hidden = !activeUpdateId;
++  el("updateCounts").hidden = !lastUpdate || Boolean(activeUpdateId);
++  let message = valid ? t(lastStatus.fresh ? "fresh" : "stale") + " · " +
++    number(lastStatus.record_count) + " " + t("hashes") : t("missing");
++  if (activeUpdateId) {
++    const stage = updateProgress?.stage;
++    message = stage ? t("update_" + stage) : t("updateApproving");
++    txt("updateStage", message);
++    const bar = el("updateTransfer"), p = updateProgress;
++    bar.hidden = p?.stage !== "downloading";
++    let transfer = "";
++    if (p?.stage === "downloading") {
++      if (Number.isSafeInteger(p.totalBytes) && p.totalBytes > 0 && p.receivedBytes <= p.totalBytes) {
++        bar.max = p.totalBytes; bar.value = p.receivedBytes;
++        transfer = t("updateBytes", {received: size(p.receivedBytes), total: size(p.totalBytes),
++          percent: number(Math.floor(100 * p.receivedBytes / p.totalBytes))});
++      } else { bar.removeAttribute("value"); transfer = t("updateUnknownBytes", {received: size(p.receivedBytes)}); }
++    }
++    txt("updateBytes", transfer);
++    const order = ["downloading", "verifying", "comparing", "installing"];
++    for (const item of el("updateSteps").children) {
++      const current = order.indexOf(stage), index = order.indexOf(item.dataset.updateStep);
++      item.dataset.state = current === index ? "active" : current > index ? "done" : "pending";
++    }
++  } else if (updateError) message = t(updateError);
++  else if (lastUpdate) {
++    message = lastUpdate.new_record_count > 0 ? t("updateNew", {count: number(lastUpdate.new_record_count)}) :
++      t(lastUpdate.rules_changed ? "updateRules" : "updateCurrent");
++    for (const [id, field] of [["newHashCount", "new_record_count"],
++      ["knownHashCount", "existing_record_count"], ["totalHashCount", "record_count"]]) txt(id, number(lastUpdate[field]));
++  }
++  txt("updateStatus", message);
++  txt("updateFacts", valid ? t("signedFacts", {date: date(lastStatus.created_at), key: lastStatus.key_id,
++    version: lastStatus.version}) : t("missing"));
++}
++
+ function setLanguage(value) {
+   language = Object.hasOwn(catalogs, value) ? value : "en";
+   document.documentElement.lang = language;
+@@ -638,19 +684,11 @@
+   } catch {}
+ }
+ async function status() {
+-  el("statusButton").disabled = true;
+-  try {
+-    txt("updateStatus", t("checking"));
+-    lastStatus = await invoke("security_status");
+-    renderStatus();
+-  } catch {
+-    lastStatus = null;
+-    txt("updateStatus", t("missing"));
+-    txt("updateFacts", "");
+-  } finally {
+-    el("statusButton").disabled = false;
+-  }
+-}
++  try { lastStatus = await invoke("security_status"); }
++  catch { lastStatus = null; }
++  renderStatus();
++}
++
+ function validate(data) {
+   const r = data?.report,
+     f = data?.file_inspection;
+@@ -708,7 +746,6 @@
+ el("languageSelect").addEventListener("change", (event) =>
+   setLanguage(event.target.value),
+ );
+-el("statusButton").addEventListener("click", status);
+ el("detailsButton").addEventListener("click", () => {
+   flip(true);
+   el("backButton").focus({ preventScroll: true });
+@@ -724,17 +761,43 @@
+     txt("scanStatus", String(error));
+   }
+ });
++const updateReady = Promise.resolve().then(() => window.__TAURI__.event.listen("update-progress", event => {
++  const p = event.payload;
++  if (activeUpdateId && p?.requestId === activeUpdateId &&
++      ["preparing", "downloading", "verifying", "comparing", "installing"].includes(p.stage) &&
++      (p.stage !== "downloading" || (Number.isSafeInteger(p.receivedBytes) && p.receivedBytes >= 0 && p.receivedBytes <= 23 * 1024 * 1024))) {
++    updateProgress = p; renderStatus();
++  }
++}));
++updateReady.catch(() => {});
+ el("updateButton").addEventListener("click", async () => {
+-  el("updateButton").disabled = true;
++  if (activeUpdateId || activeScanId) return;
++  const controls = ["updateButton", "scanButton", "chooseButton"];
++  const prior = controls.map(id => el(id).disabled);
++  controls.forEach(id => {el(id).disabled = true;});
++  activeUpdateId = crypto.randomUUID(); updateProgress = null; lastUpdate = null; updateError = null;
++  renderStatus();
+   try {
+-    await invoke("refresh_security");
+-    txt("updateStatus", t("started"));
++    await updateReady;
++    const response = await invoke("refresh_security", {requestId: activeUpdateId});
++    const result = response?.result;
++    if (response?.requestId !== activeUpdateId || response.stage !== "complete" ||
++        result?.signature_verified !== true || result?.fresh !== true || result?.available !== true ||
++        !["updated", "up_to_date"].includes(result.update_outcome) ||
++        ![result.new_record_count, result.existing_record_count, result.record_count].every(n => Number.isSafeInteger(n) && n >= 0) ||
++        result.new_record_count + result.existing_record_count !== result.record_count) throw new Error("UPDATE_FAILED");
++    lastStatus = result; lastUpdate = result;
+   } catch (error) {
+-    txt("updateStatus", String(error));
++    updateError = String(error).includes("UPDATE_APPROVAL_DECLINED") ? "updateDeclined" :
++      String(error).includes("UPDATE_TIMED_OUT") ? "updateTimeout" : "updateFailed";
++    try { lastStatus = await invoke("security_status"); } catch { lastStatus = null; }
+   } finally {
+-    el("updateButton").disabled = false;
++    activeUpdateId = null; updateProgress = null;
++    controls.forEach((id, i) => {el(id).disabled = prior[i];});
++    renderStatus();
+   }
+ });
++
+ el("chooseButton").addEventListener("click", async () => {
+   el("chooseButton").disabled = true;
+   try {
+@@ -760,7 +823,6 @@
+     "chooseButton",
+     "languageSelect",
+     "updateButton",
+-    "statusButton",
+   ])
+     el(id).disabled = true;
+   lastResult = null;
+@@ -790,8 +852,7 @@
+       "chooseButton",
+       "languageSelect",
+       "updateButton",
+-      "statusButton",
+-    ])
++      ])
+       el(id).disabled = false;
+   }
+ });
+--- a/desktop/ui/index.html
++++ b/desktop/ui/index.html
+@@ -30,7 +30,7 @@
+           on your device. Your files are never uploaded or executed.
+         </p>
+         <div class="build-line">
+-          <span data-i18n="version">Desktop 1.3.1 · Windows</span
++          <span data-i18n="version">Desktop 1.3.2 · Windows</span
+           ><bdi id="buildCode" dir="ltr"></bdi>
+         </div>
+       </section>
+@@ -45,12 +45,25 @@
+           Checking signed data…
+         </p>
+         <div class="actions">
+-          <button id="updateButton" class="secondary" data-i18n="update">
+-            Get signed update</button
+-          ><button id="statusButton" class="quiet" data-i18n="status">
+-            Check status
+-          </button>
+-        </div>
++          <button id="updateButton" class="secondary" data-i18n="update">Get latest threat data</button>
++        </div>
++        <div id="updateActivity" class="update-activity" hidden aria-live="polite">
++          <span class="update-orbit" aria-hidden="true"><span>↓</span></span>
++          <div class="update-work"><p id="updateStage"></p><p id="updateBytes"></p>
++            <progress id="updateTransfer" aria-label="Threat data download" hidden></progress>
++          </div>
++          <ol id="updateSteps" class="update-steps">
++            <li data-update-step="downloading" data-i18n="update_downloading">Receiving signed threat data</li>
++            <li data-update-step="verifying" data-i18n="update_verifying">Verifying the signature and rules</li>
++            <li data-update-step="comparing" data-i18n="update_comparing">Comparing unique hashes with your current data</li>
++            <li data-update-step="installing" data-i18n="update_installing">Saving verified threat data</li>
++          </ol>
++        </div>
++        <dl id="updateCounts" class="update-counts" hidden>
++          <div><dt data-i18n="updateNewCount">New hashes</dt><dd id="newHashCount"></dd></div>
++          <div><dt data-i18n="updateKnownCount">Already present</dt><dd id="knownHashCount"></dd></div>
++          <div><dt data-i18n="updateTotalCount">Verified total</dt><dd id="totalHashCount"></dd></div>
++        </dl>
+         <details class="update-details">
+           <summary data-i18n="updateDetails">How updates work</summary>
+           <p id="updateFacts"></p>
+--- a/malguard_cli/desktop.py
++++ b/malguard_cli/desktop.py
+@@ -26,6 +26,12 @@
+ 
+ def main(arguments: list[str]) -> int:
+     configure_output()
++    if len(arguments) == 2 and arguments[0] in {"--desktop-update", "--desktop-update-status"}:
++        from malguard_core.updates.desktop import read_job, run_job
++        if arguments[0] == "--desktop-update":
++            return run_job(arguments[1])
++        write_output(json.dumps(read_job(arguments[1]), ensure_ascii=False))
++        return 0
+     if arguments == ["--refresh-security"]:
+         result = refresh()
+         write_output(json.dumps(status_json(result), ensure_ascii=False))
+--- a/malguard_cli/frozen.py
++++ b/malguard_cli/frozen.py
+@@ -104,7 +104,8 @@
+     # the legacy ANSI code page. Public text output must also preserve Persian
+     # in pipes and files. Private worker frames above remain binary and exact.
+     configure_output()
+-    if arguments and arguments[0] in {"--desktop-scan", "--security-status", "--refresh-security"}:
++    if arguments and arguments[0] in {"--desktop-scan", "--security-status", "--refresh-security",
++                                     "--desktop-update", "--desktop-update-status"}:
+         from malguard_cli.desktop import main as desktop_main
+         return desktop_main(arguments)
+     if arguments == ["--self-test"]:
+--- a/malguard_core/updates/__init__.py
++++ b/malguard_core/updates/__init__.py
+@@ -7,6 +7,8 @@
+ import stat
+ import sys
+ import tempfile
++import time
++from collections.abc import Callable
+ from contextlib import contextmanager
+ from dataclasses import dataclass, replace
+ from datetime import UTC, datetime, timedelta
+@@ -21,6 +23,12 @@
+ 
+ UPDATE_URL = "https://raw.githubusercontent.com/MalGuard/malguard-core/main/cleanroom-updates/latest.json"
+ MAX_UPDATE_BYTES = 23 * 1024 * 1024
++Progress = Callable[[dict], None]
++
++
++def _notify(progress: Progress | None, stage: str, **values) -> None:
++    if progress is not None:
++        progress({"stage": stage, **values})
+ 
+ 
+ class UpdateError(ValueError):
+@@ -50,6 +58,11 @@
+     signature_verified: bool = False
+     created_at: str = ""
+     key_id: str = ""
++    new_record_count: int | None = None
++    existing_record_count: int | None = None
++    previous_record_count: int | None = None
++    rules_changed: bool = False
++    update_outcome: str = ""
+ 
+ 
+ def default_cache_directory() -> Path:
+@@ -136,7 +149,7 @@
+     created = datetime.fromisoformat(manifest["created_at"].replace("Z", "+00:00"))
+     age = (now or datetime.now(UTC)) - created
+     fresh = -timedelta(minutes=15) <= age <= timedelta(hours=48)
+-    records = _object(bundle.payloads["blocklist.json"])["records"]
++    records = {record["sha256"] for record in _object(bundle.payloads["blocklist.json"])["records"]}
+     return UpdateStatus(True, fresh, bundle.version, bundle.epoch, len(records),
+                         "" if fresh else "Signed reputation is older than 48 hours or future-dated",
+                         True, manifest["created_at"], bundle.key_id)
+@@ -153,17 +166,35 @@
+         return None, UpdateStatus(False, False, "", 0, 0, type(error).__name__)
+ 
+ 
+-def download() -> bytes:
++def download(*, progress: Progress | None = None) -> bytes:
+     request = Request(UPDATE_URL, headers={"Accept": "application/json",
+                                           "Accept-Encoding": "identity",
+-                                          "User-Agent": "MalGuard/1.1.0"})
++                                          "User-Agent": "MalGuard/1.2.2"})
+     with build_opener(_NoRedirect()).open(request, timeout=30) as response:
+         if response.status != 200 or response.headers.get("Content-Encoding") not in (None, "identity"):
+             raise UpdateError("Update transport response is unsupported")
+-        data = response.read(MAX_UPDATE_BYTES + 1)
+-    if len(data) > MAX_UPDATE_BYTES:
+-        raise UpdateError("Update exceeded deterministic byte limit")
+-    return data
++        length = response.headers.get("Content-Length")
++        total = int(length) if length and length.isascii() and length.isdecimal() else None
++        if total is not None and not 0 < total <= MAX_UPDATE_BYTES:
++            raise UpdateError("Update transport size is unsupported")
++        received = 0
++        chunks = []
++        started = time.monotonic()
++        _notify(progress, "downloading", receivedBytes=0, totalBytes=total)
++        while True:
++            if time.monotonic() - started > 90:
++                raise UpdateError("Update download deadline exceeded")
++            piece = response.read(min(64 * 1024, MAX_UPDATE_BYTES + 1 - received))
++            if not piece:
++                break
++            received += len(piece)
++            if received > MAX_UPDATE_BYTES:
++                raise UpdateError("Update exceeded deterministic byte limit")
++            chunks.append(piece)
++            _notify(progress, "downloading", receivedBytes=received, totalBytes=total)
++        if total is not None and received != total:
++            raise UpdateError("Update transport ended before its declared size")
++    return b"".join(chunks)
+ 
+ 
+ @contextmanager
+@@ -188,29 +219,35 @@
+         os.close(descriptor)
+ 
+ 
+-def install(data: bytes, directory: Path, state: ProtectedEpochState) -> UpdateStatus:
++def install(data: bytes, directory: Path, state: ProtectedEpochState, *,
++            progress: Progress | None = None) -> UpdateStatus:
+     if not directory.exists():
+         _protect_directory(directory)
+     _validate_directory(directory)
+     with _installation_lock(directory):
+-        return _install_locked(data, directory, state)
+-
+-
+-def _install_locked(data: bytes, directory: Path, state: ProtectedEpochState) -> UpdateStatus:
++        return _install_locked(data, directory, state, progress=progress)
++
++
++def _install_locked(data: bytes, directory: Path, state: ProtectedEpochState, *,
++                    progress: Progress | None = None) -> UpdateStatus:
++    _notify(progress, "verifying")
+     candidate = authenticate(data, state=state)
++    _notify(progress, "comparing")
+     previous, _ = load_cached(directory)
+     if previous and (candidate.epoch < previous.epoch or
+                      (candidate.epoch == previous.epoch and
+                       candidate.manifest_sha256 != previous.manifest_sha256)):
+         raise UpdateError("Update rollback or epoch collision")
+     # Never let a refresh silently delete a previously authenticated block entry.
++    old: set[str] = set()
++    new = {record["sha256"] for record in _object(candidate.payloads["blocklist.json"])["records"]}
+     if previous:
+         old = {record["sha256"] for record in _object(previous.payloads["blocklist.json"])["records"]}
+-        new = {record["sha256"] for record in _object(candidate.payloads["blocklist.json"])["records"]}
+         if not old <= new:
+             raise UpdateError("Update removed an existing blocklist identity")
+     # Protected monotonic state is checked above. Replace only authenticated data;
+     # retained cache epoch also rejects rollback after a interrupted state write.
++    _notify(progress, "installing")
+     name = None
+     try:
+         with tempfile.NamedTemporaryFile(dir=directory, delete=False, prefix="update-",
+@@ -224,15 +261,26 @@
+     finally:
+         if name and Path(name).exists():
+             Path(name).unlink()
+-    return status_for(candidate)
+-
+-
+-def refresh() -> UpdateStatus:
+-    try:
+-        return install(download(), default_cache_directory(), ProtectedEpochState())
++    candidate_rules = {name: value for name, value in candidate.payloads.items()
++                       if name.startswith("rules/") and name.endswith(".yar")}
++    previous_rules = {name: value for name, value in previous.payloads.items()
++                      if name.startswith("rules/") and name.endswith(".yar")} if previous else {}
++    rules_changed = candidate_rules != previous_rules
++    added = len(new - old)
++    return replace(status_for(candidate), new_record_count=added,
++                   existing_record_count=len(new & old), previous_record_count=len(old),
++                   rules_changed=rules_changed,
++                   update_outcome="updated" if added or rules_changed else "up_to_date")
++
++
++def refresh(*, progress: Progress | None = None) -> UpdateStatus:
++    try:
++        data = download(progress=progress) if progress else download()
++        return install(data, default_cache_directory(), ProtectedEpochState(), progress=progress)
+     except (OSError, ValueError) as error:
+         _, existing = load_cached()
+-        return replace(existing, fresh=False, reason="Update failed: " + type(error).__name__)
++        return replace(existing, fresh=False, reason="Update failed: " + type(error).__name__,
++                       update_outcome="failed")
+ 
+ 
+ def status_json(status: UpdateStatus) -> dict:
+--- /dev/null
++++ b/malguard_core/updates/desktop.py
+@@ -0,0 +1,128 @@
++"""Bounded, administrator-owned progress records for one desktop update job."""
++
++from __future__ import annotations
++
++import json
++import os
++import re
++import stat
++import sys
++import tempfile
++from pathlib import Path
++
++from malguard_core.integrity import BundleVerifier
++from malguard_core.updates import (UpdateError, _protect_directory, _validate_directory,
++                                   default_cache_directory, load_cached, refresh, status_json)
++
++STAGES = {"preparing", "downloading", "verifying", "comparing", "installing", "complete", "failed"}
++
++
++def job_path(request_id: str, directory: Path) -> Path:
++    if not re.fullmatch(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", request_id):
++        raise UpdateError("Invalid update request identifier")
++    return directory / ("refresh-" + request_id + ".json")
++
++
++def _protect_record(path: Path) -> None:
++    if sys.platform != "win32":
++        path.chmod(0o600)
++        return
++    import ctypes
++    from ctypes import wintypes
++    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
++    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
++    descriptor = wintypes.LPVOID()
++    convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
++    convert.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID),
++                        ctypes.POINTER(wintypes.DWORD))
++    convert.restype = wintypes.BOOL
++    if not convert("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GR;;;BU)", 1,
++                   ctypes.byref(descriptor), None):
++        raise UpdateError("Cannot protect update progress")
++    try:
++        advapi.SetFileSecurityW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID)
++        advapi.SetFileSecurityW.restype = wintypes.BOOL
++        if not advapi.SetFileSecurityW(str(path), 0x80000005, descriptor):
++            raise UpdateError("Administrator permission required for update progress")
++    finally:
++        kernel.LocalFree.argtypes = (wintypes.HLOCAL,)
++        kernel.LocalFree.restype = wintypes.HLOCAL
++        kernel.LocalFree(descriptor)
++
++
++def _validate_record(path: Path) -> None:
++    info = path.lstat()
++    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 8192:
++        raise UpdateError("Update progress is not an ordinary bounded file")
++    if sys.platform == "win32":
++        from malguard_core.integrity.state import _windows_sddl
++        sddl = _windows_sddl(path)
++        aces = re.findall(r"\(([^()]*)\)", sddl)
++        if not sddl.startswith(("O:BA", "O:SY")) or "D:P" not in sddl or not aces:
++            raise UpdateError("Update progress is not protected")
++        for ace in aces:
++            fields = ace.split(";")
++            if len(fields) != 6 or fields[0] != "A" or (fields[5] not in {"BA", "SY"} and
++                    (fields[5] != "BU" or fields[2] not in {"GR", "0x120089"})):
++                raise UpdateError("Update progress permits untrusted writers")
++    elif info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
++        raise UpdateError("Update progress is not owner-only")
++
++
++def run_job(request_id: str) -> int:
++    directory = default_cache_directory()
++    path = job_path(request_id, directory)
++    if not directory.exists():
++        _protect_directory(directory)
++    _validate_directory(directory)
++    if path.exists() or path.is_symlink():
++        raise UpdateError("Update identifier has already been used")
++    # Retain only a bounded history; each UI request uses a fresh UUID.
++    records = sorted(directory.glob("refresh-*.json"), key=lambda p: p.lstat().st_mtime)
++    for old in records[:-31]:
++        _validate_record(old)
++        old.unlink()
++
++    def progress(event: dict) -> None:
++        value = {"requestId": request_id, **event}
++        if value.get("stage") not in STAGES:
++            raise UpdateError("Invalid update stage")
++        data = json.dumps(value, ensure_ascii=False).encode()
++        if len(data) > 8192:
++            raise UpdateError("Update progress exceeded the limit")
++        temporary = None
++        try:
++            with tempfile.NamedTemporaryFile(dir=directory, prefix="refresh-writing-",
++                                             suffix=".tmp", delete=False) as stream:
++                temporary = Path(stream.name)
++                _protect_record(temporary)
++                stream.write(data)
++                stream.flush()
++                os.fsync(stream.fileno())
++            os.replace(temporary, path)
++        finally:
++            if temporary and temporary.exists():
++                temporary.unlink()
++
++    progress({"stage": "preparing"})
++    result = refresh(progress=progress)
++    complete = result.fresh and result.signature_verified and result.update_outcome != "failed"
++    progress({"stage": "complete" if complete else "failed", "result": status_json(result)})
++    return 0 if complete else 4
++
++
++def read_job(request_id: str) -> dict:
++    directory = default_cache_directory()
++    path = job_path(request_id, directory)
++    _validate_directory(directory)
++    _validate_record(path)
++    value = json.loads(BundleVerifier._read(path, 8192))
++    if not isinstance(value, dict) or value.get("requestId") != request_id or value.get("stage") not in STAGES:
++        raise UpdateError("Invalid update progress identity")
++    if value["stage"] == "complete":
++        result = value.get("result")
++        _, actual = load_cached(directory)
++        if not isinstance(result, dict) or not actual.fresh or not actual.signature_verified or (
++                result.get("epoch"), result.get("record_count")) != (actual.epoch, actual.record_count):
++            raise UpdateError("Completed update no longer matches authenticated cache")
++    return value
+--- a/packaging/online/build_iexpress.ps1
++++ b/packaging/online/build_iexpress.ps1
+@@ -30,7 +30,7 @@
+     if (($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {throw 'Build payload reparse point forbidden'}
+     @{path=($_.FullName.Substring($package.Length).TrimStart('\') -replace '\\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+   })
+-  @{schema=1;product='MalGuard clean-room desktop';version='1.3.1';files=$records} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $package 'install-manifest.json') -Encoding UTF8
++  @{schema=1;product='MalGuard clean-room desktop';version='1.3.2';files=$records} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $package 'install-manifest.json') -Encoding UTF8
+   $payload=Join-Path $work 'payload.zip'
+   Compress-Archive -Path (Join-Path $package '*') -DestinationPath $payload -CompressionLevel Optimal
+   $digest=(Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
+@@ -146,7 +146,7 @@
+   New-Item -ItemType Directory -Path $DiagnosticDirectory -Force | Out-Null
+   Copy-Item -LiteralPath $payload -Destination (Join-Path $DiagnosticDirectory 'payload.zip')
+   Copy-Item -LiteralPath (Join-Path $work 'install.ps1') -Destination (Join-Path $DiagnosticDirectory 'install.ps1')
+-  @{payloadHash=$digest;format='IExpress-PowerShell';engineVersion='1.2.1';appVersion='1.3.1'} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $DiagnosticDirectory 'build.json') -Encoding UTF8
++  @{payloadHash=$digest;format='IExpress-PowerShell';engineVersion='1.2.2';appVersion='1.3.2'} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $DiagnosticDirectory 'build.json') -Encoding UTF8
+   Write-Output ('IExpress installer built: '+$outputPath)
+ } finally {Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue}
+ exit 0
+--- a/packaging/online/install_iexpress.ps1
++++ b/packaging/online/install_iexpress.ps1
+@@ -247,13 +247,13 @@
+   $uninstallKey='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MalGuard'
+   New-Item -Path $uninstallKey -Force | Out-Null
+   $uninstallCommand='"'+$powershell+'" -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $target 'uninstall.ps1')+'"'
+-  foreach ($entry in @{DisplayName='MalGuard / GTA Guard';DisplayVersion='1.3.1';Publisher='MalGuard';InstallLocation=$target;DisplayIcon=(Join-Path $target 'malguard-desktop.exe');UninstallString=$uninstallCommand;QuietUninstallString=($uninstallCommand+' -Quiet')}.GetEnumerator()) {
++  foreach ($entry in @{DisplayName='MalGuard / GTA Guard';DisplayVersion='1.3.2';Publisher='MalGuard';InstallLocation=$target;DisplayIcon=(Join-Path $target 'malguard-desktop.exe');UninstallString=$uninstallCommand;QuietUninstallString=($uninstallCommand+' -Quiet')}.GetEnumerator()) {
+     Set-ItemProperty -LiteralPath $uninstallKey -Name $entry.Key -Value $entry.Value
+   }
+   # Preserve the previous installation as a rollback copy instead of deleting
+   # files or reports that may have been added by the user.
+   Set-InstallStage 'complete' 'Installation complete'
+-  $result=@{schema=1;installed=$true;format='IExpress-PowerShell';version='1.3.1';target=$target;setupProcess64Bit=[Environment]::Is64BitProcess;previousInstallation=$(if ($replaced) {$backup} else {''});warning=$message;elapsedMs=$setupWatch.ElapsedMilliseconds;stages=$stageTimings.ToArray();requiresDeviceLicense=$false;installerPasswordRequired=$false}
++  $result=@{schema=1;installed=$true;format='IExpress-PowerShell';version='1.3.2';target=$target;setupProcess64Bit=[Environment]::Is64BitProcess;previousInstallation=$(if ($replaced) {$backup} else {''});warning=$message;elapsedMs=$setupWatch.ElapsedMilliseconds;stages=$stageTimings.ToArray();requiresDeviceLicense=$false;installerPasswordRequired=$false}
+   $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $target 'installation-result.json') -Encoding UTF8
+   if (-not $noLaunchMode) {Start-Process -FilePath (Join-Path $target 'malguard-desktop.exe') -WorkingDirectory $target}
+   if (-not $quietMode) {
+--- a/packaging/online/package_source.py
++++ b/packaging/online/package_source.py
+@@ -30,7 +30,7 @@
+             archive.write(path, path.relative_to(root).as_posix())
+     data = args.output.read_bytes()
+     manifest = {"sha256": hashlib.sha256(data).hexdigest(), "files": len(files), "bytes": len(data),
+-                "app_version": "1.3.1", "engine_version": "1.2.1", "cleanroom": True,
++                "app_version": "1.3.2", "engine_version": "1.2.2", "cleanroom": True,
+                 "synthetic_tests_only": True}
+     args.output.with_suffix(".json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+     print(json.dumps(manifest))
+--- a/packaging/online/seal_gated_build.py
++++ b/packaging/online/seal_gated_build.py
+@@ -29,15 +29,15 @@
+     wrapped = public.encrypt(key, padding.OAEP(
+         mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None
+     ))
+-    aad = b"MalGuard site-gated desktop 1.3.1:" + source.encode("ascii")
++    aad = b"MalGuard site-gated desktop 1.3.2:" + source.encode("ascii")
+     sealed = b"MGBUILD2" + struct.pack(">I", len(wrapped)) + wrapped + nonce + AESGCM(key).encrypt(
+         nonce, data, aad
+     )
+     (root / (exe.name + ".sealed")).write_bytes(sealed)
+     manifest = {
+         "schema": 1, "status": "site-gated-windows-build-verified",
+-        "app_version": "1.3.1", "engine_version": "1.2.1", "source_commit": source,
+-        "build": "MG-1.3.1-WIN64-" + source[:12], "filename": exe.name,
++        "app_version": "1.3.2", "engine_version": "1.2.2", "source_commit": source,
++        "build": "MG-1.3.2-WIN64-" + source[:12], "filename": exe.name,
+         "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+         "sealed_sha256": hashlib.sha256(sealed).hexdigest(),
+         "requires_device_license": False, "installer_password_required": False,
+--- a/packaging/online/smoke_gui_install.ps1
++++ b/packaging/online/smoke_gui_install.ps1
+@@ -58,7 +58,7 @@
+ $installation=Get-Content -LiteralPath (Join-Path $install 'installation-result.json') -Raw | ConvertFrom-Json
+ if (-not $installation.installed -or $installation.format -ne 'IExpress-PowerShell' -or -not $installation.setupProcess64Bit) {throw '64-bit IExpress installation result missing'}
+ $checks+=@{name='iexpress-powershell-exe-install';passed=$true}
+-if ($installation.version -ne '1.3.1' -or $installation.requiresDeviceLicense -ne $false -or $installation.installerPasswordRequired -ne $false -or $installation.elapsedMs -le 0 -or $installation.stages.Count -ne 8) {throw 'Unrestricted setup result or real stage timing is missing'}
++if ($installation.version -ne '1.3.2' -or $installation.requiresDeviceLicense -ne $false -or $installation.installerPasswordRequired -ne $false -or $installation.elapsedMs -le 0 -or $installation.stages.Count -ne 8) {throw 'Unrestricted setup result or real stage timing is missing'}
+ $license=& $engine --license-status | ConvertFrom-Json
+ if ($LASTEXITCODE -ne 0 -or $license.private_build -ne $false -or $license.authorized -ne $true -or $license.reason -ne 'PUBLIC_BUILD') {throw 'Installed engine still requires a device license'}
+ $checks+=@{name='no-device-license-or-installer-password';passed=$true;elapsedMs=$installation.elapsedMs;stages=$installation.stages}
+@@ -77,6 +77,24 @@
+ $online=& $engine --security-status | ConvertFrom-Json
+ if ($LASTEXITCODE -ne 0 -or -not $online.available -or -not $online.fresh -or $online.record_count -le 0) {throw 'Installed signed online feed is unavailable or stale'}
+ $checks+=@{name='installed-signed-online-feed';passed=$true;epoch=$online.epoch;record_count=$online.record_count}
++$updateId=[guid]::NewGuid().ToString()
++& $engine --desktop-update $updateId
++if ($LASTEXITCODE -ne 0) {throw 'Installed desktop update job did not complete'}
++$completedUpdate=& $engine --desktop-update-status $updateId | ConvertFrom-Json
++if ($LASTEXITCODE -ne 0 -or $completedUpdate.requestId -ne $updateId -or $completedUpdate.stage -ne 'complete' -or
++    -not $completedUpdate.result.signature_verified -or -not $completedUpdate.result.fresh -or
++    $completedUpdate.result.new_record_count -lt 0 -or $completedUpdate.result.existing_record_count -ne $online.record_count -or
++    $completedUpdate.result.new_record_count+$completedUpdate.result.existing_record_count -ne $completedUpdate.result.record_count) {
++  throw 'Installed desktop update returned incorrect authenticated new/known counts'
++}
++$checks+=@{name='installed-desktop-update-completion-and-counts';passed=$true;new_records=$completedUpdate.result.new_record_count;existing_records=$completedUpdate.result.existing_record_count;total_records=$completedUpdate.result.record_count}
++$progressPath=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) ('MalGuardSecurityUpdates/refresh-'+$updateId+'.json')
++$progressAcl=Get-Acl -LiteralPath $progressPath
++if ($progressAcl.Owner -notmatch 'Administrators$|SYSTEM$' -or -not $progressAcl.AreAccessRulesProtected) {throw 'Desktop update progress owner/DACL is unprotected'}
++foreach ($ace in $progressAcl.Access) {
++  if ($ace.IdentityReference -match 'Users$' -and ($ace.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -ne 0) {throw 'Ordinary users may forge update completion'}
++}
++$checks+=@{name='update-progress-readonly-acl';passed=$true}
+ $detectionFixtures=Join-Path $env:RUNNER_TEMP ('mg-detection-'+[guid]::NewGuid().ToString('N'))
+ try {
+   Push-Location (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+--- a/packaging/online/test_setup_deadlines.ps1
++++ b/packaging/online/test_setup_deadlines.ps1
+@@ -17,7 +17,7 @@
+ $assignment=$ast.Find({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$result'},$true)
+ . ([scriptblock]::Create($assignment.Extent.Text))
+ $roundtrip=$result | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+-if ($roundtrip.stages.Count -ne 8 -or $roundtrip.version -ne '1.3.1' -or $roundtrip.requiresDeviceLicense -ne $false -or $roundtrip.installerPasswordRequired -ne $false) {throw 'Actual installer completion metadata could not be serialized'}
++if ($roundtrip.stages.Count -ne 8 -or $roundtrip.version -ne '1.3.2' -or $roundtrip.requiresDeviceLicense -ne $false -or $roundtrip.installerPasswordRequired -ne $false) {throw 'Actual installer completion metadata could not be serialized'}
+ $root=Join-Path $env:RUNNER_TEMP ('mg-deadline-'+[guid]::NewGuid().ToString('N'))
+ New-Item -ItemType Directory -Path $root | Out-Null
+ try {
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@
+ 
+ [project]
+ name = "malguard"
+-version = "1.2.1"
++version = "1.2.2"
+ description = "Defensive static analysis of GTA V mods with authenticated online intelligence"
+ requires-python = ">=3.12,<3.13"
+ dependencies = [
+--- a/tests/desktop/browser.mjs
++++ b/tests/desktop/browser.mjs
+@@ -162,10 +162,10 @@
+     route.request().url().startsWith(url) ? route.continue() : route.abort(),
+   );
+   await page.exposeBinding("__nativeInvoke", async (_source, name, args) => {
+-    if (name === "release_info") return { build: "MG-1.3.1-WIN64-development" };
++    if (name === "release_info") return { build: "MG-1.3.2-WIN64-development" };
+     if (name === "security_status") return engine("--security-status");
+     if (name === "choose_file") return path.join(fixtures, chosen);
+-    if (name === "refresh_security") return null;
++    if (name === "refresh_security") return {requestId: args.requestId, stage: "failed"};
+     if (name === "scan_selected") {
+       if (gate) await gate.promise;
+       lastScan = await engine(
+@@ -198,13 +198,16 @@
+   });
+   await page.addInitScript(() => {
+     const listeners = [];
++    const updateListeners = [];
+     window.__emitScan = (payload) => listeners.forEach((fn) => fn({ payload }));
++    window.__emitUpdate = (payload) => updateListeners.forEach((fn) => fn({payload}));
+     window.__TAURI__ = {
+       core: { invoke: (name, args) => window.__nativeInvoke(name, args) },
+       event: {
+         listen: async (name, fn) => {
+-          if (name !== "scan-progress") throw new Error("Unknown event");
+-          listeners.push(fn);
++          if (name === "scan-progress") listeners.push(fn);
++          else if (name === "update-progress") updateListeners.push(fn);
++          else throw new Error("Unknown event");
+           return () => {};
+         },
+       },
+@@ -466,17 +469,17 @@
+     path.join(cache, "latest.json"),
+     JSON.stringify(corrupted),
+   );
+-  await page.click("#statusButton");
+-  await page.waitForFunction(
+-    () => !document.getElementById("statusButton").disabled,
++  await page.click("#updateButton");
++  await page.waitForFunction(
++    () => !document.getElementById("updateButton").disabled,
+   );
+   check(
+     !(await page.textContent("#updateStatus")).includes("1,342"),
+     "Invalid signature cannot retain a verified count",
+   );
+   check(
+-    (await page.textContent("#updateStatus")).includes("تأییدشده"),
+-    "Missing authenticated cache is explained",
++    (await page.textContent("#updateStatus")).includes("به‌روزرسانی کامل نشد"),
++    "Failed update cannot claim an unauthenticated cache is current",
+   );
+   await page.click("#chooseButton");
+   await page.click("#scanButton");
+--- /dev/null
++++ b/tests/desktop/update-browser.mjs
+@@ -0,0 +1,109 @@
++// Actual Python update jobs and signed inert fixtures through the desktop UI.
++// Only the native UAC prompt, IPC and network transport are substituted.
++import assert from 'node:assert/strict';
++import fs from 'node:fs/promises';
++import path from 'node:path';
++import http from 'node:http';
++import {spawn} from 'node:child_process';
++import {fileURLToPath,pathToFileURL} from 'node:url';
++const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
++const output=process.env.MALGUARD_UPDATE_QA_OUTPUT;
++if(!output||!process.env.PLAYWRIGHT_MODULE)throw new Error('Set QA output and Playwright module');
++const python=process.env.MALGUARD_PYTHON||'python';
++const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
++let page,scenario='new',pendingApproval=null,tests=0;
++const stages=[],errors=[];
++const check=(ok,message)=>{assert.ok(ok,message);tests++;};
++async function driver(...args){return new Promise((resolve,reject)=>{
++ const child=spawn(python,[path.join(root,'tests/desktop/update_driver.py'),args[0],output,...args.slice(1)],{cwd:root,stdio:['ignore','pipe','pipe']});
++ let stdout='',pending='';
++ child.stdout.on('data',data=>stdout+=data);
++ child.stderr.on('data',data=>{
++  pending+=data;const lines=pending.split('\n');pending=lines.pop();
++  for(const line of lines){try{const event=JSON.parse(line);stages.push(event);page?.evaluate(p=>window.__emit('update-progress',p),event).catch(()=>{});}catch{}}
++ });
++ child.on('error',reject);child.on('exit',code=>{if(code)reject(new Error('Inert update driver failed'));else{try{resolve(stdout.trim()?JSON.parse(stdout):null);}catch(e){reject(e);}}});
++});}
++await driver('prepare');
++const server=http.createServer(async(req,res)=>{
++ const file={'/':'index.html','/app.js':'app.js','/app.css':'app.css'}[new URL(req.url,'http://localhost').pathname];
++ if(!file){res.writeHead(404);res.end();return;}
++ res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');
++ res.end(await fs.readFile(path.join(root,'desktop/ui',file)));
++});
++await new Promise(done=>server.listen(0,'127.0.0.1',done));
++const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true});
++try{
++ page=await browser.newPage({viewport:{width:900,height:850}});
++ page.on('pageerror',e=>errors.push(e.message));
++ await page.exposeBinding('__native',async(_source,name,args)=>{
++  if(name==='release_info')return{build:'MG-1.3.2-WIN64-update-fixture'};
++  if(name==='security_status')return driver('status');
++  if(name==='refresh_security'){
++   if(pendingApproval)await pendingApproval.promise;
++   if(scenario==='cancel')throw new Error('UPDATE_APPROVAL_DECLINED');
++   if(scenario==='timeout')throw new Error('UPDATE_TIMED_OUT');
++   return driver('job',args.requestId,scenario);
++  }
++  throw new Error('Unexpected IPC command');
++ });
++ await page.addInitScript(()=>{
++  const listeners=new Map();
++  window.__emit=(name,payload)=>listeners.get(name)?.forEach(fn=>fn({payload}));
++  window.__TAURI__={core:{invoke:(name,args)=>window.__native(name,args)},event:{listen:async(name,fn)=>{
++   if(!listeners.has(name))listeners.set(name,[]);listeners.get(name).push(fn);return()=>{};
++  }}};
++ });
++ await page.goto('http://127.0.0.1:'+server.address().port);
++ await page.waitForFunction(()=>document.getElementById('updateStatus').textContent.includes('SHA-256'));
++ check(await page.locator('#statusButton').count()===0,'There is one update action');
++ pendingApproval={};pendingApproval.promise=new Promise(done=>pendingApproval.resolve=done);
++ await page.click('#updateButton');
++ check(await page.isVisible('#updateActivity'),'Animation starts during real approval wait');
++ check(await page.locator('#updateButton').isDisabled(),'Second request is prevented');
++ check((await page.textContent('#updateStatus')).includes('administrator'),'Approval is not reported as a download');
++ await page.evaluate(()=>window.__emit('update-progress',{requestId:'12345678-abcd-abcd-abcd-123456789abc',stage:'installing'}));
++ check((await page.textContent('#updateStatus')).includes('administrator'),'Other job telemetry ignored');
++ pendingApproval.resolve();pendingApproval=null;
++ await page.waitForFunction(()=>document.getElementById('updateTransfer').hasAttribute('value'));
++ check((await page.textContent('#updateBytes')).includes('%'),'Real received byte percentage shown');
++ await page.screenshot({path:path.join(output,'update-receiving-en.png')});
++ await page.waitForFunction(()=>!document.getElementById('updateButton').disabled);
++ check((await page.textContent('#updateStatus')).includes('1 new unique'),'One actual new hash reported');
++ check(await page.textContent('#newHashCount')==='1','New count is one');
++ check(await page.textContent('#knownHashCount')==='1','Previously present count is one');
++ check(await page.textContent('#totalHashCount')==='2','Authenticated total is two');
++ check(!await page.isVisible('#updateActivity'),'Working animation ends only after result');
++ check(['downloading','verifying','comparing','installing'].every(s=>stages.some(p=>p.stage===s)),'Actual engine phases emitted');
++ scenario='repeat';await page.click('#updateButton');
++ await page.waitForFunction(()=>!document.getElementById('updateButton').disabled);
++ check((await page.textContent('#updateStatus')).includes('No new information'),'Repeat reports already current');
++ check(await page.textContent('#newHashCount')==='0'&&await page.textContent('#knownHashCount')==='2','Duplicates do not inflate new count');
++ scenario='rules';await page.click('#updateButton');await page.waitForFunction(()=>!document.getElementById('updateButton').disabled);
++ check((await page.textContent('#updateStatus')).includes('rules updated'),'Rules-only update is distinguished');
++ const before=await fs.readFile(path.join(output,'cache/latest.json'));
++ for(const mode of ['offline','tamper','cancel','timeout']){
++  scenario=mode;await page.click('#updateButton');await page.waitForFunction(()=>!document.getElementById('updateButton').disabled);
++  check(!await page.isVisible('#updateCounts'),mode+' does not publish success counts');
++  check((await page.textContent('#updateStatus')).match(/did not complete|cancelled|time limit/),mode+' clearly explained');
++  check((await fs.readFile(path.join(output,'cache/latest.json'))).equals(before),mode+' preserves verified cache');
++ }
++ scenario='unknown';await page.selectOption('#languageSelect','fa');await page.click('#updateButton');
++ await page.waitForFunction(()=>document.getElementById('updateBytes').textContent.includes('اعلام نشده'));
++ check(!await page.locator('#updateTransfer').getAttribute('value'),'Unknown size uses indeterminate progress');
++ check((await page.textContent('#updateStage')).includes('دریافت'),'Persian shows actual download stage');
++ await page.emulateMedia({reducedMotion:'reduce'});
++ check(await page.locator('.update-orbit').evaluate(node=>getComputedStyle(node,'::before').animationName)==='none','Reduced motion respected');
++ await page.screenshot({path:path.join(output,'update-receiving-fa.png')});
++ await page.waitForFunction(()=>!document.getElementById('updateButton').disabled);
++ check((await page.textContent('#updateStatus')).includes('اطلاعات جدید دریافت شد'),'Persian success result shown');
++ check(await page.textContent('#newHashCount')==='۱'&&await page.textContent('#totalHashCount')==='۳','Persian uses actual new and total counts');
++ scenario='unknown';await page.click('#updateButton');await page.waitForFunction(()=>!document.getElementById('updateButton').disabled);
++ check((await page.textContent('#updateStatus')).includes('اطلاعات جدیدی وجود ندارد'),'Persian duplicate result matches request');
++ await page.setViewportSize({width:700,height:850});
++ check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'RTL update layout fits desktop minimum width');
++ await page.screenshot({path:path.join(output,'update-current-fa.png')});
++ check(errors.length===0,'No page errors');
++ await fs.writeFile(path.join(output,'update-qa.json'),JSON.stringify({passed:tests,errors,actual_signed_inert_jobs:true,stages:[...new Set(stages.map(s=>s.stage))]},null,2));
++ console.log(JSON.stringify({passed:tests,actual_signed_inert_jobs:true,errors}));
++}finally{await browser.close();await new Promise(done=>server.close(done));}
+--- /dev/null
++++ b/tests/desktop/update_driver.py
+@@ -0,0 +1,84 @@
++"""Inert signed fixtures for browser update QA; never used by production code."""
++import base64
++import importlib.util
++import io
++import json
++import sys
++import time
++from datetime import UTC, datetime
++from pathlib import Path
++
++from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
++from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
++
++from malguard_core.integrity import ProtectedEpochState
++from malguard_core.reputation.trust import PUBLIC_KEYS
++import malguard_core.updates as updates
++import malguard_core.updates.desktop as jobs
++
++
++def main():
++    mode, output, *args = sys.argv[1:]
++    root = Path(output)
++    cache = root / "cache"
++    root.mkdir(parents=True, exist_ok=True)
++    if mode == "prepare":
++        key = Ed25519PrivateKey.generate()
++        (root / "public-key").write_bytes(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
++        PUBLIC_KEYS["malguard-online-2026-10"] = (root / "public-key").read_bytes()
++        source = Path(__file__).resolve().parents[2] / "packaging/online/publish_feed.py"
++        spec = importlib.util.spec_from_file_location("fixture_publisher", source)
++        assert spec and spec.loader
++        module = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(module)
++        rules = (source.parents[2] / "rules/gta_guard.yar").read_bytes()
++        private = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
++        previous = None
++        for index, hashes in enumerate([["a"*64], ["a"*64, "b"*64], ["a"*64, "b"*64],
++                                        ["a"*64, "b"*64, "c"*64]]):
++            metadata = json.dumps({"query_status": "ok", "data": [{"sha256_hash": h} for h in hashes]}).encode()
++            snapshot = module.build_snapshot(metadata, private, index+100, datetime.now(UTC),
++                rules + (b"\n// inert rules change\n" if index >= 2 else b""), previous)
++            previous = json.dumps(snapshot).encode()
++            (root / f"feed-{index}.json").write_bytes(previous)
++        PUBLIC_KEYS["malguard-online-2026-10"] = (root / "public-key").read_bytes()
++        updates.install((root / "feed-0.json").read_bytes(), cache, ProtectedEpochState(root / "epochs"))
++        return
++    PUBLIC_KEYS["malguard-online-2026-10"] = (root / "public-key").read_bytes()
++    updates.default_cache_directory = lambda: cache
++    jobs.default_cache_directory = lambda: cache
++    updates.ProtectedEpochState = lambda: ProtectedEpochState(root / "epochs")
++    if mode == "status":
++        print(json.dumps(updates.status_json(updates.load_cached(cache)[1])))
++        return
++    request_id, scenario = args
++    payload = (root / ("feed-3.json" if scenario == "unknown" else
++                       "feed-2.json" if scenario == "rules" else "feed-1.json")).read_bytes()
++    if scenario == "tamper":
++        parsed = json.loads(payload)
++        parsed["signature_b64"] = base64.b64encode(bytes(64)).decode()
++        payload = json.dumps(parsed).encode()
++    class Response(io.BytesIO):
++        status = 200
++        headers = {} if scenario == "unknown" else {"Content-Length": str(len(payload))}
++        def read(self, limit=-1):
++            time.sleep(0.05)
++            return super().read(min(limit, 4096))
++    class Opener:
++        def open(self, request, timeout):
++            if scenario == "offline":
++                raise OSError("Inert offline fixture")
++            return Response(payload)
++    updates.build_opener = lambda *unused: Opener()
++    notify = updates._notify
++    def telemetry(progress, stage, **values):
++        notify(progress, stage, **values)
++        print(json.dumps({"requestId": request_id, "stage": stage, **values}), file=sys.stderr, flush=True)
++        time.sleep(0.06)
++    updates._notify = telemetry
++    jobs.run_job(request_id)
++    print(json.dumps(jobs.read_job(request_id)))
++
++
++if __name__ == "__main__":
++    main()
+--- a/tests/security/test_online_updates.py
++++ b/tests/security/test_online_updates.py
+@@ -138,3 +138,144 @@
+     with Scanner(reputation_fresh=False) as scanner:
+         assert scanner.scan_file(benign).verdict.value == "INCONCLUSIVE"
+         assert scanner.scan_file(harmful).verdict.value == "MALICIOUS"
++
++
++def test_refresh_counts_only_new_unique_hashes(publisher, tmp_path):
++    directory = tmp_path / "cache"
++    state = ProtectedEpochState(tmp_path / "epochs")
++    first = publisher(b"first synthetic")
++    initial = install(first, directory, state)
++    assert (initial.new_record_count, initial.existing_record_count,
++            initial.previous_record_count, initial.update_outcome) == (1, 0, 0, "updated")
++    repeated = install(publisher(b"first synthetic", epoch=101, previous=first), directory, state)
++    assert (repeated.new_record_count, repeated.existing_record_count,
++            repeated.update_outcome) == (0, 1, "up_to_date")
++    previous = (directory / "latest.json").read_bytes()
++    added = install(publisher(b"second synthetic", epoch=102, previous=previous), directory, state)
++    assert (added.new_record_count, added.existing_record_count,
++            added.previous_record_count, added.record_count) == (1, 1, 1, 2)
++    assert not added.rules_changed and added.update_outcome == "updated"
++
++
++def test_rules_change_is_reported_even_without_new_hashes(publisher, tmp_path):
++    directory = tmp_path / "cache"
++    state = ProtectedEpochState(tmp_path / "epochs")
++    first = publisher()
++    install(first, directory, state)
++    rules = (Path(__file__).resolve().parents[2] / "rules/gta_guard.yar").read_bytes()
++    result = install(publisher(epoch=101, previous=first, rule_source=rules+b"\n// updated fixture\n"),
++                     directory, state)
++    assert result.new_record_count == 0 and result.existing_record_count == 1
++    assert result.rules_changed and result.update_outcome == "updated"
++
++
++def test_install_progress_requires_signature_before_comparison(publisher, tmp_path):
++    events = []
++    directory = tmp_path / "cache"
++    state = ProtectedEpochState(tmp_path / "epochs")
++    valid = publisher()
++    install(valid, directory, state, progress=events.append)
++    assert [e["stage"] for e in events] == ["verifying", "comparing", "installing"]
++    invalid = json.loads(publisher(epoch=101, previous=valid))
++    invalid["signature_b64"] = base64.b64encode(bytes(64)).decode()
++    events.clear()
++    with pytest.raises(BundleError):
++        install(json.dumps(invalid).encode(), directory, state, progress=events.append)
++    assert [e["stage"] for e in events] == ["verifying"]
++    assert (directory / "latest.json").read_bytes() == valid
++
++
++def test_download_progress_counts_actual_bytes(monkeypatch):
++    import io
++    import malguard_core.updates as updates
++    payload = b"harmless transport fixture" * 8000
++    class Response(io.BytesIO):
++        status = 200
++        headers = {"Content-Length": str(len(payload))}
++    class Opener:
++        def open(self, request, timeout):
++            assert request.full_url == updates.UPDATE_URL and timeout == 30
++            return Response(payload)
++    monkeypatch.setattr(updates, "build_opener", lambda *args: Opener())
++    events = []
++    assert updates.download(progress=events.append) == payload
++    counts = [event["receivedBytes"] for event in events]
++    assert counts[0] == 0 and counts[-1] == len(payload)
++    assert counts == sorted(set(counts)) and len(counts) > 3
++    assert all(event["totalBytes"] == len(payload) for event in events)
++
++
++@pytest.mark.parametrize("length,expected", [(None, True), ("10", False), ("0", False),
++                                              (str(24*1024*1024), False)])
++def test_download_unknown_size_or_incorrect_declared_size(monkeypatch, length, expected):
++    import io
++    import malguard_core.updates as updates
++    class Response(io.BytesIO):
++        status = 200
++        headers = {} if length is None else {"Content-Length": length}
++    class Opener:
++        def open(self, request, timeout):
++            return Response(b"fixture")
++    monkeypatch.setattr(updates, "build_opener", lambda *args: Opener())
++    events = []
++    if expected:
++        assert updates.download(progress=events.append) == b"fixture"
++        assert events[-1]["totalBytes"] is None and events[-1]["receivedBytes"] == 7
++    else:
++        with pytest.raises(UpdateError):
++            updates.download(progress=events.append)
++
++
++def test_desktop_job_reports_authenticated_completion_and_duplicate_counts(publisher, tmp_path, monkeypatch):
++    import malguard_core.updates as updates
++    import malguard_core.updates.desktop as jobs
++    directory = tmp_path / "cache"
++    monkeypatch.setattr(updates, "default_cache_directory", lambda: directory)
++    monkeypatch.setattr(jobs, "default_cache_directory", lambda: directory)
++    monkeypatch.setattr(updates, "ProtectedEpochState", lambda: ProtectedEpochState(tmp_path / "epochs"))
++    first = publisher()
++    monkeypatch.setattr(updates, "download", lambda **kwargs: first)
++    request_id = "12345678-abcd-abcd-abcd-123456789abc"
++    assert jobs.run_job(request_id) == 0
++    result = jobs.read_job(request_id)
++    assert result["stage"] == "complete" and result["result"]["new_record_count"] == 1
++    assert result["result"]["signature_verified"] and result["result"]["fresh"]
++    with pytest.raises(UpdateError):
++        jobs.run_job(request_id)
++    second_id = "12345678-abcd-abcd-abcd-123456789abd"
++    monkeypatch.setattr(updates, "download", lambda **kwargs: publisher(epoch=101, previous=first))
++    assert jobs.run_job(second_id) == 0
++    repeated = jobs.read_job(second_id)
++    assert repeated["result"]["new_record_count"] == 0
++    assert repeated["result"]["update_outcome"] == "up_to_date"
++    altered = json.loads((directory / "latest.json").read_bytes())
++    altered["signature_b64"] = base64.b64encode(bytes(64)).decode()
++    (directory / "latest.json").write_text(json.dumps(altered))
++    with pytest.raises(UpdateError):
++        jobs.read_job(second_id)
++
++
++def test_desktop_update_failure_does_not_claim_cached_data_is_new(publisher, tmp_path, monkeypatch):
++    import malguard_core.updates as updates
++    import malguard_core.updates.desktop as jobs
++    directory = tmp_path / "cache"
++    valid = publisher()
++    install(valid, directory, ProtectedEpochState(tmp_path / "epochs"))
++    monkeypatch.setattr(updates, "default_cache_directory", lambda: directory)
++    monkeypatch.setattr(jobs, "default_cache_directory", lambda: directory)
++    def offline(**kwargs):
++        raise OSError("Synthetic disconnected transport")
++    monkeypatch.setattr(updates, "download", offline)
++    request_id = "12345678-abcd-abcd-abcd-123456789abe"
++    assert jobs.run_job(request_id) == 4
++    result = jobs.read_job(request_id)
++    assert result["stage"] == "failed" and result["result"]["update_outcome"] == "failed"
++    assert result["result"]["new_record_count"] is None
++    assert (directory / "latest.json").read_bytes() == valid
++
++
++@pytest.mark.parametrize("request_id", ["../arbitrary", "", "x"*100, "12345678-ABCD-abcd-abcd-123456789abc"])
++def test_desktop_update_identifier_cannot_select_a_path(tmp_path, request_id):
++    from malguard_core.updates.desktop import job_path
++    with pytest.raises(UpdateError):
++        job_path(request_id, tmp_path)
