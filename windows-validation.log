@@ -1,116 +1,21 @@
-........................................................................ [  7%]
-........................................................................ [ 14%]
-........................................................................ [ 21%]
-........................................................................ [ 28%]
-...............................................................s........ [ 35%]
-........................................................................ [ 42%]
-..............FF......s................................................. [ 49%]
-........................................................................ [ 56%]
-........................................................................ [ 63%]
-........................................................................ [ 70%]
-........................................................................ [ 77%]
-........................................................................ [ 84%]
-........................................................................ [ 91%]
-........................................................................ [ 98%]
-.............                                                            [100%]
-================================== FAILURES ===================================
-___ test_desktop_job_reports_authenticated_completion_and_duplicate_counts ____
-
-publisher = <function publisher.<locals>.publish at 0x000001D044220040>
-tmp_path = WindowsPath('C:/Users/runneradmin/AppData/Local/Temp/pytest-of-runneradmin/pytest-0/test_desktop_job_reports_authe0')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D043561F70>
-
-    def test_desktop_job_reports_authenticated_completion_and_duplicate_counts(publisher, tmp_path, monkeypatch):
-        import malguard_core.updates as updates
-        import malguard_core.updates.desktop as jobs
-        directory = tmp_path / "cache"
-        monkeypatch.setattr(updates, "default_cache_directory", lambda: directory)
-        monkeypatch.setattr(jobs, "default_cache_directory", lambda: directory)
-        monkeypatch.setattr(updates, "ProtectedEpochState", lambda: ProtectedEpochState(tmp_path / "epochs"))
-        first = publisher()
-        monkeypatch.setattr(updates, "download", lambda **kwargs: first)
-        request_id = "12345678-abcd-abcd-abcd-123456789abc"
-        assert jobs.run_job(request_id) == 0
->       result = jobs.read_job(request_id)
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-tests\security\test_online_updates.py:240: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
-malguard_core\updates\desktop.py:118: in read_job
-    _validate_record(path)
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
-
-path = WindowsPath('C:/Users/runneradmin/AppData/Local/Temp/pytest-of-runneradmin/pytest-0/test_desktop_job_reports_authe0/cache/refresh-12345678-abcd-abcd-abcd-123456789abc.json')
-
-    def _validate_record(path: Path) -> None:
-        info = path.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 8192:
-            raise UpdateError("Update progress is not an ordinary bounded file")
-        if sys.platform == "win32":
-            from malguard_core.integrity.state import _windows_sddl
-            sddl = _windows_sddl(path)
-            aces = re.findall(r"\(([^()]*)\)", sddl)
-            if not sddl.startswith(("O:BA", "O:SY")) or "D:P" not in sddl or not aces:
-                raise UpdateError("Update progress is not protected")
-            for ace in aces:
-                fields = ace.split(";")
-                if len(fields) != 6 or fields[0] != "A" or (fields[5] not in {"BA", "SY"} and
-                        (fields[5] != "BU" or fields[2] not in {"GR", "0x120089"})):
->                   raise UpdateError("Update progress permits untrusted writers")
-E                   malguard_core.updates.UpdateError: Update progress permits untrusted writers
-
-malguard_core\updates\desktop.py:67: UpdateError
-________ test_desktop_update_failure_does_not_claim_cached_data_is_new ________
-
-publisher = <function publisher.<locals>.publish at 0x000001D0442209A0>
-tmp_path = WindowsPath('C:/Users/runneradmin/AppData/Local/Temp/pytest-of-runneradmin/pytest-0/test_desktop_update_failure_do0')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D04422B1A0>
-
-    def test_desktop_update_failure_does_not_claim_cached_data_is_new(publisher, tmp_path, monkeypatch):
-        import malguard_core.updates as updates
-        import malguard_core.updates.desktop as jobs
-        directory = tmp_path / "cache"
-        valid = publisher()
-        install(valid, directory, ProtectedEpochState(tmp_path / "epochs"))
-        monkeypatch.setattr(updates, "default_cache_directory", lambda: directory)
-        monkeypatch.setattr(jobs, "default_cache_directory", lambda: directory)
-        def offline(**kwargs):
-            raise OSError("Synthetic disconnected transport")
-        monkeypatch.setattr(updates, "download", offline)
-        request_id = "12345678-abcd-abcd-abcd-123456789abe"
-        assert jobs.run_job(request_id) == 4
->       result = jobs.read_job(request_id)
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-tests\security\test_online_updates.py:271: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
-malguard_core\updates\desktop.py:118: in read_job
-    _validate_record(path)
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
-
-path = WindowsPath('C:/Users/runneradmin/AppData/Local/Temp/pytest-of-runneradmin/pytest-0/test_desktop_update_failure_do0/cache/refresh-12345678-abcd-abcd-abcd-123456789abe.json')
-
-    def _validate_record(path: Path) -> None:
-        info = path.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 8192:
-            raise UpdateError("Update progress is not an ordinary bounded file")
-        if sys.platform == "win32":
-            from malguard_core.integrity.state import _windows_sddl
-            sddl = _windows_sddl(path)
-            aces = re.findall(r"\(([^()]*)\)", sddl)
-            if not sddl.startswith(("O:BA", "O:SY")) or "D:P" not in sddl or not aces:
-                raise UpdateError("Update progress is not protected")
-            for ace in aces:
-                fields = ace.split(";")
-                if len(fields) != 6 or fields[0] != "A" or (fields[5] not in {"BA", "SY"} and
-                        (fields[5] != "BU" or fields[2] not in {"GR", "0x120089"})):
->                   raise UpdateError("Update progress permits untrusted writers")
-E                   malguard_core.updates.UpdateError: Update progress permits untrusted writers
-
-malguard_core\updates\desktop.py:67: UpdateError
+........................................................................ [  6%]
+........................................................................ [ 13%]
+........................................................................ [ 20%]
+........................................................................ [ 27%]
+...............................................................s........ [ 34%]
+........................................................................ [ 41%]
+................................s....................................... [ 48%]
+........................................................................ [ 55%]
+........................................................................ [ 62%]
+........................................................................ [ 69%]
+........................................................................ [ 76%]
+........................................................................ [ 83%]
+........................................................................ [ 90%]
+........................................................................ [ 97%]
+.......................                                                  [100%]
 =========================== short test summary info ===========================
 SKIPPED [1] tests\security\test_additional_invariants.py:402: Synthetic FIFO is POSIX-specific
 SKIPPED [1] tests\security\test_signed_security_data.py:44: FIFO races require POSIX
-FAILED tests/security/test_online_updates.py::test_desktop_job_reports_authenticated_completion_and_duplicate_counts - malguard_core.updates.UpdateError: Update progress permits untrusted writers
-FAILED tests/security/test_online_updates.py::test_desktop_update_failure_does_not_claim_cached_data_is_new - malguard_core.updates.UpdateError: Update progress permits untrusted writers
-2 failed, 1017 passed, 2 skipped in 133.30s (0:02:13)
+1029 passed, 2 skipped in 157.16s (0:02:37)
+All checks passed!
+Success: no issues found in 48 source files
