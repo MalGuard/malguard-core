@@ -137,11 +137,12 @@ jobs:
       - name: Synthetic tests and type checks on native Windows
         working-directory: cleanroom-source
         run: |
-          python -m pytest -q --junitxml=windows-tests.xml
+          python -m pytest -q --junitxml=windows-tests.xml *> windows-validation.log
+          Get-Content windows-validation.log
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
-          python -m ruff check .
+          python -m ruff check . >> windows-validation.log
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
-          python -m mypy --platform win32 malguard_core malguard_cli
+          python -m mypy --platform win32 malguard_core malguard_cli >> windows-validation.log
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - name: Verify bounded setup waits using inert Windows processes
         shell: powershell
@@ -262,6 +263,13 @@ jobs:
               Copy-Item -LiteralPath (Join-Path 'verified-desktop' $name) -Destination (Join-Path 'delivery-output' $name) -Force
             }
           }
+          # Failed checks also publish bounded inert test diagnostics, never payloads.
+          foreach ($name in @('windows-tests.xml','windows-validation.log')) {
+            $report=Join-Path 'cleanroom-source' $name
+            if ((Test-Path -LiteralPath $report -PathType Leaf) -and (Get-Item -LiteralPath $report).Length -le 1048576) {
+              Copy-Item -LiteralPath $report -Destination (Join-Path 'delivery-output' $name) -Force
+            }
+          }
           @{schema=1;source_commit=$env:GITHUB_SHA;run_id=$env:GITHUB_RUN_ID;result=$env:BUILD_OUTCOME;windows_runner='windows-2025'} | ConvertTo-Json | Set-Content delivery-output/build-status.json -Encoding UTF8
           # Authenticate this Git process only; no credential is saved in .git.
           $authorization=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('x-access-token:'+$env:GH_TOKEN))
@@ -274,7 +282,8 @@ jobs:
             git config user.name 'MalGuard site-gated build'
             git config user.email 'malguard-build@users.noreply.github.com'
             git add -- $files build-status.json
-            if ($LASTEXITCODE -ne 0 -and $env:BUILD_OUTCOME -ne 'success') {git add -- build-status.json}
+            foreach ($name in @('windows-tests.xml','windows-validation.log')) {if (Test-Path -LiteralPath $name) {git add -- $name}}
+            if ($LASTEXITCODE -ne 0 -and $env:BUILD_OUTCOME -ne 'success') {git add -- build-status.json; foreach ($name in @('windows-tests.xml','windows-validation.log')) {if (Test-Path -LiteralPath $name) {git add -- $name}}}
             git diff --cached --quiet
             if ($LASTEXITCODE -ne 0) {
               git commit -m "Site-gated Windows build evidence $env:GITHUB_RUN_ID"
