@@ -281,9 +281,9 @@ jobs:
           try {
             git config user.name 'MalGuard site-gated build'
             git config user.email 'malguard-build@users.noreply.github.com'
-            git add -- $files build-status.json
+            git add -- build-status.json
+            if ($env:BUILD_OUTCOME -eq 'success') {git add -- $files; if ($LASTEXITCODE -ne 0) {throw 'Verified delivery staging failed'}}
             foreach ($name in @('windows-tests.xml','windows-validation.log')) {if (Test-Path -LiteralPath $name) {git add -- $name}}
-            if ($LASTEXITCODE -ne 0 -and $env:BUILD_OUTCOME -ne 'success') {git add -- build-status.json; foreach ($name in @('windows-tests.xml','windows-validation.log')) {if (Test-Path -LiteralPath $name) {git add -- $name}}}
             git diff --cached --quiet
             if ($LASTEXITCODE -ne 0) {
               git commit -m "Site-gated Windows build evidence $env:GITHUB_RUN_ID"

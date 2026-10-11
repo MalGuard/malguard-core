@@ -205,7 +205,7 @@
  }
  
  fn main() {
---- /dev/null
+--- a/desktop/src-tauri/src/updater.rs
 +++ b/desktop/src-tauri/src/updater.rs
 @@ -0,0 +1,151 @@
 +//! Wait for the fixed installed administrator updater, then authenticate its result.
@@ -909,9 +909,9 @@
  
  
  def status_json(status: UpdateStatus) -> dict:
---- /dev/null
+--- a/malguard_core/updates/desktop.py
 +++ b/malguard_core/updates/desktop.py
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,133 @@
 +"""Bounded, administrator-owned progress records for one desktop update job."""
 +
 +from __future__ import annotations
@@ -950,7 +950,7 @@
 +    convert.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID),
 +                        ctypes.POINTER(wintypes.DWORD))
 +    convert.restype = wintypes.BOOL
-+    if not convert("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GR;;;BU)", 1,
++    if not convert("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;BU)", 1,
 +                   ctypes.byref(descriptor), None):
 +        raise UpdateError("Cannot protect update progress")
 +    try:
@@ -964,21 +964,26 @@
 +        kernel.LocalFree(descriptor)
 +
 +
++def _validate_record_sddl(sddl: str) -> None:
++    aces = re.findall(r"\(([^()]*)\)", sddl)
++    if not sddl.startswith(("O:BA", "O:SY")) or "D:P" not in sddl or not aces:
++        raise UpdateError("Update progress is not protected")
++    for ace in aces:
++        fields = ace.split(";")
++        # Windows maps generic read to FILE_GENERIC_READ and serializes it as
++        # FR. All accepted spellings permit reading only, never file writes.
++        if len(fields) != 6 or fields[0] != "A" or (fields[5] not in {"BA", "SY"} and
++                (fields[5] != "BU" or fields[2] not in {"GR", "FR", "0x120089"})):
++            raise UpdateError("Update progress permits untrusted writers")
++
++
 +def _validate_record(path: Path) -> None:
 +    info = path.lstat()
 +    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 8192:
 +        raise UpdateError("Update progress is not an ordinary bounded file")
 +    if sys.platform == "win32":
 +        from malguard_core.integrity.state import _windows_sddl
-+        sddl = _windows_sddl(path)
-+        aces = re.findall(r"\(([^()]*)\)", sddl)
-+        if not sddl.startswith(("O:BA", "O:SY")) or "D:P" not in sddl or not aces:
-+            raise UpdateError("Update progress is not protected")
-+        for ace in aces:
-+            fields = ace.split(";")
-+            if len(fields) != 6 or fields[0] != "A" or (fields[5] not in {"BA", "SY"} and
-+                    (fields[5] != "BU" or fields[2] not in {"GR", "0x120089"})):
-+                raise UpdateError("Update progress permits untrusted writers")
++        _validate_record_sddl(_windows_sddl(path))
 +    elif info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
 +        raise UpdateError("Update progress is not owner-only")
 +
@@ -1225,7 +1230,7 @@
    );
    await page.click("#chooseButton");
    await page.click("#scanButton");
---- /dev/null
+--- a/tests/desktop/update-browser.mjs
 +++ b/tests/desktop/update-browser.mjs
 @@ -0,0 +1,109 @@
 +// Actual Python update jobs and signed inert fixtures through the desktop UI.
@@ -1337,7 +1342,7 @@
 + await fs.writeFile(path.join(output,'update-qa.json'),JSON.stringify({passed:tests,errors,actual_signed_inert_jobs:true,stages:[...new Set(stages.map(s=>s.stage))]},null,2));
 + console.log(JSON.stringify({passed:tests,actual_signed_inert_jobs:true,errors}));
 +}finally{await browser.close();await new Promise(done=>server.close(done));}
---- /dev/null
+--- a/tests/desktop/update_driver.py
 +++ b/tests/desktop/update_driver.py
 @@ -0,0 +1,84 @@
 +"""Inert signed fixtures for browser update QA; never used by production code."""
@@ -1426,7 +1431,7 @@
 +    main()
 --- a/tests/security/test_online_updates.py
 +++ b/tests/security/test_online_updates.py
-@@ -138,3 +138,144 @@
+@@ -138,3 +138,165 @@
      with Scanner(reputation_fresh=False) as scanner:
          assert scanner.scan_file(benign).verdict.value == "INCONCLUSIVE"
          assert scanner.scan_file(harmful).verdict.value == "MALICIOUS"
@@ -1571,3 +1576,24 @@
 +    from malguard_core.updates.desktop import job_path
 +    with pytest.raises(UpdateError):
 +        job_path(request_id, tmp_path)
++
++
++@pytest.mark.parametrize("rights", ["GR", "FR", "0x120089"])
++def test_desktop_progress_accepts_windows_read_only_spellings(rights):
++    from malguard_core.updates.desktop import _validate_record_sddl
++    _validate_record_sddl(f"O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;{rights};;;BU)")
++
++
++@pytest.mark.parametrize("sddl", [
++    "O:BAD:P(A;;FA;;;BA)(A;;FW;;;BU)",
++    "O:BAD:P(A;;FA;;;BA)(A;;GRGW;;;BU)",
++    "O:BAD:P(A;;FA;;;BA)(A;;FA;;;BU)",
++    "O:BAD:P(A;;FA;;;BA)(A;;0x12019f;;;BU)",
++    "O:BAD:P(A;;FA;;;BA)(A;;FR;;;WD)",
++    "O:BUD:P(A;;FR;;;BU)",
++    "O:BAD:(A;;FR;;;BU)",
++])
++def test_desktop_progress_rejects_untrusted_writers_or_owner(sddl):
++    from malguard_core.updates.desktop import _validate_record_sddl
++    with pytest.raises(UpdateError):
++        _validate_record_sddl(sddl)
