@@ -1,8 +1,8 @@
 <div align="center">
 
-<a href="https://malguard.github.io/"><picture><source media="(prefers-reduced-motion: reduce) and (max-width: 600px)" srcset="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d-mobile-poster.png" /><source media="(max-width: 600px) and (prefers-reduced-motion: no-preference)" srcset="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d-mobile.gif" /><source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d-poster.png" /><img src="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d.gif" alt="The original MalGuard logo in blue and cyan, rendered in 3D — Inspect before you trust." width="100%" /></picture></a>
+<a href="https://malguard.site/"><picture><source media="(prefers-reduced-motion: reduce) and (max-width: 600px)" srcset="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d-mobile-poster.png" /><source media="(max-width: 600px) and (prefers-reduced-motion: no-preference)" srcset="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d-mobile.gif" /><source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d-poster.png" /><img src="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d.gif" alt="The original MalGuard logo in blue and cyan, rendered in 3D — Inspect before you trust." width="100%" /></picture></a>
 
-[Website](https://malguard.github.io/) · [Documentation](https://malguard.github.io/docs.html) · [Trust Center](https://malguard.github.io/trust.html) · [Creator](https://github.com/MalGuard)
+[Website](https://malguard.site/) · [Documentation](https://malguard.site/docs.html) · [Trust Center](https://malguard.site/trust.html) · [Creator](https://github.com/MalGuard)
 
 </div>
 
