@@ -3,7 +3,7 @@ name: Clean-room MalGuard online desktop and signed intelligence
 on:
   push:
     branches: [main]
-    paths: ['cleanroom-v1/**', '.github/workflows/cleanroom-online.yml']
+    paths: ['cleanroom-v1/**', 'tools/ci/publish_cleanroom_feed.py', '.github/workflows/cleanroom-online.yml']
   schedule:
     - cron: '17 1 * * *'
   workflow_dispatch:
@@ -76,7 +76,7 @@ jobs:
       - name: Install the verified locked graph
         working-directory: cleanroom-source
         run: python -m pip install --require-hashes -r requirements-lock.txt
-      - name: Authenticate metadata and sign the candidate
+      - name: Fetch authenticated metadata and sign the candidate
         env:
           MALGUARD_ABUSECH_AUTH_KEY: ${{ secrets.MALGUARD_ABUSECH_AUTH_KEY }}
           MALGUARD_UPDATE_SIGNING_KEY: ${{ secrets.MALGUARD_UPDATE_SIGNING_KEY }}
@@ -84,7 +84,7 @@ jobs:
           UPDATE_ATTEMPT: ${{ github.run_attempt }}
         run: |
           epoch=$((UPDATE_EPOCH * 1000 + UPDATE_ATTEMPT))
-          python cleanroom-source/packaging/online/publish_feed.py --output cleanroom-updates/latest.json --epoch "$epoch"
+          python tools/ci/publish_cleanroom_feed.py --output cleanroom-updates/latest.json --epoch "$epoch"
       - name: Publish only authenticated security data
         env:
           GH_TOKEN: ${{ github.token }}
