@@ -2,6 +2,8 @@
 
 MalGuard accepts defensive-security contributions through reviewed pull requests.
 
+**New to the project?** Start with the [contributor quickstart](docs/CONTRIBUTOR_QUICKSTART.md), then browse [open issues](https://github.com/MalGuard/malguard-core/issues). Small documentation improvements and harmless synthetic regression tests are good starting points.
+
 ## Safety requirements
 
 - Do not commit, upload, download, or execute real malware.
@@ -14,13 +16,19 @@ MalGuard accepts defensive-security contributions through reviewed pull requests
 ## Development workflow
 
 1. Create a branch from the current `main`.
-2. Make the smallest reviewable change.
+2. Make the smallest reviewable change, preferably linked to an open issue.
 3. Add or update tests for security-sensitive behavior.
-4. Run `node tests/run-all.js` and relevant platform tests.
-5. Open a pull request.
+4. Run `node tests/run-all.js` and relevant platform tests, or accurately document which tests you could not run.
+5. Open a pull request using the PR template and record the observed results.
 6. Require review and green CI before merge.
 
 Security-sensitive build, workflow, installer, updater, isolation, and signing changes require especially careful review.
+
+## Reporting bugs and security issues
+
+- For ordinary, non-sensitive bugs, use the [issue tracker](https://github.com/MalGuard/malguard-core/issues) and harmless synthetic reproductions only.
+- For potential vulnerabilities or information that could put users at risk, follow [SECURITY.md](SECURITY.md) and report privately. Never disclose sensitive vulnerability details in public issues.
+- A missing scan detection does not prove that a file is safe. Keep claims and test outcomes evidence-based.
 
 ## Maintainer security
 
