@@ -44,6 +44,8 @@ MalGuard is licensed under the [MIT License](LICENSE).
 
 Contributions are welcome through reviewed pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+**New contributors:** Start with the [5-minute contributor quickstart](docs/CONTRIBUTOR_QUICKSTART.md), then explore [good first issues](https://github.com/MalGuard/malguard-core/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) or [help wanted](https://github.com/MalGuard/malguard-core/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). Documentation and harmless synthetic test improvements are welcome; please never upload or run malware.
+
 ## Security reporting
 
 See [SECURITY.md](SECURITY.md). Do not publish suspected vulnerabilities before maintainers have had a reasonable opportunity to investigate and fix them.
