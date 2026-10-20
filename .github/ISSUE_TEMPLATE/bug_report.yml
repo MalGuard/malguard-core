@@ -1,0 +1,50 @@
+name: Non-security bug report
+description: Report a reproducible issue without including malware, private data, or sensitive vulnerability details.
+title: "[Bug]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security issues must be reported privately.** Do not submit exploits, real malware samples, tokens, user documents, or personal data.
+        Read [SECURITY.md](https://github.com/MalGuard/malguard-core/blob/main/SECURITY.md) first.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: This is not a sensitive vulnerability report and contains no real malware or secrets.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem summary
+      description: What happened? Prefer a harmless synthetic reproduction.
+      placeholder: The version consistency test unexpectedly reports...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use only harmless test data and redact sensitive output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Windows 11, Node.js 22, commit SHA...
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized logs or test output (optional)
+      description: Remove passwords, tokens, identifiers, private paths, and personal information.
+    validations:
+      required: false
