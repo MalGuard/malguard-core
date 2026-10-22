@@ -13,6 +13,12 @@ function safePe() {
     sourceIdentity: { sha256: 'a'.repeat(64), revalidated: true },
     engineResult: { rulesStatus: 'official', peValid: true },
     threatIntel: { status: 'hash_not_found', source: 'cache' },
+    multiEngine: {
+      engines: [
+        { name: 'yara_x', status: 'no_match' },
+        { name: 'capa', status: 'complete' },
+      ],
+    },
   };
 }
 
