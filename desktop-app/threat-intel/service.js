@@ -20,6 +20,8 @@ class ThreatIntelService {
     this.lastRecentSyncAttemptAt = 0;
     this.lastRecentSync = { status: 'never', count: 0, metadataOnly: true };
     this._recentSyncPromise = null;
+    this._autoSyncTimer = null;
+    this._autoSyncStartedAt = null;
   }
 
   _triggerRecentSyncIfDue(force = false) {
@@ -31,6 +33,31 @@ class ThreatIntelService {
       .catch(() => ({ provider: 'malwarebazaar', status: 'unavailable', reason: 'recent_sync_exception', count: 0, metadataOnly: true }))
       .finally(() => { this._recentSyncPromise = null; });
     return this._recentSyncPromise;
+  }
+
+  startAutoSync() {
+    if (this._autoSyncTimer) return { ok: true, alreadyRunning: true, intervalMs: this.recentSyncIntervalMs };
+    this._autoSyncStartedAt = Date.now();
+    const tick = async () => {
+      try {
+        const credential = await this.credentials.status();
+        if (credential && credential.configured) {
+          await this._triggerRecentSyncIfDue(true);
+        }
+      } catch (_) {
+        // Background threat-intel refresh must never crash the scanner.
+      }
+    };
+    void tick();
+    this._autoSyncTimer = setInterval(() => { void tick(); }, this.recentSyncIntervalMs);
+    if (typeof this._autoSyncTimer.unref === 'function') this._autoSyncTimer.unref();
+    return { ok: true, alreadyRunning: false, intervalMs: this.recentSyncIntervalMs };
+  }
+
+  stopAutoSync() {
+    if (this._autoSyncTimer) clearInterval(this._autoSyncTimer);
+    this._autoSyncTimer = null;
+    return { ok: true };
   }
 
   async syncRecent(options = {}) {
@@ -121,7 +148,7 @@ class ThreatIntelService {
       configured: credential.configured,
       credentialSource: credential.source,
       cache: { loaded: cache.loaded, corrupt: cache.corrupt, entries: cache.entries },
-      recentFeed: { ...this.lastRecentSync, inFlight: !!this._recentSyncPromise },
+      recentFeed: { ...this.lastRecentSync, inFlight: !!this._recentSyncPromise, autoSyncRunning: !!this._autoSyncTimer, autoSyncIntervalMs: this.recentSyncIntervalMs, autoSyncStartedAt: this._autoSyncStartedAt },
     };
   }
 }

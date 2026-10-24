@@ -65,6 +65,15 @@ const { ThreatIntelCache } = require('../desktop-app/threat-intel/cache-store.js
   assert.equal(recentCalls, 1, 'status must not trigger a duplicate background sync immediately after manual sync');
   assert.equal(service._recentSyncPromise, null, 'no background cache write should remain after recent manual sync');
 
+  const auto = service.startAutoSync();
+  assert.equal(auto.ok, true);
+  assert.equal(service._autoSyncTimer != null, true);
+  const autoStatus = await service.status();
+  assert.equal(autoStatus.recentFeed.autoSyncRunning, true);
+  assert.equal(autoStatus.recentFeed.autoSyncIntervalMs, 60 * 1000);
+  service.stopAutoSync();
+  assert.equal(service._autoSyncTimer, null);
+
   await fs.promises.rm(dir, { recursive: true, force: true });
   console.log('✓ Threat-intel recent metadata sync populates cache without duplicate post-sync background writes');
 })().catch(error => { console.error(error); process.exit(1); });
