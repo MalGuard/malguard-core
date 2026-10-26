@@ -35,7 +35,15 @@ const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller
   assert.match(xml, /C:\\host&amp;input/);
   assert.doesNotMatch(xml, /<Networking>Enable<\/Networking>/);
 
-  const controller = new SandboxController({ windowsBackend: backend, allowExperimentalDetonation: false });
+  // Deterministic fail-closed checks: never launch a native sandbox or sample in unit tests.
+  // Runtime acceptance tests use a separate Windows-specific harness.
+  const lockedBackend = (available) => ({
+    capabilities: async () => ({ backend: 'windows-sandbox', available, releaseGrade: false }),
+    runContainmentSelfTest: async () => ({ ok: false, code: 'TEST_CONTAINMENT_UNCERTIFIED' }),
+    runIsolationSelfTest: async () => ({ ok: false, code: 'TEST_ISOLATION_UNCERTIFIED' }),
+    analyze: async () => { throw new Error('uncertified backend must never execute a sample'); },
+  });
+  const controller = new SandboxController({ windowsBackend: lockedBackend(true) });
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'malguard-sandbox-test-'));
   try {
     const samplePath = path.join(tempDir, 'synthetic.exe');
@@ -55,8 +63,20 @@ const { SandboxController } = require('../desktop-app/sandbox/sandbox-controller
     const denied = await controller.analyzeUntrustedSample(samplePath);
     assert.equal(denied.ok, false);
     assert.equal(denied.verdict, 'inconclusive');
-    assert(['WINDOWS_SANDBOX_UNAVAILABLE', 'HARDENED_SANDBOX_ACCEPTANCE_PENDING'].includes(denied.code));
+    assert.equal(denied.code, 'WINDOWS_SANDBOX_CERTIFICATION_FAILED');
     assert.equal(denied.preflight.sha256, preflight.sha256);
+    assert.equal(denied.sandboxLaunched, false);
+    assert.equal(denied.sampleExecutionStarted, false);
+    assert.equal(denied.certification.ok, false);
+
+    const unavailableController = new SandboxController({ windowsBackend: lockedBackend(false) });
+    const unavailable = await unavailableController.analyzeUntrustedSample(samplePath);
+    assert.equal(unavailable.ok, false);
+    assert.equal(unavailable.verdict, 'inconclusive');
+    assert.equal(unavailable.code, 'WINDOWS_SANDBOX_UNAVAILABLE');
+    assert.equal(unavailable.preflight.sha256, preflight.sha256);
+    assert.equal(unavailable.sandboxLaunched, false);
+    assert.equal(unavailable.sampleExecutionStarted, false);
   } finally {
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   }
