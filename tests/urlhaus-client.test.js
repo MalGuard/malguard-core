@@ -168,3 +168,58 @@ test('service exposes separate opt-in URL lookup without hash lookups or cache w
   assert.equal((await service.lookupUrl(URL_FIXTURE, { consent: true })).status, 'matched');
   assert.equal(calls, 1);
 });
+
+
+test('URLhaus ID validation does not coerce arrays, objects or unsafe numbers', async () => {
+  for (const id of [['123'], ['123', '456'], {}, null, true, false, 0, -1,
+    1.2, 1e30, '12e3', '../bad', '', []]) {
+    const actual = await lookup(client(async () => response({ ...hit, id })));
+    assert.equal(actual.status, 'invalid_response', 'unexpected accepted id: ' + JSON.stringify(id));
+    assert.equal(actual.reference, undefined);
+  }
+});
+
+test('positive integer URLhaus ID retains previous numeric compatibility', async () => {
+  const actual = await lookup(client(async () => response({ ...hit, id: 123 })));
+  assert.equal(actual.status, 'matched');
+  assert.equal(actual.reference, 'https://urlhaus.abuse.ch/url/123/');
+});
+
+test('calendar-invalid URLhaus timestamps are not returned as evidence', async () => {
+  for (const date_added of ['2026-99-99 99:99:99 UTC', '2026-02-29 12:00:00 UTC',
+    '2025-02-29 12:00:00 UTC', '2026-04-31 12:00:00 UTC',
+    '2026-10-25 24:00:00 UTC', '2026-10-25 23:60:00 UTC',
+    '2026-10-25 23:59:60 UTC', '0000-01-01 00:00:00 UTC',
+    '2026-01-01T01:01:01Z', null, {}, 123]) {
+    const actual = await lookup(client(async () => response({ ...hit, date_added })));
+    assert.equal(actual.status, 'matched');
+    assert.equal(actual.upstreamTimestamp, null);
+  }
+});
+
+test('valid leap-day, boundary and early-year timestamps remain supported', async () => {
+  for (const date_added of ['2024-02-29 00:00:00 UTC',
+    '2026-12-31 23:59:59 UTC', '0001-01-01 00:00:00',
+    '0099-01-01 00:00:00 UTC']) {
+    const actual = await lookup(client(async () => response({ ...hit, date_added })));
+    assert.equal(actual.status, 'matched');
+    assert.equal(actual.upstreamTimestamp, date_added);
+  }
+});
+
+test('no_results with record fields is contradictory, not a negative verdict', async () => {
+  for (const field of ['id', 'url', 'url_status', 'threat', 'date_added']) {
+    const actual = await lookup(client(async () => response({
+      query_status: 'no_results', [field]: hit[field],
+    })));
+    assert.equal(actual.status, 'invalid_response');
+    assert.equal(actual.reason, 'unexpected_shape');
+    assert.equal(actual.verdict, undefined);
+  }
+});
+
+test('ordinary no_results response stays no_match', async () => {
+  const actual = await lookup(client(async () => response({ query_status: 'no_results' })));
+  assert.equal(actual.status, 'no_match');
+  assert.equal(actual.safe, undefined);
+});
