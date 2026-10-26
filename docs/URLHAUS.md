@@ -36,11 +36,12 @@ All results contain `provider: 'urlhaus'`, a source attribution URL, and `status
 | `not_checked` | Consent was absent or the indicator failed local validation. |
 
 Matched results include a URLhaus reference, upstream URL status and threat, and
-the upstream `date_added` as `upstreamTimestamp` when present in the documented
-format (otherwise `null`). The timestamp is when the record was added, not a
+the upstream `date_added` as `upstreamTimestamp` only when its format and
+calendar/time values are valid (otherwise `null`). The timestamp is when the record was added, not a
 freshness guarantee. Offline records still count as matches. Failures never
 produce `no_match`, `clean`, or `safe`; downstream callers must preserve that
-distinction. This adapter alone does not enforce scanner blocking policy.
+distinction. Contradictory `no_results` responses containing matched-record fields
+return `invalid_response`, not `no_match`. This adapter alone does not enforce scanner blocking policy.
 
 The default deadline is 8 seconds across credential retrieval, fetch, and body
 reading. Responses are streamed with a 256 KiB default byte limit. No live API
