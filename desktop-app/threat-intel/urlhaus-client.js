@@ -7,6 +7,27 @@ function result(status, reason, metadata = {}) {
   return { provider: 'urlhaus', source: SOURCE, status, ...(reason ? { reason } : {}), ...metadata };
 }
 
+// URLhaus IDs may be decimal strings or safe positive integers, never arrays or objects.
+function validRecordId(id) {
+  return (typeof id === 'string' && /^\d+$/.test(id)) ||
+    (typeof id === 'number' && Number.isSafeInteger(id) && id > 0);
+}
+
+// A regex alone accepts impossible months, days and times; round-trip through UTC.
+function validUpstreamTimestamp(value) {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})( UTC)?$/.exec(value);
+  if (!match) return false;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
+  if (year === 0) return false;
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, 0);
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day && date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute && date.getUTCSeconds() === second;
+}
+
 class UrlhausClient {
   constructor(options = {}) {
     this.fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -110,13 +131,20 @@ class UrlhausClient {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return result('invalid_response', 'unexpected_shape');
     }
-    if (payload.query_status === 'no_results') return result('no_match');
+    if (payload.query_status === 'no_results') {
+      // An upstream contradiction must never be presented as a negative lookup.
+      const matchedFields = ['id', 'url', 'url_status', 'threat', 'date_added'];
+      if (matchedFields.some((field) => Object.hasOwn(payload, field))) {
+        return result('invalid_response', 'unexpected_shape');
+      }
+      return result('no_match');
+    }
     if (['no_api_key', 'invalid_api_key', 'user_blacklisted'].includes(payload.query_status)) {
       return result('unavailable', 'authentication_failed');
     }
     if (payload.query_status !== 'ok' || payload.url !== indicator ||
         !['online', 'offline', 'unknown'].includes(payload.url_status) ||
-        payload.threat !== 'malware_download' || !/^\d+$/.test(String(payload.id || ''))) {
+        payload.threat !== 'malware_download' || !validRecordId(payload.id)) {
       return result('invalid_response', 'unexpected_shape');
     }
     // Return only allowlisted metadata. Never echo submitted URLs, keys, or raw responses.
@@ -124,9 +152,7 @@ class UrlhausClient {
       reference: SOURCE + 'url/' + payload.id + '/',
       urlStatus: payload.url_status,
       threat: payload.threat,
-      upstreamTimestamp: typeof payload.date_added === 'string' &&
-        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}( UTC)?$/.test(payload.date_added)
-        ? payload.date_added : null,
+      upstreamTimestamp: validUpstreamTimestamp(payload.date_added) ? payload.date_added : null,
     });
   }
 }
