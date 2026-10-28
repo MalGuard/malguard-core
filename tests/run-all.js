@@ -73,6 +73,7 @@ const tests=[
  'settings-store.test.js',
  'access-gate.test.js',
  'malwarebazaar-client.test.js',
+ 'urlhaus-client.test.js',
  'threat-intel-cache.test.js',
  'threat-intel-recent-feed.test.js',
  'credential-store.test.js',
