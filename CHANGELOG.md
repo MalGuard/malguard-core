@@ -1,3 +1,25 @@
+# Changelog
+
+Notable changes are documented here in the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This is a source-history record; **an entry does not establish that a signed or production-certified binary was published**. The authoritative current source version is in `DESKTOP-VERSION` and `package.json`.
+
+## [Unreleased]
+
+### Documentation and community health
+- Clarified developer onboarding, evidence-based feature scope, security limitations and module architecture.
+- Added a public maintenance-evidence index, a source-grounded roadmap, feature-request template and conduct guidelines.
+- Added private disclosure contact and explicit best-effort pre-release support language.
+
+### Verified development history (selected merged pull requests)
+- [#123](https://github.com/MalGuard/malguard-core/pull/123): improved contributor onboarding and safe public issue reporting.
+- [#121](https://github.com/MalGuard/malguard-core/pull/121): added read-only MalGuard MCP tools.
+- [#117](https://github.com/MalGuard/malguard-core/pull/117): integrated Fusion Engine 2.0 and multi-engine scan changes.
+
+These links identify merged source changes, **not** independently verified published GitHub releases or user adoption.
+
+## Historical engineering notes (preserved from the previous changelog)
+
+The following entries predate this documentation update. Their version headings describe development milestones; they do not override the current source version or prove tagged releases.
+
 ## Desktop 0.6.1-dev — Windows acceptance harness
 - Added a synthetic-only Windows acceptance runner that recompiles the native containment probe and Windows service, runs the full regression suite, and emits a machine-readable JSON result.
 - Fixed the Sandbox release gate so Windows-native containment and isolation self-tests can unlock `releaseGrade` only for the current process after both probes actually pass; no stale disk flag is trusted.
@@ -19,8 +41,6 @@
 - Guard: baseline scanning of pre-existing active files, watcher health/reconciliation, protected-file scope filter.
 - Quarantine: strict UUID IDs, trusted payload path derivation, allowed-root restore confinement.
 - Engineering Hardening suite expanded to 17/17 programs and repeated three times after the hardening changes.
-
-# Changelog
 
 ## 0.9.0-rc.1 - 2026-09-12
 

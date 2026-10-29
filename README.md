@@ -1,61 +1,97 @@
-<div align="center">
+# MalGuard Core
 
-<a href="https://malguard.site/"><picture><source media="(prefers-reduced-motion: reduce) and (max-width: 600px)" srcset="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d-mobile-poster.png" /><source media="(max-width: 600px) and (prefers-reduced-motion: no-preference)" srcset="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d-mobile.gif" /><source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d-poster.png" /><img src="https://raw.githubusercontent.com/MalGuard/MalGuard/main/assets/malguard-light-3d.gif" alt="The original MalGuard logo in blue and cyan, rendered in 3D — Inspect before you trust." width="100%" /></picture></a>
+**Open-source defensive scanning and isolation-routing foundations for safer game modifications and suspicious-file inspection.**
 
-[Website](https://malguard.site/) · [Documentation](https://malguard.site/docs.html) · [Trust Center](https://malguard.site/trust.html) · [Creator](https://github.com/MalGuard)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Windows release-candidate workflow](https://github.com/MalGuard/malguard-core/actions/workflows/windows-release-candidate.yml/badge.svg?branch=main)](https://github.com/MalGuard/malguard-core/actions/workflows/windows-release-candidate.yml)
+[![Source version](https://img.shields.io/badge/source-0.8.0--beta.7-informational.svg)](DESKTOP-VERSION)
+[![Latest published release](https://img.shields.io/github/v/release/MalGuard/malguard-core?include_prereleases)](https://github.com/MalGuard/malguard-core/releases)
 
-</div>
+[Website](https://malguard.site/) · [Documentation](https://malguard.site/docs.html) · [Trust Center](https://malguard.site/trust.html) · [Security policy](SECURITY.md) · [Contributor quickstart](docs/CONTRIBUTOR_QUICKSTART.md)
 
-# MalGuard
+MalGuard is a developing defensive-security project focused on game modifications and other untrusted files. The goal is to surface file, archive, script, and executable risk signals while **failing closed** when evidence, provenance, or required isolation is missing. This repository contains the core and local service for GTA Guard and related components; it is **not** a claim that any file declared clean is guaranteed harmless.
 
-MalGuard is an open-source defensive security project focused on safer game-mod analysis, local scanning, and fail-closed isolation. GTA Guard is the first product focus.
+> **Status:** active pre-release source; `package.json` and `DESKTOP-VERSION` identify **0.8.0-beta.7**. Runtime certification, release signing, availability of optional services, and the readiness of a specific distribution are separate gates. Do not equate synthetic tests with production-grade execution isolation.
 
-## Security model
+## What exists in this repository
 
-- Static file, archive, script, and PE-oriented inspection
-- Extension/magic consistency checks and bounded malformed-input handling
-- Fail-closed verdicts: `SAFE`, `SUSPICIOUS`, `MALICIOUS`, and `INCONCLUSIVE`
-- Dedicated Worker isolation for browser-side scanning paths
-- MalGuard isolation routing with MicroVM / portable VM foundations
-- Optional Windows Sandbox backend where available; it is not required for the MalGuard VM path
-- Runtime package integrity and sealed-package verification
-- Signed update and anti-replay enforcement
-- Supply-chain regression checks and pinned CI actions
+These are source-backed components, not independently audited effectiveness claims:
 
-MalGuard does **not** claim that a clean result proves a file is harmless. Isolation backends and host capabilities are certified independently and fail closed when required evidence is unavailable.
+- **Local file and scanner integration:** `desktop-app/scanner-bridge.js` and `desktop-app/server.js` provide the loopback desktop service, scanner integration, file identity checks, and structured fail-closed results.
+- **Static inspection and regression contracts:** tests cover supported archive/script/PE-oriented inspection, malformed input, identity revalidation, scanner resilience, and secure result handling.
+- **Sandbox coordination:** `desktop-app/sandbox/` contains sandbox controllers and isolation backend routing. Windows Sandbox is optional where supported and *must not* be treated as certified without host-specific acceptance. MicroVM/portable-VM paths have their own readiness gates.
+- **Threat-intelligence integration:** `desktop-app/threat-intel/` includes metadata-oriented services and MalwareBazaar client contracts; external services depend on credentials/configuration and availability.
+- **GTA simulation and AI evidence plumbing:** `desktop-app/gta-simulation/` contains orchestration and optional provider interfaces. Not every backend is enabled or certified in every environment.
+- **Integrity and update controls:** package/source provenance, runtime integrity verification, update/release policy, and signing constraints are checked by code and regression tests.
+- **Read-only local MCP tools:** `tools/malguard-mcp-server.mjs` exposes bounded status, sandbox-health, and redacted diagnostics tools, without arbitrary command execution.
 
-## Safe development rule
+Security outcomes should remain `SAFE`, `SUSPICIOUS`, `MALICIOUS` or `INCONCLUSIVE` only when the responsible component has supporting evidence. **Inconclusive is not safe**. Platform-dependent capabilities are explicitly gated.
 
-Do not add, download, or execute real malware in this repository or its CI. Tests must use harmless synthetic fixtures only.
+## Architecture (source-level overview)
 
-## Validation
+```mermaid
+flowchart TD
+    UI["Local UI and loopback service\ndesktop-app/server.js"] --> SC["ScannerBridge\ndesktop-app/scanner-bridge.js"]
+    SC --> STATIC["Static scanning and file-identity verification"]
+    SC --> INTEL["ThreatIntelService\noptional reputation metadata"]
+    UI --> PIPE["ModelScanPipelineManager"]
+    PIPE --> ISO["SandboxController"]
+    ISO --> ROUTER["IsolationBackendRouter"]
+    ROUTER --> WIN["Windows Sandbox\nonly if host-certified"]
+    ROUTER --> VM["MicroVM / portable VM\ncapability-gated backends"]
+    PIPE --> OPTIONAL["Optional cloud inspection, GTA simulation\nand AI evidence adapters"]
+```
 
-Run the engineering hardening suite locally with:
+The diagram documents module relationships, not a promise that each optional path is deployed, available, or release-approved.
+
+## Developer quick start
+
+**Requirements:** Git and Node.js 20+; additional native/Windows-specific dependencies may be needed for platform acceptance. Start with **harmless synthetic fixtures only**.
+
+```bash
+git clone https://github.com/MalGuard/malguard-core.git
+cd malguard-core
+node --version
+node tests/version-consistency.test.js
+```
+
+The focused version check reads `DESKTOP-VERSION` and `package.json`; both files and the test entry point exist in this source tree.
+
+For the broader, environment-sensitive regression suite:
 
 ```bash
 node tests/run-all.js
 ```
 
-Additional release and platform-specific validation runs in GitHub Actions.
+The npm package also maps `npm test` to that same suite. It may require additional platform setup and takes longer; report failures rather than bypassing a safety gate. A local CLI test does **not** certify a Windows sandbox.
 
-## Open source
+For **development-only** use of the loopback desktop service:
 
-MalGuard is licensed under the [MIT License](LICENSE).
+```bash
+npm install --ignore-scripts
+npm start
+```
 
-Contributions are welcome through reviewed pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The `start` script runs `desktop-app/server.js` with its integrity/health preloads and binds to `127.0.0.1:18777` by default. This is a source-development workflow, **not** an end-user install or an assurance that every optional backend works on your host. Do not process real malware or unknown executable samples during development.
 
-**New contributors:** Start with the [5-minute contributor quickstart](docs/CONTRIBUTOR_QUICKSTART.md), then explore [good first issues](https://github.com/MalGuard/malguard-core/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) or [help wanted](https://github.com/MalGuard/malguard-core/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). Documentation and harmless synthetic test improvements are welcome; please never upload or run malware.
+More entry points: `npm run diagnose` (may exit nonzero when a readiness condition fails), `npm run verify:readiness` (strict acceptance gate), and `npm run mcp:stdio` (requires installed package dependencies). They are diagnostics, not claims of certification.
 
-## Security reporting
+## Security and privacy
 
-See [SECURITY.md](SECURITY.md). Do not publish suspected vulnerabilities before maintainers have had a reasonable opportunity to investigate and fix them.
+- File input, paths, update data, and scan metadata are treated as attacker-controlled.
+- Required evidence missing → fail closed; a partial/failed scan cannot be promoted to a clean verdict.
+- No real malware may be downloaded, committed, uploaded, or executed in repository tests or CI.
+- Runtime isolation, package integrity, Windows release signing, and unsigned-preview distribution have separate controls.
+- Reporting is private-first: see [SECURITY.md](SECURITY.md). Read [PRIVACY.md](PRIVACY.md) and [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md).
 
-## Privacy
+## Related MalGuard projects
 
-See [PRIVACY.md](PRIVACY.md).
+- [MalGuard malware-ai](https://github.com/MalGuard/malware-ai) — a related repository for malware-analysis and AI integration; assess capabilities in its own source and documentation.
+- [MalGuard website](https://github.com/MalGuard/malguard.github.io) / [malguard.site](https://malguard.site/) — the public-facing website covering MalGuard AI, GTA Guard, Game Scam Guard and Threat Radar.
+- [Roadmap and current limitations](docs/ROADMAP.md) · [Maintenance evidence](docs/MAINTAINER_EVIDENCE.md) · [Changelog](CHANGELOG.md)
 
-## Code signing policy
+## Contributing and maintenance
 
-See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md).
+We welcome focused, reviewable defensive-security contributions. Start with the [5-minute quickstart](docs/CONTRIBUTOR_QUICKSTART.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [good first issues](https://github.com/MalGuard/malguard-core/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). Normal bugs go through issue forms; possible vulnerabilities should be reported privately via **contact@malguard.site**. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [PR template](.github/PULL_REQUEST_TEMPLATE.md).
 
-The project is preparing an application for free open-source code signing. Until a signing provider accepts the project and a release passes the required signing/verification gates, unsigned release candidates must not be presented as fully signed public Windows releases.
+**License:** [MIT](LICENSE). Project founder and lead developer: Mohammadreza Azarderakhsh. No third-party audit, adoption total, release certification, or funding approval is implied by this README.
