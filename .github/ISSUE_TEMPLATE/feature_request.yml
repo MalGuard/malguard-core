@@ -1,0 +1,38 @@
+name: Feature request (defensive security)
+description: Suggest a scoped enhancement without disclosing vulnerabilities, real malware or private data.
+title: "[Feature]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement. Sensitive vulnerabilities must be disclosed privately via [SECURITY.md](https://github.com/MalGuard/malguard-core/blob/main/SECURITY.md).
+        Do not upload or link to real malware, exploits, credentials, personal data or private samples.
+  - type: textarea
+    id: need
+    attributes:
+      label: User need and defensive use case
+      description: What specific problem should this solve and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe an observable, testable improvement.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security and privacy considerations
+      description: Explain fail-closed behavior, sensitive data handling and any required platform capability gates.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria and harmless tests
+      description: Suggest synthetic test cases and observable results; no real malware.
+    validations:
+      required: false
