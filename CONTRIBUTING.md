@@ -13,6 +13,18 @@ MalGuard accepts defensive-security contributions through reviewed pull requests
 - Do not introduce hidden network access, telemetry, installers, or update behavior.
 - Do not bypass release provenance, integrity, update, or code-signing controls.
 
+## Local setup and reviewable tests
+
+Requirements: Git and Node.js 20+. From the repository root:
+
+```bash
+node tests/version-consistency.test.js
+```
+
+This focused source-contract test does not require downloading samples. For the full suite use `node tests/run-all.js`; many checks are platform-sensitive, so report the actual environment and results. Install optional Node dependencies with `npm install --ignore-scripts` only when needed. Do not claim a test passed unless you ran it.
+
+See [current status and limitations](docs/ROADMAP.md), [community conduct](CODE_OF_CONDUCT.md), and [maintainer evidence](docs/MAINTAINER_EVIDENCE.md).
+
 ## Development workflow
 
 1. Create a branch from the current `main`.
