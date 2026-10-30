@@ -96,6 +96,10 @@ Include failures, baseline comparisons and a reproducibility command; avoid cher
 
 Keep URLs to the license, tagged release, source and test commits, CI run, security policy, reproducible demo, exact measured download counts and actual external contributor work. Track whether Codex was really used on review/maintenance tasks, with evidence of human review. **No star threshold, 90-day activity rule, download level, grant, credits or free Pro access is guaranteed.** Cybersecurity Grant and Codex for OSS are separate applications; do not cite one program's confirmation as the other's.
 
+## Repository merge discipline
+
+MalGuard Core's main-integrity and trusted-release workflows require **two-parent GitHub PR merge commits** on `main`. Do not select squash/rebase merge: it produces a single-parent main commit and blocks trusted release checks even for documentation-only changes. Never weaken or bypass the integrity workflows to make a merge pass. Verify the resulting commit topology and main CI after merge.
+
 ## Release blockers
 
 - Hard-coded or leaked credentials, absent production secret rotation, shared user quota, missing tenant isolation.
