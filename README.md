@@ -9,6 +9,16 @@
 
 [Website](https://malguard.site/) · [Documentation](https://malguard.site/docs.html) · [Trust Center](https://malguard.site/trust.html) · [Security policy](SECURITY.md) · [Contributor quickstart](docs/CONTRIBUTOR_QUICKSTART.md)
 
+## Try it now — no installation or account
+
+**Checking a suspicious game-mod link?** Try the [free Link Inspector](https://malguard.site/tools.html#link-inspector) on the public MalGuard website. Click **Try example** to see what a deceptive link can look like, then check a link's visible URL structure in your own browser. **The tool does not visit the destination or upload the pasted URL**, and it cannot determine whether a site is safe.
+
+**Checking a downloaded file's identity?** Open the [local SHA-256 File Fingerprint tool](https://malguard.site/tools.html#file-fingerprint). It hashes a file in your browser without uploading it to MalGuard. A hash is an identifier, **not a malware verdict**. Do not open untrusted executable files simply to test them.
+
+These browser-only tools live in the [public website source repository](https://github.com/MalGuard/malguard.github.io), while **this repository** contains the GTA Guard scanning and sandbox-routing source. Some Windows release and isolation features are still pre-release or unavailable on some systems.
+
+**For developers:** [run a harmless source-contract test](#developer-quick-start) · [read the trust model](SECURITY.md) · [pick a good first issue](https://github.com/MalGuard/malguard-core/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). If you find MalGuard useful, starring this repository is an optional way to bookmark the work; thoughtful bug reports and contributions are especially valuable.
+
 MalGuard is a developing defensive-security project focused on game modifications and other untrusted files. The goal is to surface file, archive, script, and executable risk signals while **failing closed** when evidence, provenance, or required isolation is missing. This repository contains the core and local service for GTA Guard and related components; it is **not** a claim that any file declared clean is guaranteed harmless.
 
 > **Status:** active pre-release source; `package.json` and `DESKTOP-VERSION` identify **0.8.0-beta.7**. Runtime certification, release signing, availability of optional services, and the readiness of a specific distribution are separate gates. Do not equate synthetic tests with production-grade execution isolation.
