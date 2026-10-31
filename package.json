@@ -17,7 +17,7 @@
     "mcp:stdio": "node tools/malguard-mcp-server.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.3.1",
+    "@modelcontextprotocol/server": "2.4.0",
     "@vercel/sandbox": "3.3.0"
   }
 }
