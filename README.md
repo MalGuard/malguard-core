@@ -3,11 +3,14 @@
 **Open-source defensive scanning and isolation-routing foundations for safer game modifications and suspicious-file inspection.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![OpenSSF Best Practices Baseline Level 1](https://www.bestpractices.dev/projects/16122/baseline)](https://www.bestpractices.dev/projects/16122)
 [![Windows release-candidate workflow](https://github.com/MalGuard/malguard-core/actions/workflows/windows-release-candidate.yml/badge.svg?branch=main)](https://github.com/MalGuard/malguard-core/actions/workflows/windows-release-candidate.yml)
 [![Source version](https://img.shields.io/badge/source-0.8.0--beta.7-informational.svg)](DESKTOP-VERSION)
 [![Latest published release](https://img.shields.io/github/v/release/MalGuard/malguard-core?include_prereleases)](https://github.com/MalGuard/malguard-core/releases)
 
 [Website](https://malguard.site/) · [Documentation](https://malguard.site/docs.html) · [Trust Center](https://malguard.site/trust.html) · [Security policy](SECURITY.md) · [Contributor quickstart](docs/CONTRIBUTOR_QUICKSTART.md)
+
+**OpenSSF Best Practices (Baseline Level 1):** [View MalGuard Core's current badge status and self-assessment](https://www.bestpractices.dev/projects/16122). This badge reflects project-submitted open-source practices; it is **not** an independent security audit, malware-detection certification, or Windows Authenticode code-signing certificate.
 
 ## Try it now — no installation or account
 
