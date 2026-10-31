@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # pinned v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # pinned v7.1.0
         with: { node-version: 20 }
       - run: node tests/scanner-core-acceptance.test.js
       - run: node tests/regression-corpus.test.js
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # pinned v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # pinned v7.1.0
         with: { node-version: 20 }
       - run: node tests/fusion-engine.test.js
       - run: node tests/multiengine-fusion.test.js
@@ -50,7 +50,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # pinned v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # pinned v7.1.0
         with: { node-version: 20 }
       - run: node tests/ai-evidence-bridge.test.js
       - run: node tests/malguard-cloud-ai-provider.test.js
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # pinned v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # pinned v7.1.0
         with: { node-version: 20 }
       - run: node tests/sandbox-backend.test.js
       - run: node tests/isolation-backend-router.test.js
@@ -86,7 +86,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # pinned v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # pinned v7.1.0
         with: { node-version: 20 }
       - run: node tests/desktop-app.test.js
       - run: node tests/pro-scan-pipeline.test.js
