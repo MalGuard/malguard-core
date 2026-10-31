@@ -24,6 +24,7 @@ for (const file of files) {
 
   const isNativeAppRelease = file === 'native-app-release.yml';
   const isScorecardAnalysis = file === 'scorecard.yml';
+  const isCodeQLAnalysis = file === 'codeql.yml';
   if (isNativeAppRelease) {
     assert(/^on:\s*\r?\n\s{2}workflow_run:\s*$/m.test(text), `${file}: release publishing must be workflow_run-only`);
     assert(/^permissions:\s*\r?\n\s{2}actions:\s*read\s*\r?\n\s{2}contents:\s*write\s*$/m.test(text),
@@ -74,6 +75,26 @@ for (const file of files) {
     const actualActions = lines.map(line => /^\s*uses:\s*([^\s#]+)/.exec(line)?.[1]).filter(Boolean);
     assert.deepStrictEqual(actualActions, expectedActions,
       `${file}: only reviewed, SHA-pinned Scorecard steps are allowed`);
+  } else if (isCodeQLAnalysis) {
+    // CodeQL uploads only security alerts; no broad repo-write token is needed.
+    assert.deepStrictEqual(writeScopes, ['security-events: write'],
+      `${file}: only Code Scanning SARIF upload may have write access`);
+    assert(/^    permissions:\s*\r?\n      contents:\s*read\s*\r?\n      actions:\s*read\s*\r?\n      security-events:\s*write\s*$/m.test(text),
+      `${file}: scanning credentials must stay within the analysis job`);
+    assert(/^on:\s*\r?\n  push:\s*\r?\n    branches:\s*\[main\]\s*\r?\n  pull_request:\s*\r?\n    branches:\s*\[main\]/m.test(text),
+      `${file}: CodeQL must run on main pushes and pull requests`);
+    assert(!/pull_request_target|workflow_run|workflow_dispatch|repository_dispatch/.test(text),
+      `${file}: untrusted privileged triggers are forbidden`);
+    assert(!/^\s+run:\s*/m.test(text) && !/\$\{\{/.test(text) && !/\bsecrets\./.test(text),
+      `${file}: custom shell commands, expression interpolation and secrets are forbidden`);
+    assert(/^\s+languages:\s*javascript-typescript,python\s*$/m.test(text),
+      `${file}: the reviewed analysis language scope must not drift`);
+    const actualActions = lines.map(line => /^\s*uses:\s*([^\s#]+)/.exec(line)?.[1]).filter(Boolean);
+    assert.deepStrictEqual(actualActions, [
+      'actions/checkout@11d5960a326750d5838078e36cf38b85af677262',
+      'github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d',
+      'github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d',
+    ], `${file}: only approved SHA-pinned CodeQL actions may run`);
   } else {
     assert.strictEqual(writeScopes.length, 0, `${file}: workflow must not grant write-scoped token permissions`);
   }
