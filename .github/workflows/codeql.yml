@@ -1,0 +1,37 @@
+# Security scanning on main and every pull request using GitHub CodeQL.
+# SHA-pinned actions; upload-only, job-scoped security-events permission.
+name: MalGuard CodeQL SAST
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '41 3 * * 0'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL source analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: javascript-typescript,python
+
+      - name: Analyze and upload findings
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
