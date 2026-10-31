@@ -19,6 +19,25 @@ node --version
 node tests/version-consistency.test.js
 ```
 
+### Windows PowerShell
+
+Run the clone command from the directory where you want the repository. Run the
+remaining commands from the repository root:
+
+```powershell
+git clone https://github.com/MalGuard/malguard-core.git
+Set-Location malguard-core
+node --version
+node tests/version-consistency.test.js
+```
+
+Confirm that `node --version` reports Node.js 20 or later. If the focused test
+fails, report your Windows version, Node.js version, exact command, and
+sanitized error output. Redact usernames, home-directory paths, tokens, and
+personal data. Report potential security vulnerabilities through the
+[private security-reporting channel](https://github.com/MalGuard/malguard-core/security/policy),
+not a public issue.
+
 The version consistency test is a good first check and does not need a local malware sample. For broader validation on a suitable development machine, run:
 
 ```bash
