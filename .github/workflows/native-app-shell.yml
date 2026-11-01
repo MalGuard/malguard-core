@@ -495,3 +495,46 @@ jobs:
             app-shell/desktop/dist/MalGuard-App-Preview-Linux-x64.AppImage.sha256
           if-no-files-found: error
           retention-days: 7
+
+  # After all platform builders succeed, attest only main-branch release artifacts.
+  # No checkout or execution of downloaded artifacts in this privileged job.
+  attest-native-artifacts:
+    name: Attest verified native preview packages
+    needs: [android-preview, windows-preview, macos-preview, ios-simulator-preview, linux-preview]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download same-run platform preview artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4 pinned
+        with:
+          pattern: malguard-*-preview
+          path: attestation-input
+          merge-multiple: true
+
+      - name: Verify all native build packages and SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          checksums=(attestation-input/*.sha256)
+          packages=(attestation-input/*.apk attestation-input/*.exe attestation-input/*.zip attestation-input/*.deb attestation-input/*.AppImage)
+          if (( ${#checksums[@]} != 6 || ${#packages[@]} != 6 )); then
+            echo 'Expected six native build packages and matching SHA-256 files' >&2
+            exit 1
+          fi
+          cd attestation-input
+          for sum in *.sha256; do
+            sed -i 's/\r$//' "$sum"
+            sha256sum --status --check "$sum"
+          done
+
+      - name: Attest verified native packages and checksums
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2 pinned
+        with:
+          subject-path: 'attestation-input/*'
