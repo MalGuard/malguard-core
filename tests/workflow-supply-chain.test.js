@@ -25,6 +25,7 @@ for (const file of files) {
   const isNativeAppRelease = file === 'native-app-release.yml';
   const isScorecardAnalysis = file === 'scorecard.yml';
   const isCodeQLAnalysis = file === 'codeql.yml';
+  const isWindowsAttestation = file === 'windows-release-candidate.yml';
   if (isNativeAppRelease) {
     assert(/^on:\s*\r?\n\s{2}workflow_run:\s*$/m.test(text), `${file}: release publishing must be workflow_run-only`);
     assert(/^permissions:\s*\r?\n\s{2}actions:\s*read\s*\r?\n\s{2}contents:\s*write\s*$/m.test(text),
@@ -47,7 +48,7 @@ for (const file of files) {
 
   // OpenSSF Scorecard needs OIDC to attest published results and Code Scanning to upload SARIF.
   // Constrain the sole exception to the reviewed Scorecard job and exact pinned actions.
-  const privilegedWriteScope = /^\s+(?:actions|checks|deployments|id-token|issues|packages|pages|pull-requests|repository-projects|security-events|statuses):\s*write\s*$/gm;
+  const privilegedWriteScope = /^\s+(?:actions|attestations|checks|deployments|id-token|issues|packages|pages|pull-requests|repository-projects|security-events|statuses):\s*write\s*$/gm;
   const writeScopes = [...text.matchAll(privilegedWriteScope)].map(match => match[0].trim()).sort();
   if (isScorecardAnalysis) {
     assert.deepStrictEqual(writeScopes, ['id-token: write', 'security-events: write'],
@@ -95,8 +96,35 @@ for (const file of files) {
       'github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d',
       'github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d',
     ], `${file}: only approved SHA-pinned CodeQL actions may run`);
+  } else if (isWindowsAttestation) {
+    // Build jobs are read-only; only a gated post-build job can publish
+    // signed provenance for verified same-run Windows artifacts.
+    assert.deepStrictEqual(writeScopes, ['attestations: write', 'id-token: write'],
+      file + ': only provenance and OIDC write scopes are allowed');
+    const marker = '\n  attest-windows-candidates:\n';
+    assert.strictEqual(text.split(marker).length, 2,
+      file + ': exactly one post-build attestation job is required');
+    const attestJob = text.split(marker)[1];
+    assert(/^\s{4}needs: windows-release-candidate\s*$/m.test(attestJob),
+      file + ': attestation must follow successful Windows matrix');
+    assert(/^\s{4}if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'\s*$/m.test(attestJob),
+      file + ': signing must run only on a trusted main push');
+    assert(/^\s{4}permissions:\s*\r?\n\s{6}contents: read\s*\r?\n\s{6}actions: read\s*\r?\n\s{6}id-token: write\s*\r?\n\s{6}attestations: write\s*$/m.test(attestJob),
+      file + ': elevated permissions must be scoped to attestation job');
+    assert(!/^\s+uses:\s*actions\/checkout@/m.test(attestJob) && !/\bsecrets\./.test(attestJob),
+      file + ': attestation must not checkout source or access secrets');
+    assert(/sha256sum --status --check "\$sum"/.test(attestJob),
+      file + ': file integrity must be verified before attestations');
+    const allowed = [
+      'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
+      'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
+      'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
+    ];
+    const used = attestJob.split(/\r?\n/).map(line => /^\s*uses:\s*([^\s#]+)/.exec(line)?.[1]).filter(Boolean);
+    assert.deepStrictEqual(used, allowed,
+      file + ': attestation actions must be SHA-pinned and allowlisted');
   } else {
-    assert.strictEqual(writeScopes.length, 0, `${file}: workflow must not grant write-scoped token permissions`);
+    assert.strictEqual(writeScopes.length, 0, file + ': workflow must not grant write-scoped token permissions');
   }
   assert(!/MALGUARD_RELEASE_SIGNING_PRIVATE_KEY_PEM/.test(text), `${file}: offline release signing private keys must never be referenced by GitHub Actions`);
   for (const line of lines.filter(value => value.includes('SignPath/github-action-submit-signing-request'))) {
