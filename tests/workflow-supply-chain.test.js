@@ -26,6 +26,7 @@ for (const file of files) {
   const isScorecardAnalysis = file === 'scorecard.yml';
   const isCodeQLAnalysis = file === 'codeql.yml';
   const isWindowsAttestation = file === 'windows-release-candidate.yml';
+  const isNativeShellAttestation = file === 'native-app-shell.yml';
   if (isNativeAppRelease) {
     assert(/^on:\s*\r?\n\s{2}workflow_run:\s*$/m.test(text), `${file}: release publishing must be workflow_run-only`);
     assert(/^permissions:\s*\r?\n\s{2}actions:\s*read\s*\r?\n\s{2}contents:\s*write\s*$/m.test(text),
@@ -96,6 +97,35 @@ for (const file of files) {
       'github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d',
       'github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d',
     ], `${file}: only approved SHA-pinned CodeQL actions may run`);
+  } else if (isNativeShellAttestation) {
+    // Privileged provenance is isolated from all five read-only native builders
+    // and can only run for a trusted main push or explicit main dispatch.
+    assert.deepStrictEqual(writeScopes, ['attestations: write', 'id-token: write'],
+      file + ': only attestation and OIDC writes are permitted');
+    const marker = '\n  attest-native-artifacts:\n';
+    assert.strictEqual(text.split(marker).length, 2,
+      file + ': one isolated native attestation job is required');
+    const attestJob = text.split(marker)[1];
+    assert(/^\s{4}needs: \[android-preview, windows-preview, macos-preview, ios-simulator-preview, linux-preview\]\s*$/m.test(attestJob),
+      file + ': signing requires all five native platforms to build successfully');
+    assert(attestJob.includes("if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'"),
+      file + ': attestation may only run for trusted main source');
+    assert(/^\s{4}permissions:\s*\r?\n\s{6}contents: read\s*\r?\n\s{6}actions: read\s*\r?\n\s{6}id-token: write\s*\r?\n\s{6}attestations: write\s*$/m.test(attestJob),
+      file + ': elevated privileges must be job scoped');
+    assert(!/^\s+uses:\s*actions\/checkout@/m.test(attestJob) && !/\bsecrets\./.test(attestJob),
+      file + ': attestation job must not checkout or load secrets');
+    assert(/sha256sum --status --check "\$sum"/.test(attestJob) &&
+      /checksums=\(attestation-input\/\*\.sha256\)/.test(attestJob),
+      file + ': six release checksum files must be verified before signing');
+    assert(/subject-path: 'attestation-input\/\*'/.test(attestJob),
+      file + ': only downloaded, verified native packages may be attested');
+    const expectedActions = [
+      'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
+      'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
+    ];
+    const used = attestJob.split(/\r?\n/).map(line => /^\s*uses:\s*([^\s#]+)/.exec(line)?.[1]).filter(Boolean);
+    assert.deepStrictEqual(used, expectedActions,
+      file + ': only reviewed, SHA-pinned actions may attest packages');
   } else if (isWindowsAttestation) {
     // Build jobs are read-only; only a gated post-build job can publish
     // signed provenance for verified same-run Windows artifacts.
