@@ -179,10 +179,21 @@ test('URLhaus ID validation does not coerce arrays, objects or unsafe numbers', 
   }
 });
 
-test('positive integer URLhaus ID retains previous numeric compatibility', async () => {
-  const actual = await lookup(client(async () => response({ ...hit, id: 123 })));
-  assert.equal(actual.status, 'matched');
-  assert.equal(actual.reference, 'https://urlhaus.abuse.ch/url/123/');
+test('all-zero string URLhaus IDs are rejected without record references', async () => {
+  for (const id of ['0', '00', '000', '0'.repeat(100)]) {
+    const actual = await lookup(client(async () => response({ ...hit, id })));
+    assert.equal(actual.status, 'invalid_response', 'unexpected accepted id: ' + id);
+    assert.equal(actual.reason, 'unexpected_shape');
+    assert.equal(actual.reference, undefined);
+  }
+});
+
+test('positive URLhaus IDs retain string and numeric compatibility', async () => {
+  for (const id of [1, 123, Number.MAX_SAFE_INTEGER, '1', '123', '000123', '10']) {
+    const actual = await lookup(client(async () => response({ ...hit, id })));
+    assert.equal(actual.status, 'matched', 'unexpected rejected id: ' + id);
+    assert.equal(actual.reference, 'https://urlhaus.abuse.ch/url/' + id + '/');
+  }
 });
 
 test('calendar-invalid URLhaus timestamps are not returned as evidence', async () => {

@@ -35,8 +35,10 @@ All results contain `provider: 'urlhaus'`, a source attribution URL, and `status
 | `invalid_response` | The response was malformed, too large, or inconsistent. |
 | `not_checked` | Consent was absent or the indicator failed local validation. |
 
-Matched results include a URLhaus reference, upstream URL status and threat, and
-the upstream `date_added` as `upstreamTimestamp` only when its format and
+Matched results require a positive record ID: a decimal string containing at least one nonzero
+digit, or a safe positive integer. All-zero string IDs are invalid responses.
+They include a URLhaus reference, upstream URL status and threat, and the upstream
+`date_added` as `upstreamTimestamp` only when its format and
 calendar/time values are valid (otherwise `null`). The timestamp is when the record was added, not a
 freshness guarantee. Offline records still count as matches. Failures never
 produce `no_match`, `clean`, or `safe`; downstream callers must preserve that

@@ -9,7 +9,7 @@ function result(status, reason, metadata = {}) {
 
 // URLhaus IDs may be decimal strings or safe positive integers, never arrays or objects.
 function validRecordId(id) {
-  return (typeof id === 'string' && /^\d+$/.test(id)) ||
+  return (typeof id === 'string' && /^\d+$/.test(id) && /[1-9]/.test(id)) ||
     (typeof id === 'number' && Number.isSafeInteger(id) && id > 0);
 }
 
