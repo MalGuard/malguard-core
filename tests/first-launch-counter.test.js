@@ -97,6 +97,20 @@ const {
   assert.strictEqual(disabled.reason, 'disabled');
   assert.strictEqual(disabledCalls, 0);
 
+  let defaultCalls = 0;
+  const notOptedIn = await recordFirstSuccessfulLaunch({
+    version: '0.6.1-beta.1',
+    arch: 'x64',
+    platform: 'win32',
+    settingsFile: path.join(tmp, 'default-settings.json'),
+    packageRoot: tmp,
+    requirePackaged: false,
+    ci: false,
+    fetchImpl: async () => { defaultCalls += 1; throw new Error('must not be called without opt-in'); },
+  });
+  assert.strictEqual(notOptedIn.reason, 'not-opted-in');
+  assert.strictEqual(defaultCalls, 0);
+
   const sourceCheckout = await recordFirstSuccessfulLaunch({
     version: '0.6.1-beta.1',
     arch: 'x64',

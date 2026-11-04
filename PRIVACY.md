@@ -24,17 +24,21 @@ MalGuard's error-reporting design is local-first. Diagnostic information is not 
 
 Official Windows download buttons may use GitHub Release assets so GitHub can expose aggregate download counts.
 
-Packaged Windows builds may make one request after the first successful launch to a small, static GitHub Release beacon asset. MalGuard does not attach a user, device, advertising, or installation identifier to this request, and no scanned file or scan result is included. A local marker stored alongside MalGuard settings prevents the same installation from intentionally sending the beacon again.
+This metric is **off by default (opt-in)**. Only when the user enables it, packaged Windows builds make one request after the first successful launch to a small, static GitHub Release beacon asset. MalGuard does not attach a user, device, advertising, or installation identifier to this request, and no scanned file or scan result is included. A local marker stored alongside MalGuard settings prevents the same installation from intentionally sending the beacon again.
 
-GitHub may receive standard network metadata, such as the source IP address, as part of serving the public asset under GitHub's own service policies. Users can disable the MalGuard first-launch request by setting `MALGUARD_DISABLE_ANONYMOUS_INSTALL_COUNT=1`.
+GitHub may receive standard network metadata, such as the source IP address, as part of serving the public asset under GitHub's own service policies. Users can opt in by setting `MALGUARD_ENABLE_ANONYMOUS_INSTALL_COUNT=1`; `MALGUARD_DISABLE_ANONYMOUS_INSTALL_COUNT=1` always forces it off.
 
 ## Anonymous compatibility report
 
-Packaged Windows builds may send one coarse compatibility report after the first successful launch. The report contains only the MalGuard version, Windows build, x64/ARM64 architecture, a bucketed CPU-core range, a bucketed RAM range, and the system language.
+This report is **off by default (opt-in)**. Only when the user enables it, packaged Windows builds send one coarse compatibility report after the first successful launch. The report contains only the MalGuard version, Windows build, x64/ARM64 architecture, a bucketed CPU-core range, a bucketed RAM range, and the system language.
 
 The report does not include an account name, computer name, hardware serial number, network adapter identifier, precise location, file path, scan result, or installation identifier. MalGuard stores only a local marker so the same installation does not intentionally send the report again.
 
-The server may forward the report as an administrative notification email when the notification service is configured. Users can disable this report by setting `MALGUARD_DISABLE_ANONYMOUS_COMPATIBILITY_REPORT=1`.
+The server may forward the report as an administrative notification email when the notification service is configured. Users can opt in by setting `MALGUARD_ENABLE_ANONYMOUS_COMPATIBILITY_REPORT=1`; `MALGUARD_DISABLE_ANONYMOUS_COMPATIBILITY_REPORT=1` always forces it off.
+
+## Uninstalling
+
+Remove installer builds with the uninstaller the installer registers in Windows, or delete the folder for portable builds. MalGuard settings and local markers live in the MalGuard settings folder and can be removed with it.
 
 ## Changes
 

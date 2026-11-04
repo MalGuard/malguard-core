@@ -74,10 +74,13 @@ async function recordFirstSuccessfulLaunch(options = {}) {
   const packageRoot = options.packageRoot || path.resolve(__dirname, '..', '..');
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 5000;
+  // Opt-in only: nothing is sent unless the caller or the user explicitly enables it.
+  const optedIn = options.enabled === true || options.disabled === false || process.env.MALGUARD_ENABLE_ANONYMOUS_INSTALL_COUNT === '1';
   const disabled = options.disabled === true || process.env.MALGUARD_DISABLE_ANONYMOUS_INSTALL_COUNT === '1';
   const ci = options.ci === true ? true : options.ci === false ? false : Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
 
   if (disabled) return { ok: true, counted: false, reason: 'disabled' };
+  if (!optedIn) return { ok: true, counted: false, reason: 'not-opted-in' };
   if (ci) return { ok: true, counted: false, reason: 'ci' };
   if (platform !== 'win32') return { ok: true, counted: false, reason: 'non-windows' };
   if (!settingsFile) return { ok: false, counted: false, reason: 'settings-file-required' };
