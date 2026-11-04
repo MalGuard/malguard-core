@@ -2,11 +2,13 @@
 
 ## Current status
 
-MalGuard has submitted an application for free open-source code signing through SignPath Foundation. The application is pending review.
+MalGuard applied for free open-source code signing through SignPath Foundation. On 2026-11-04 SignPath Foundation replied that it is not issuing a certificate at this time because the project does not yet show enough public adoption signals (community usage, independent references, sustained engagement). The decision was explicitly not about code quality. MalGuard intends to reapply once the project has broader public recognition.
+
+Until then, **no MalGuard release is signed by SignPath Foundation**. Windows builds are published as clearly labelled Unsigned Previews with SHA-256 checksums and source commits.
 
 The project must not claim that a release is signed by SignPath Foundation until the application has been accepted and the actual artifact has passed signature verification.
 
-Target OSS signing provider, pending acceptance: SignPath.io / SignPath Foundation.
+Target OSS signing provider (not yet accepted): SignPath.io / SignPath Foundation.
 
 After acceptance, release and download pages will include the required attribution: "Free code signing provided by SignPath.io, certificate by SignPath Foundation."
 
@@ -38,14 +40,17 @@ The SignPath GitHub Action, if enabled after acceptance, must be pinned to an im
 
 Every public signing request requires manual approval after CI and integrity verification succeed.
 
-Current project roles:
+### Team roles
 
-- Committer: repository owner `@MalGuard`
-- Reviewer: repository owner `@MalGuard`
-- Signing approver: repository owner `@MalGuard`
+These roles follow the structure SignPath Foundation asks open-source projects to publish:
 
-As the maintainer team grows, these roles should be separated across trusted maintainers where practical.
+| Role | Who | Responsibility |
+| --- | --- | --- |
+| Committers and reviewers | [@MalGuard](https://github.com/MalGuard) (Mohammadreza Azarderakhsh) | Write and review every change merged to `main` |
+| Approvers | [@MalGuard](https://github.com/MalGuard) (Mohammadreza Azarderakhsh) | Manually approve each signing request |
+
+All team members are required to use multi-factor authentication on GitHub and on any signing service. As the maintainer team grows, these roles will be separated across trusted maintainers, and outside contributors' changes will always be reviewed by a maintainer before merge.
 
 ## Privacy
 
-See [PRIVACY.md](PRIVACY.md).
+MalGuard analyses supported files locally by default. Packaged Windows builds may send one anonymous first-launch install count and one coarse compatibility report; both contain no user, device, file, or scan data and both can be disabled. Full details and the opt-out settings are in [PRIVACY.md](PRIVACY.md). No other information is transferred to networked systems unless the user explicitly requests a feature that states it.
