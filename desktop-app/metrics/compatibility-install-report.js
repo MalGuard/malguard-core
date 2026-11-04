@@ -82,6 +82,8 @@ async function writeMarker(file, payload) {
 }
 
 async function sendCompatibilityInstallReport(options = {}) {
+  // Opt-in only: nothing is sent unless the caller or the user explicitly enables it.
+  const optedIn = options.enabled === true || options.disabled === false || process.env.MALGUARD_ENABLE_ANONYMOUS_COMPATIBILITY_REPORT === '1';
   const disabled = options.disabled === true || process.env.MALGUARD_DISABLE_ANONYMOUS_COMPATIBILITY_REPORT === '1';
   const ci = options.ci === true ? true : options.ci === false ? false : Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
   const platform = options.platform || process.platform;
@@ -90,6 +92,7 @@ async function sendCompatibilityInstallReport(options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
 
   if (disabled) return {ok:true,sent:false,reason:'disabled'};
+  if (!optedIn) return {ok:true,sent:false,reason:'not-opted-in'};
   if (ci) return {ok:true,sent:false,reason:'ci'};
   if (platform !== 'win32') return {ok:true,sent:false,reason:'non-windows'};
   if (!settingsFile) return {ok:false,sent:false,reason:'settings-file-required'};
