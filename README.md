@@ -2,6 +2,10 @@
 
 **Open-source defensive scanning and isolation-routing foundations for safer game modifications and suspicious-file inspection.**
 
+Fake "GTA VI PC demos", cracked mod menus, and trojanised mod archives are a common way gamers get infected. MalGuard is a free, MIT-licensed project that helps you check game mods and downloads **before** you run them, with evidence you can read instead of a black-box verdict.
+
+> *Scan smart. Play safe.*
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![OpenSSF Best Practices Baseline Level 1](https://www.bestpractices.dev/projects/16122/baseline)](https://www.bestpractices.dev/projects/16122)
 [![Windows release-candidate workflow](https://github.com/MalGuard/malguard-core/actions/workflows/windows-release-candidate.yml/badge.svg?branch=main)](https://github.com/MalGuard/malguard-core/actions/workflows/windows-release-candidate.yml)
@@ -102,6 +106,15 @@ More entry points: `npm run diagnose` (may exit nonzero when a readiness conditi
 - [MalGuard malware-ai](https://github.com/MalGuard/malware-ai) — a related repository for malware-analysis and AI integration; assess capabilities in its own source and documentation.
 - [MalGuard website](https://github.com/MalGuard/malguard.github.io) / [malguard.site](https://malguard.site/) — the public-facing website covering MalGuard AI, GTA Guard, Game Scam Guard and Threat Radar.
 - [Roadmap and current limitations](docs/ROADMAP.md) · [Maintenance evidence](docs/MAINTAINER_EVIDENCE.md) · [Changelog](CHANGELOG.md)
+
+## Community and support
+
+MalGuard is an early, independent open-source project, and it grows only through real users. If it helped you or you want it to exist:
+
+- ⭐ **Star the repository** so other gamers and security researchers can find it.
+- 🐛 **Open an issue** when a mod is flagged wrongly, or when a malicious one slips through (share hashes, never live malware).
+- 📝 **Write or talk about it**: a blog post, video, forum thread, or modding-community mention helps more than anything else.
+- 🔧 **Contribute**: see the good first issues below.
 
 ## Contributing and maintenance
 
