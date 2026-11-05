@@ -8,6 +8,9 @@ Notable changes are documented here in the spirit of [Keep a Changelog](https://
 - Clarified developer onboarding, evidence-based feature scope, security limitations and module architecture.
 - Added a public maintenance-evidence index, a source-grounded roadmap, feature-request template and conduct guidelines.
 - Added private disclosure contact and explicit best-effort pre-release support language.
+- Documented published GitHub pre-release notes in this changelog (including `0.8.0-beta.2`) so release history matches GitHub Releases.
+- Documented that `gitBlobSha` in `desktop-app/sandbox/isolation-readiness.js` uses SHA-1 only as a Git blob object id, not as a security hash.
+- Recorded an honest contributor warnings policy in `CONTRIBUTING.md` without claiming a project-wide ESLint setup.
 
 ### Verified development history (selected merged pull requests)
 - [#123](https://github.com/MalGuard/malguard-core/pull/123): improved contributor onboarding and safe public issue reporting.
@@ -15,6 +18,34 @@ Notable changes are documented here in the spirit of [Keep a Changelog](https://
 - [#117](https://github.com/MalGuard/malguard-core/pull/117): integrated Fusion Engine 2.0 and multi-engine scan changes.
 
 These links identify merged source changes, **not** independently verified published GitHub releases or user adoption.
+
+## Published GitHub pre-releases (source-aligned notes)
+
+These entries describe **published GitHub Releases** that already exist. They are pre-release / preview artifacts. An entry here does **not** claim Authenticode signing, production certification, or that the tagged commit is an ancestor of current `main`.
+
+### [0.8.0-beta.7 telemetry preview] - 2026-09-26 — tag `telemetry-preview-72ec93ef`
+- Unsigned Windows x64 telemetry preview for manual testing (asset names report build `0.8.0-beta.7`).
+- Release notes record TSH Telemetry PASS, TSH Pro PASS, Security CI PASS, and Windows install/runtime verification PASS for commit `72ec93ef223ec62e3a8df5df9d3c0a536bae41f4`.
+- Companion `.sha256` published with the installer.
+
+### [0.8.0-beta.7 TSH Pro preview] - 2026-09-26 — tag `tsh-pro-preview-c3d0d398`
+- Verified TSH Pro Windows x64 preview from commit `c3d0d398956607b5a7b1aebc141452f241f0870a` (unsigned).
+- Release notes record TSH Pro no-Sandbox scan PASS, Security CI PASS, installer build PASS, and install/runtime self-test PASS.
+
+### [0.8.0-beta.2] - 2026-09-25 — tag `v0.8.0-beta.2`
+- Unsigned Windows x64 setup preview (`MalGuard-Setup-0.8.0-beta.2-windows-x64.1.exe`) with published SHA-256 companion file.
+- Source commit `6bc4c19468c9953c843a14a118b862c9e9a62447` (merge of [#110](https://github.com/MalGuard/malguard-core/pull/110)): completes the bounded metadata-only AI evidence path for model scans, with explicit opt-out, no raw file bytes, timeout/fail-closed behavior, and existing sandbox isolation preserved.
+- Preceding 0.8 work on that line included GTA simulation packaging and hybrid isolation merges (#104–#108, #102). This tag is a published pre-release snapshot; it is not asserted to be an ancestor of current `main`.
+
+### [App Offline Preview 0.2.0] - 2026-09-23 — tags `app-v0.2.0-offline-preview.2`, `app-v0.2.0-offline-preview.1`
+- Offline preview packages that bundle a locked snapshot of the official MalGuard production site UI into native containers (Android APK, Windows setup, macOS zip; `.2` also ships Linux AppImage/DEB).
+- iOS asset is simulator-only. Windows/macOS previews are not production-signed.
+
+### [App Preview 0.1.0] - 2026-09-23 — tags `malguard-app-v0.1.0-preview`, `app-v0.1.0-preview.1`
+- Native app-shell previews using the official MalGuard production website as the application UI (Android/Windows/macOS previews; iOS simulator-only).
+
+### [0.6.1-beta.1 unsigned preview] - 2026-09-20 — tag `v0.6.1-beta.1-unsigned-preview`
+- Unsigned Windows x64 and ARM64 setup preview from commit `9bd450df2345eb2f9c9025b05f3d21bef8e43a5d`, with published SHA-256 digests. Not Authenticode-signed.
 
 ## Historical engineering notes (preserved from the previous changelog)
 

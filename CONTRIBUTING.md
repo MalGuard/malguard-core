@@ -36,6 +36,11 @@ See [current status and limitations](docs/ROADMAP.md), [community conduct](CODE_
 
 Security-sensitive build, workflow, installer, updater, isolation, and signing changes require especially careful review.
 
+
+## Warnings policy
+
+Treat new compiler, runtime, and tool warnings introduced by a change as defects to fix or to justify explicitly in the pull request. Prefer fixing a warning over silencing it. This repository does not currently ship a project-wide ESLint (or equivalent) config; contributors should still avoid introducing obvious unused bindings, unreachable paths, or Node deprecation warnings in touched code, and CI should remain the source of truth for what must pass before merge.
+
 ## Reporting bugs and security issues
 
 - For ordinary, non-sensitive bugs, use the [issue tracker](https://github.com/MalGuard/malguard-core/issues) and harmless synthetic reproductions only.
