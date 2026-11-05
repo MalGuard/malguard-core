@@ -1,6 +1,7 @@
 'use strict';
 
 const { MalwareBazaarClient } = require('./malwarebazaar-client.js');
+const { UrlhausClient } = require('./urlhaus-client.js');
 const { ThreatIntelCache } = require('./cache-store.js');
 const { AbuseChCredentialStore } = require('./credential-store.js');
 
@@ -20,6 +21,17 @@ class ThreatIntelService {
     this.lastRecentSyncAttemptAt = 0;
     this.lastRecentSync = { status: 'never', count: 0, metadataOnly: true };
     this._recentSyncPromise = null;
+    this.urlhausClient = options.urlhausClient || new UrlhausClient({
+      authKeyProvider: () => this.credentials.getAuthKey(),
+      fetchImpl: options.fetchImpl,
+      timeoutMs: options.timeoutMs,
+      maxResponseBytes: options.maxResponseBytes,
+    });
+  }
+
+  // Separate from file-hash results and scanner verdicts pending interface review.
+  async lookupUrl(url, options = {}) {
+    return this.urlhausClient.lookupUrl(url, { consent: options.consent === true });
   }
 
   _triggerRecentSyncIfDue(force = false) {
