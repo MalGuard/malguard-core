@@ -14,7 +14,8 @@
     "diagnose": "node tools/health-report.js",
     "verify:readiness": "node tools/verify-product-readiness.js",
     "package:portable": "node tools/build-portable-package.js",
-    "mcp:stdio": "node tools/malguard-mcp-server.mjs"
+    "mcp:stdio": "node tools/malguard-mcp-server.mjs",
+    "lint:syntax": "bash tools/lint-syntax.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",

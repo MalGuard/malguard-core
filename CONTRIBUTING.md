@@ -13,6 +13,12 @@ MalGuard accepts defensive-security contributions through reviewed pull requests
 - Do not introduce hidden network access, telemetry, installers, or update behavior.
 - Do not bypass release provenance, integrity, update, or code-signing controls.
 
+
+## Contribution requirements
+
+- **Major new functionality must include automated tests.** Document those tests (what they cover and how to run them) in the pull request or linked change proposal. Security-sensitive behavior without tests is not ready to merge.
+- Prefer the smallest reviewable change linked to an open issue. Do not claim coverage percentages you did not measure.
+
 ## Local setup and reviewable tests
 
 Requirements: Git and Node.js 20+. From the repository root:
@@ -35,6 +41,16 @@ See [current status and limitations](docs/ROADMAP.md), [community conduct](CODE_
 6. Require review and green CI before merge.
 
 Security-sensitive build, workflow, installer, updater, isolation, and signing changes require especially careful review.
+
+
+## Warnings policy
+
+Treat new compiler, runtime, and tool warnings introduced by a change as defects to fix or to justify explicitly in the pull request. Prefer fixing a warning over silencing it. This repository does not currently ship a project-wide ESLint (or equivalent) config; contributors should still avoid introducing obvious unused bindings, unreachable paths, or Node deprecation warnings in touched code, and CI should remain the source of truth for what must pass before merge.
+
+### Safe language mode and syntax checks
+
+- New and touched CommonJS / Node JavaScript sources should use `'use strict'` (or an equivalent module form that enables strict mode) so assignments to undeclared bindings and similar mistakes fail early.
+- Run `npm run lint:syntax` before opening a PR. That script runs `node --check` on a curated list of top-level and desktop-app entry `.js` files. The existing Security CI job already runs `node --check` more broadly across `*.js` sources (no separate ESLint gate).
 
 ## Reporting bugs and security issues
 

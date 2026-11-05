@@ -65,6 +65,11 @@ function validateMxcAttestation(attestation) {
     : { ok: false, code: 'MXC_ATTESTATION_CONTRACT_FAILED' };
 }
 
+// gitBlobSha computes a Git blob object id (SHA-1 over "blob <size>\0" + bytes).
+// This matches Git's content-addressed object identity for harness drift checks.
+// It is NOT a security hash, password hash, or integrity MAC; do not use it for
+// cryptographic authentication, signing, or untrusted-input integrity. Prefer
+// SHA-256 (or stronger) wherever MalGuard needs a security digest.
 function gitBlobSha(bytes) {
   const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
   const header = Buffer.from(`blob ${buffer.length}\0`, 'utf8');

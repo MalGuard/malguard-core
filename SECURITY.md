@@ -34,7 +34,29 @@ Release candidates are bound to source provenance and package integrity. Public 
 
 A pre-release version, a synthetic test pass, or a sandbox configuration is not a claim of release-grade isolation or a signed Windows release. See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md).
 
-## Reporting vulnerabilities (private first)
+
+## Secure design knowledge (maintainer attestation)
+
+The primary maintainer designs and reviews MalGuard changes with classic Saltzer/Schroeder secure-design principles as already practiced in this codebase:
+
+- **Fail-safe defaults** — missing integrity, provenance, isolation, or analysis evidence stays fail-closed rather than silent-allow.
+- **Least privilege** — release signing keys stay out of Actions/source control; CI defaults to read-only contents where possible; optional network/threat-intel paths require explicit enablement.
+- **Complete mediation** — untrusted paths, archive entries, offsets, and update metadata are re-validated at use, not trusted from earlier steps alone.
+- **Allowlist input validation** — supported formats and fields are constrained; malformed or ambiguous inputs are rejected safely with bounded resource use.
+- **Economy of mechanism / limited attack surface** — prefer small reviewable changes; do not add hidden network, telemetry, installer, or update behavior.
+
+The maintainer is familiar with common error classes for this Node/desktop stack and the mitigations already reflected in project policy and tests, including:
+
+- Path traversal in archives and file APIs → normalize/allowlist and reject unsafe entries.
+- Command injection → no shell for untrusted input; fixed argv where processes are required.
+- Prototype pollution → avoid merging untrusted objects into prototypes; validate plain data.
+- XSS in UI surfaces → treat scan/metadata strings as untrusted in rendered output.
+- Insecure deserialization → do not eval or unserialize untrusted blobs; prefer explicit parsers.
+- Supply-chain / unsigned artifacts → integrity hashes, pinned Actions, unsigned preview labeling, and code-signing policy for public Windows distribution.
+
+This section is maintainer attestation tied to existing practices. It does **not** claim a formal course certificate, third-party audit, or production isolation certification.
+
+## Reporting a vulnerability
 
 Email **contact@malguard.site** with a non-sensitive summary, affected source commit/version, expected/observed behavior, and minimal *harmless* reproduction steps. Please do not include malware, credentials, sensitive files, personal data, or exploit payloads. You may also use [GitHub private vulnerability reporting](https://github.com/MalGuard/malguard-core/security/advisories/new) where enabled.
 
