@@ -101,7 +101,7 @@ More entry points: `npm run diagnose` (may exit nonzero when a readiness conditi
 
 - [MalGuard malware-ai](https://github.com/MalGuard/malware-ai) — a related repository for malware-analysis and AI integration; assess capabilities in its own source and documentation.
 - [MalGuard website](https://github.com/MalGuard/malguard.github.io) / [malguard.site](https://malguard.site/) — the public-facing website covering MalGuard AI, GTA Guard, Game Scam Guard and Threat Radar.
-- [Roadmap and current limitations](docs/ROADMAP.md) · [Maintenance evidence](docs/MAINTAINER_EVIDENCE.md) · [Changelog](CHANGELOG.md)
+- [Product and Core versioning](docs/PRODUCT_VERSIONING.md) · [Roadmap and current limitations](docs/ROADMAP.md) · [Maintenance evidence](docs/MAINTAINER_EVIDENCE.md) · [Changelog](CHANGELOG.md)
 
 ## Contributing and maintenance
 
