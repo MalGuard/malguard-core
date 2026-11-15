@@ -5,6 +5,7 @@ Notable changes are documented here in the spirit of [Keep a Changelog](https://
 ## [Unreleased]
 
 ### Documentation and community health
+- Corrected GTA Guard/Core versioning documentation to reflect the existing 1.3.2 website release manifest, engine 1.2.2, and declared Core source commit; documented the disabled publication workflow and unresolved version-file scope.
 - Clarified developer onboarding, evidence-based feature scope, security limitations and module architecture.
 - Added a public maintenance-evidence index, a source-grounded roadmap, feature-request template and conduct guidelines.
 - Added private disclosure contact and explicit best-effort pre-release support language.
