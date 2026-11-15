@@ -31,7 +31,7 @@ These are useful, internally consistent release records. However, the digest has
 
 ## Current publication workflow status
 
-The website workflow `.github/workflows/publish-current-gta-guard-windows.yml` is deliberately disabled by an unconditional `if: `${{ false }}` job guard. Its checked-in configuration also targets a different Core commit and a `0.8.0-beta.7` release tag/name. Do not remove the guard or re-enable this workflow as a quick fix: first reconcile the intended product version, engine version, Core commit, release tag, artifact name, and metadata schema, then review and test the complete Windows build path.
+The website workflow `.github/workflows/publish-current-gta-guard-windows.yml` is deliberately disabled by an unconditional `if: ${{ false }}` job guard. Its checked-in configuration also targets a different Core commit and a `0.8.0-beta.7` release tag/name. Do not remove the guard or re-enable this workflow as a quick fix: first reconcile the intended product version, engine version, Core commit, release tag, artifact name, and metadata schema, then review and test the complete Windows build path.
 
 The public website metadata says the 1.3.2 Windows download is enabled, while the checked-in publication workflow says public distribution is paused. Treat this as a release-control inconsistency that requires an explicit owner decision before the workflow is reactivated or the public status is changed.
 
