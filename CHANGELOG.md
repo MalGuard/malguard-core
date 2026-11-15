@@ -5,6 +5,7 @@ Notable changes are documented here in the spirit of [Keep a Changelog](https://
 ## [Unreleased]
 
 ### Documentation and community health
+- Added a product/Core versioning note distinguishing GTA Guard 1.3.2 from the Core source version 0.8.0-beta.7, and documenting the release-provenance evidence still required to map a product artifact to an exact Core commit.
 - Clarified developer onboarding, evidence-based feature scope, security limitations and module architecture.
 - Added a public maintenance-evidence index, a source-grounded roadmap, feature-request template and conduct guidelines.
 - Added private disclosure contact and explicit best-effort pre-release support language.
