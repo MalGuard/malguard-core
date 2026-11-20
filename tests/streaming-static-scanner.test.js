@@ -74,6 +74,22 @@ async function run() {
   assert.equal(result.finalVerdict, 'suspicious', 'UTF-16 marker spanning boundary missed');
   assert.equal(result.findings[0].encoding, 'UTF-16LE');
 
+  bytes = Buffer.alloc(8 * MiB, 0);
+  bytes.write(marker, 4 * MiB - 7, 'utf16le');
+  result = await scanBytes(bytes);
+  assert.equal(result.finalVerdict, 'suspicious', 'UTF-16 odd-aligned boundary marker missed');
+
+  // Regression for the original 14–64 MiB engine blind spot.
+  const engineContext = { console, TextDecoder, Uint8Array, performance, window: null };
+  engineContext.window = engineContext;
+  vm.createContext(engineContext);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../engine.js'), 'utf8'), engineContext);
+  const legacyMatches = vm.runInContext('scanStringIndicators', engineContext);
+  bytes = Buffer.alloc(16 * MiB, 0);
+  bytes.write(marker, 10 * MiB);
+  assert.equal(legacyMatches(bytes, [{ id:'STR-033', pattern:marker, severity:'high' }], []).hits.has('STR-033'), true,
+    'Legacy engine still has a 16 MiB middle blind spot');
+
   bytes = Buffer.alloc(12 * MiB, 0);
   result = await scanBytes(bytes);
   assert.equal(result.finalVerdict, 'inconclusive', 'No textual indicators cannot imply SAFE');
@@ -83,6 +99,29 @@ async function run() {
   await assert.rejects(() => scanner.scan(new FileLike('boundary.dll', Buffer.alloc(1), 1024 * MiB)),
     e => e.code === 'CHUNK_READ_FAILED', 'Truncated virtual 1-GiB input must fail closed');
 
-  console.log('✓ Bounded scanner: SHA-256, marker boundaries, progress, incomplete verdicts and size guards passed');
+  // Desktop real disk-backed path: 65 MiB sparse benign fixture, no 65-MiB JS allocation.
+  const os = require('node:os');
+  const { ScannerBridge } = require('../desktop-app/scanner-bridge.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'malguard-large-stream-'));
+  const largePath = path.join(dir, 'large.dll');
+  try {
+    const descriptor = fs.openSync(largePath, 'w');
+    try {
+      fs.ftruncateSync(descriptor, 65 * MiB);
+      const content = Buffer.from(marker);
+      fs.writeSync(descriptor, content, 0, content.length, 10 * MiB);
+    } finally { fs.closeSync(descriptor); }
+    const bridge = new ScannerBridge();
+    const checkpoints = [];
+    const desktopResult = await bridge.scanPath(largePath, 'pro', {
+      reportMode: 'detailed', onProgress: event => checkpoints.push(event)
+    });
+    assert.equal(desktopResult.finalVerdict, 'suspicious', 'Desktop failed to find middle marker');
+    assert.equal(desktopResult.sourceIdentity && desktopResult.sourceIdentity.revalidated, true);
+    assert.equal(desktopResult.streamingResult.bytesScanned, 65 * MiB);
+    assert.equal(checkpoints.length, 6, 'Expected 10-MiB checkpoints until 60 MiB');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+
+  console.log('✓ Bounded scanner: SHA-256, boundaries, 65-MiB desktop, progress, fail-closed coverage passed');
 }
 run().catch(e => { console.error(e.stack || e); process.exitCode = 1; });
