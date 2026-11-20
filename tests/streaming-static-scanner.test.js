@@ -116,7 +116,7 @@ async function run() {
     const desktopResult = await bridge.scanPath(largePath, 'pro', {
       reportMode: 'detailed', onProgress: event => checkpoints.push(event)
     });
-    assert.equal(desktopResult.finalVerdict, 'suspicious', 'Desktop failed to find middle marker');
+    assert.equal(desktopResult.finalVerdict, 'suspicious', 'Desktop failed to find middle marker: ' + JSON.stringify(desktopResult));
     assert.equal(desktopResult.sourceIdentity && desktopResult.sourceIdentity.revalidated, true);
     assert.equal(desktopResult.streamingResult.bytesScanned, 65 * MiB);
     assert.equal(checkpoints.length, 6, 'Expected 10-MiB checkpoints until 60 MiB');
