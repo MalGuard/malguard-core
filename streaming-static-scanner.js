@@ -152,7 +152,15 @@ async function scan(file, options) {
     for (const rule of rules.suspicious_strings) {
       if (!rule.pattern || hits.has(rule.id)) continue;
       const hasAscii = latin.includes(rule.pattern);
-      const hasWide = !hasAscii && (rule.severity === 'high' || rule.severity === 'critical') && wide.includes(rule.pattern);
+      let hasWide = false;
+      if (!hasAscii && (rule.severity === 'high' || rule.severity === 'critical')) {
+        if (wide === null) wide = utf16.decode(joined).toLowerCase();
+        hasWide = wide.includes(rule.pattern);
+        if (!hasWide) {
+          if (wideShifted === null) wideShifted = utf16.decode(joined.subarray(1)).toLowerCase();
+          hasWide = wideShifted.includes(rule.pattern);
+        }
+      }
       if (hasAscii || hasWide) {
         hits.set(rule.id, {
           rule: rule.id, category: rule.category || 'uncategorized',
