@@ -43,6 +43,7 @@ try {
 
   importScripts(
     'engine.js',
+    'streaming-static-scanner.js',
     'multilayer.js',
     'gta-mod-detector.js',
     'archive-inspector.js',
@@ -164,7 +165,29 @@ self.addEventListener('message', async (event) => {
   const startedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
   try {
-    const result = await self.scanFileWithMode(request.file, request.mode);
+    // Larger than the legacy PE engine: bounded full-file string inspection.
+    // Structural and secondary analyzers are not claimed. Never issue SAFE here.
+    let result;
+    if (request.file.size > self.MalGuardEngine.limits.maxFileSize) {
+      if (!self.MalGuardStreamingScanner) throw fail('STREAMING_MODULE_MISSING', 'Large-file scanner is unavailable.');
+      const summary = await self.MalGuardStreamingScanner.scan(request.file, {
+        onProgress: (progress) => self.postMessage({
+          type: 'scan_progress', requestId: request.requestId, progress
+        }),
+      });
+      result = {
+        resultSchemaVersion: self.MalGuardContract.resultSchemaVersion,
+        appIntegrationVersion: self.MalGuardContract.expectedModules.appIntegration,
+        mode: request.mode,
+        finalVerdict: summary.finalVerdict,
+        engineResult: null,
+        streamingResult: summary,
+        hardeningError: 'large_file_partial_analyzer_coverage',
+        note: 'Large-file string indicators scanned in full, but PE/secondary analysis is not complete. SAFE cannot be returned.',
+      };
+    } else {
+      result = await self.scanFileWithMode(request.file, request.mode);
+    }
     const finishedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
     if (!result || typeof result !== 'object') {
