@@ -81,7 +81,7 @@ async function run() {
   await assert.rejects(() => scanner.scan(new FileLike('oversize.dll', Buffer.alloc(1), 1024 * MiB + 1)),
     e => e.code === 'WORKER_INPUT_TOO_LARGE');
   await assert.rejects(() => scanner.scan(new FileLike('boundary.dll', Buffer.alloc(1), 1024 * MiB)),
-    e => e.code === 'CHUNK_READ_MISMATCH', 'Truncated virtual 1-GiB input must fail closed');
+    e => e.code === 'CHUNK_READ_FAILED', 'Truncated virtual 1-GiB input must fail closed');
 
   console.log('✓ Bounded scanner: SHA-256, marker boundaries, progress, incomplete verdicts and size guards passed');
 }
