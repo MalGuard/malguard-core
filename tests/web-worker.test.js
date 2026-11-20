@@ -108,7 +108,7 @@ async function workerHostTests() {
   const badMode = await waitFor(() => messages.find(m => m.type === 'scan_error' && m.requestId === 'bad-mode'));
   assert.equal(badMode.error.code, 'INVALID_MODE');
 
-  const huge = new FileLike('huge.zip', Buffer.from('x'), 151 * 1024 * 1024);
+  const huge = new FileLike('huge.zip', Buffer.from('x'), 1024 * 1024 * 1024 + 1);
   listeners.message({ data: { type: 'scan', requestId: 'huge-1', file: huge, mode: 'pro' } });
   const hugeMsg = await waitFor(() => messages.find(m => m.type === 'scan_error' && m.requestId === 'huge-1'));
   assert.equal(hugeMsg.error.code, 'WORKER_INPUT_TOO_LARGE');
