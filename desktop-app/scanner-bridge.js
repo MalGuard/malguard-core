@@ -108,6 +108,7 @@ class ScannerBridge {
     for (const file of [
       'malguard-contract.js',
       'engine.js',
+      'streaming-static-scanner.js',
       'multilayer.js',
       'gta-mod-detector.js',
       'archive-inspector.js',
