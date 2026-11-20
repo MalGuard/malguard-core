@@ -19,6 +19,7 @@ const STAGES = Object.freeze({
       'malformed-fuzz.test.js',
       'pe-fuzz.test.js',
       'performance-budget.test.js',
+      'streaming-static-scanner.test.js',
       'web-worker.test.js',
       'scanner-core-acceptance.test.js',
       'mutation-security.test.js',

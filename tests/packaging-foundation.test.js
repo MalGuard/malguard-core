@@ -22,6 +22,7 @@ for (const required of [
   'SHA256SUMS.txt',
   'package.json',
   'rules.json',
+  'streaming-static-scanner.js',
   'app.js',
   'desktop-app/server.js',
   'desktop-app/gta-simulation/simulation-engine.js',

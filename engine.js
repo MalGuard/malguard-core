@@ -25,9 +25,8 @@
      - اعتبارسنجی امضای دیجیتال (Authenticode) و الگوریتم
        Checksum فایل PE پیاده‌سازی نشده‌اند؛ فقط وجود/اندازهٔ آن‌ها
        به‌صورت اطلاعاتی گزارش می‌شود.
-     - تحلیل رشته‌ها برای فایل‌های بزرگ به یک پنجرهٔ محدود (ابتدا +
-       انتهای فایل) محدود می‌شود، نه کل فایل — این یک مصالحهٔ
-       آگاهانه بین ایمنی حافظه/کارایی و پوشش کامل است.
+     - تحلیل رشته‌های 64 MiB و کمتر به‌طور کامل با پنجره‌های 4 MiB
+       و هم‌پوشانی انجام می‌شود. مسیر بزرگ‌تر در یک ماژول مستقل است.
    ============================================================ */
 
 'use strict';
@@ -1021,40 +1020,45 @@ function analyzePackerSections(peInfo, packerSetLower) {
 }
 
 /* ============================================================
-   بخش ۵: اسکن رشتهٔ محدود (bounded) — ASCII و UTF-16LE (item 22-23)
-   هرگز کل فایل ۶۴ مگابایتی را به یک رشتهٔ جاوااسکریپتی غول‌پیکر
-   تبدیل نمی‌کنیم. برای فایل‌های بزرگ، فقط پنجرهٔ ابتدا+انتها اسکن
-   می‌شود (محدودیت مستند و آگاهانه — نه پوشش کامل).
+   Full-coverage bounded string scan for the legacy <=64 MiB PE path.
+   The chunk overlap ensures indicators crossing 4-MiB boundaries are
+   not missed. This does not load the entire file as decoded text.
    ============================================================ */
-function buildScanRegions(totalLen) {
-  if (totalLen <= LIMITS.STRING_SCAN_FULL_THRESHOLD) {
-    return [{ start: 0, end: totalLen }];
+function scanStringIndicators(bytes, stringRules, gtaMarkers) {
+  const step = 4 * 1024 * 1024;
+  const overlap = 1024;
+  const ascii = new TextDecoder('latin1');
+  const utf16 = new TextDecoder('utf-16le', { fatal: false });
+  const hits = new Map();
+  const gtaHits = new Set();
+  let prev = new Uint8Array(0);
+  for (let start = 0; start < bytes.length; start += step) {
+    const current = bytes.subarray(start, Math.min(start + step, bytes.length));
+    const joined = new Uint8Array(prev.length + current.length);
+    joined.set(prev, 0);
+    joined.set(current, prev.length);
+    const asciiText = ascii.decode(joined).toLowerCase();
+    let utf16Text = null;
+    let utf16Shifted = null;
+    for (const rule of stringRules) {
+      if (!rule.pattern || hits.has(rule.id)) continue;
+      if (asciiText.includes(rule.pattern)) {
+        hits.set(rule.id, false);
+      } else if (rule.severity === 'high' || rule.severity === 'critical') {
+        if (utf16Text === null) utf16Text = utf16.decode(joined).toLowerCase();
+        if (utf16Text.includes(rule.pattern)) hits.set(rule.id, true);
+        else {
+          if (utf16Shifted === null) utf16Shifted = utf16.decode(joined.subarray(1)).toLowerCase();
+          if (utf16Shifted.includes(rule.pattern)) hits.set(rule.id, true);
+        }
+      }
+    }
+    for (const marker of gtaMarkers) {
+      if (marker.pattern && asciiText.includes(marker.pattern)) gtaHits.add(marker.id);
+    }
+    prev = joined.slice(Math.max(0, joined.length - overlap));
   }
-  const head = { start: 0, end: Math.min(LIMITS.STRING_SCAN_HEAD_BYTES, totalLen) };
-  const tailStart = Math.max(head.end, totalLen - LIMITS.STRING_SCAN_TAIL_BYTES);
-  const tail = { start: tailStart, end: totalLen };
-  return [head, tail];
-}
-
-function decodeRegionsAsciiLower(bytes, regions) {
-  const decoder = new TextDecoder('latin1');
-  let combined = '';
-  for (const r of regions) {
-    combined += decoder.decode(bytes.subarray(r.start, r.end)) + '\u0000';
-  }
-  return combined.toLowerCase();
-}
-
-function decodeRegionsUtf16Lower(bytes, regions) {
-  const decoder = new TextDecoder('utf-16le', { fatal: false });
-  let combined = '';
-  for (const r of regions) {
-    const len = r.end - r.start;
-    const evenLen = len - (len % 2);
-    if (evenLen <= 0) continue;
-    combined += decoder.decode(bytes.subarray(r.start, r.start + evenLen)) + '\u0000';
-  }
-  return combined.toLowerCase();
+  return { hits, gtaHits };
 }
 
 /* ============================================================
@@ -1332,23 +1336,12 @@ async function scanFile(file) {
   // صورت شکست تجزیهٔ PE نیز از دست نروند (item 8/9). blacklistHit و
   // reputationStatus همان مقادیر محاسبه‌شده در بالا هستند.
 
-  // --- اسکن رشته (محدود به پنجرهٔ ابتدا/انتها برای فایل‌های بزرگ) ---
-  const regions = buildScanRegions(bytes.length);
-  const asciiText = decodeRegionsAsciiLower(bytes, regions);
-  let utf16Text = null; // فقط در صورت نیاز (الگوهای high/critical) محاسبه می‌شود
-
+  // --- Full-coverage string scan: 4 MiB windows with overlap ---
   const suspiciousStrings = rules.suspicious_strings || [];
+  const stringInspection = scanStringIndicators(bytes, suspiciousStrings, rules.gta_markers || []);
   for (const rule of suspiciousStrings) {
-    if (!rule.pattern) continue;
-    let matched = asciiText.includes(rule.pattern);
-    let viaUtf16 = false;
-
-    if (!matched && (rule.severity === 'high' || rule.severity === 'critical')) {
-      if (utf16Text === null) utf16Text = decodeRegionsUtf16Lower(bytes, regions);
-      if (utf16Text.includes(rule.pattern)) { matched = true; viaUtf16 = true; }
-    }
-
-    if (matched) {
+    if (stringInspection.hits.has(rule.id)) {
+      const viaUtf16 = stringInspection.hits.get(rule.id);
       const ev = {
         category: rule.category || 'uncategorized', rule: rule.id, severity: rule.severity,
         weight: rule.weight, confidence: rule.confidence,
@@ -1417,7 +1410,7 @@ async function scanFile(file) {
 
   // --- نشانه‌های GTA: فقط زمینه/اطلاعات، هرگز امتیازدهی نمی‌شوند (item 27) ---
   const gtaMarkers = rules.gta_markers || [];
-  const matchedMarkers = gtaMarkers.filter(m => m.pattern && asciiText.includes(m.pattern));
+  const matchedMarkers = gtaMarkers.filter(m => stringInspection.gtaHits.has(m.id));
   const looksLikeGtaMod = matchedMarkers.length > 0;
   if (!looksLikeGtaMod) {
     reasons.push('هیچ نشانهٔ خاص GTA در فایل یافت نشد؛ این فایل ممکن است یک DLL عمومی باشد — تحلیل ایمنی همچنان کامل انجام شد.');

@@ -30,11 +30,11 @@ const contract = {
   verdicts: ['safe', 'suspicious', 'malicious', 'inconclusive', 'invalid'],
 
   worker: {
-    maxInputBytes: 150 * 1024 * 1024,
+    maxInputBytes: 1024 * 1024 * 1024,
     maxFileNameLength: 1024,
     maxRequestIdLength: 128,
     initTimeoutMs: 8000,
-    scanTimeoutMs: 45000,
+    scanTimeoutMs: 10 * 60 * 1000,
     maxConcurrentScans: 1,
   },
 

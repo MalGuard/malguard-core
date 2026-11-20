@@ -108,6 +108,7 @@ class ScannerBridge {
     for (const file of [
       'malguard-contract.js',
       'engine.js',
+      'streaming-static-scanner.js',
       'multilayer.js',
       'gta-mod-detector.js',
       'archive-inspector.js',
@@ -173,7 +174,124 @@ class ScannerBridge {
     return result;
   }
 
-  async scanPath(filePath, mode = 'pro') {
+  // Large-file branch: disk-backed slices, two bounded hashing passes and identity checks.
+  // Does NOT claim PE, archive or multi-engine coverage. Never emits SAFE.
+  async scanLargeHandle(handle, resolved, initialStat, mode, options = {}) {
+    const CHUNK = 4 * 1024 * 1024;
+    const SIZE_LIMIT = 1024 * 1024 * 1024;
+    const TIME_LIMIT = 10 * 60 * 1000;
+    const started = Date.now();
+    const signal = options.signal || null;
+    const size = initialStat.size;
+    if (!Number.isSafeInteger(size) || size < 1 || size > SIZE_LIMIT) {
+      return { resultSchemaVersion:'1.0.0', mode, finalVerdict:'inconclusive', hardeningError:'desktop_file_too_large' };
+    }
+    function assertRunning() {
+      if (signal && signal.aborted) {
+        const err = new Error('Large-file scan cancelled');
+        err.code = 'SCAN_ABORTED';
+        throw err;
+      }
+      if (Date.now() - started > TIME_LIMIT) {
+        const err = new Error('Large-file scan exceeded time limit');
+        err.code = 'SCAN_TIMEOUT';
+        throw err;
+      }
+    }
+    async function readBlock(from, to) {
+      assertRunning();
+      if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) ||
+          from < 0 || to <= from || to > size || to - from > CHUNK) {
+        const error = new Error('Invalid large-file read bounds');
+        error.code = 'SCAN_READ_BOUNDS';
+        throw error;
+      }
+      const data = Buffer.allocUnsafe(to - from);
+      let offset = 0;
+      while (offset < data.length) {
+        assertRunning();
+        const { bytesRead } = await handle.read(data, offset, data.length - offset, from + offset);
+        if (!bytesRead) {
+          const error = new Error('File changed or ended during scan');
+          error.code = 'SCAN_READ_TRUNCATED';
+          throw error;
+        }
+        offset += bytesRead;
+      }
+      return data;
+    }
+    function isSameFile(before, after) {
+      return after.isFile() && !after.isSymbolicLink() &&
+        before.size === after.size && before.mtimeMs === after.mtimeMs &&
+        before.ctimeMs === after.ctimeMs &&
+        before.dev === after.dev && before.ino === after.ino;
+    }
+    const file = {
+      name: path.basename(resolved),
+      size,
+      slice(from, to) {
+        return {
+          size: to - from,
+          async arrayBuffer() {
+            const data = await readBlock(from, to);
+            return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+          },
+        };
+      },
+    };
+    let summary;
+    try {
+      summary = await this.context.MalGuardStreamingScanner.scan(file, {
+        onProgress: typeof options.onProgress === 'function'
+          ? (event) => {
+              assertRunning();
+              if (options.reportMode === 'detailed') options.onProgress(event);
+            }
+          : undefined,
+      });
+      assertRunning();
+      const midway = await handle.stat();
+      if (!isSameFile(initialStat, midway)) {
+        return { resultSchemaVersion:'1.0.0', mode, finalVerdict:'inconclusive',
+          hardeningError:'desktop_file_changed_during_scan' };
+      }
+
+      // Do not trust a file solely on timestamp/size; independently rehash in blocks.
+      const verified = createHash('sha256');
+      for (let pos = 0; pos < size; pos += CHUNK) {
+        verified.update(await readBlock(pos, Math.min(pos + CHUNK, size)));
+      }
+      if (verified.digest('hex') !== summary.sha256) {
+        return { resultSchemaVersion:'1.0.0', mode, finalVerdict:'inconclusive',
+          hardeningError:'desktop_file_changed_during_scan' };
+      }
+      const endHandleStat = await handle.stat();
+      const endPathStat = await withTransientIoRetry(() => fs.promises.lstat(resolved));
+      if (!isSameFile(initialStat, endHandleStat) || !isSameFile(initialStat, endPathStat)) {
+        return { resultSchemaVersion:'1.0.0', mode, finalVerdict:'inconclusive',
+          hardeningError:'desktop_file_changed_during_scan' };
+      }
+      const result = {
+        resultSchemaVersion: '1.0.0', mode,
+        finalVerdict: summary.finalVerdict,
+        streamingResult: JSON.parse(JSON.stringify(summary)),
+        contentSha256: summary.sha256,
+        sourceIdentity: { sha256: summary.sha256, revalidated: true },
+        hardeningError: 'large_file_partial_analyzer_coverage',
+        note: 'All bytes checked for supported string indicators; structural and external engines not run. SAFE not possible.',
+        multiEngine: { status: 'skipped', reason: 'large_file_unverified_external_engine_support' },
+      };
+      return this._applyThreatIntel(result, summary.sha256);
+    } catch (error) {
+      const output = ioFailureResult(error, mode, 'large-file-stream');
+      output.hardeningError = error && error.code === 'SCAN_ABORTED'
+        ? 'desktop_scan_aborted' : error && error.code === 'SCAN_TIMEOUT'
+        ? 'desktop_scan_timeout' : output.hardeningError;
+      return output;
+    }
+  }
+
+  async scanPath(filePath, mode = 'pro', options = {}) {
     const resolved = path.resolve(filePath);
     let beforePathStat;
     try { beforePathStat = await withTransientIoRetry(() => fs.promises.lstat(resolved)); }
@@ -189,7 +307,7 @@ class ScannerBridge {
       error.code = 'SCAN_TARGET_NOT_FILE';
       throw error;
     }
-    if (beforePathStat.size > 64 * 1024 * 1024) {
+    if (beforePathStat.size > 1024 * 1024 * 1024) {
       return { resultSchemaVersion: '1.0.0', finalVerdict: 'inconclusive', hardeningError: 'desktop_file_too_large', mode };
     }
 
@@ -204,6 +322,10 @@ class ScannerBridge {
       catch (error) { return ioFailureResult(error, mode, 'fstat-before-read'); }
       if (!beforeHandleStat.isFile() || beforeHandleStat.size !== beforePathStat.size) {
         return { resultSchemaVersion: '1.0.0', finalVerdict: 'inconclusive', hardeningError: 'desktop_file_identity_changed_before_read', mode };
+      }
+
+      if (beforeHandleStat.size > 64 * 1024 * 1024) {
+        return await this.scanLargeHandle(handle, resolved, beforeHandleStat, mode, options);
       }
 
       let bytes;

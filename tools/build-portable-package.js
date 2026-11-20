@@ -19,6 +19,7 @@ const ROOT_FILES = [
   'rules.json',
   'malguard-contract.js',
   'engine.js',
+  'streaming-static-scanner.js',
   'multilayer.js',
   'gta-mod-detector.js',
   'archive-inspector.js',

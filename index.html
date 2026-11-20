@@ -33,6 +33,20 @@
 
       <div id="fileInfo" class="file-info"></div>
 
+      <div class="pro-details" style="margin: 12px 0; padding: 12px;">
+        <label for="reportMode" style="display: block; margin-bottom: 6px;">نحوه نمایش گزارش اسکن</label>
+        <select id="reportMode" style="width: 100%; padding: 9px;" aria-label="نحوه نمایش گزارش اسکن">
+          <option value="detailed">گزارش مرحله‌ای هر ۱۰ MiB</option>
+          <option value="final">فقط گزارش نهایی</option>
+        </select>
+        <p style="margin: 8px 0 0; font-size: 0.85rem;">در اسکن فایل‌های بزرگ، گزارش‌های مرحله‌ای موقت هستند و به‌معنی امن بودن فایل نیستند.</p>
+      </div>
+      <div id="scanProgress" class="pro-details" aria-live="polite" hidden>
+        <h3>پیشرفت اسکن</h3>
+        <div id="scanProgressStatus"></div>
+        <ol id="scanProgressEvents" style="max-height: 240px; overflow-y: auto;"></ol>
+      </div>
+
       <div class="scan-actions">
         <button id="scanBtn" class="scan-btn" disabled>اسکن کن</button>
         <button id="cancelScanBtn" class="cancel-scan-btn" type="button" hidden>لغو اسکن</button>
@@ -103,6 +117,10 @@
       const dropzoneText = document.getElementById('dropzoneText');
       const fileInput = document.getElementById('fileInput');
       const fileInfo = document.getElementById('fileInfo');
+      const reportMode = document.getElementById('reportMode');
+      const scanProgress = document.getElementById('scanProgress');
+      const scanProgressStatus = document.getElementById('scanProgressStatus');
+      const scanProgressEvents = document.getElementById('scanProgressEvents');
       const scanBtn = document.getElementById('scanBtn');
       const cancelScanBtn = document.getElementById('cancelScanBtn');
       const errorBanner = document.getElementById('errorBanner');
@@ -214,6 +232,9 @@
       }
 
       function resetResults() {
+        scanProgress.hidden = true;
+        scanProgressStatus.textContent = '';
+        scanProgressEvents.textContent = '';
         results.classList.remove('visible');
         reasonsList.innerHTML = '';
         hashBox.style.display = '';
@@ -313,10 +334,32 @@
         currentScanAbortController = new AbortController();
 
         try {
+          const showDetailed = reportMode.value === 'detailed';
+          if (showDetailed) {
+            scanProgress.hidden = false;
+            scanProgressStatus.textContent = 'شروع بررسی فایل…';
+          }
           const wrapped = await scanFileInWorker(selectedFile, currentMode, {
             signal: currentScanAbortController.signal,
+            reportMode: reportMode.value,
+            onProgress: showDetailed ? (progress) => {
+              if (!progress || !Number.isFinite(progress.scannedBytes) || !Number.isFinite(progress.totalBytes)) return;
+              scanProgressStatus.textContent = formatSize(progress.scannedBytes) + ' از ' +
+                formatSize(progress.totalBytes) + ' (' + progress.percent + '%) بررسی شد.';
+              const item = document.createElement('li');
+              const details = Array.isArray(progress.newFindings) ? progress.newFindings : [];
+              item.textContent = 'تا ' + formatSize(progress.scannedBytes) + ': ' +
+                (details.length ? details.length + ' نشانه جدید (' +
+                  details.map(f => f.rule + ' / ' + f.severity).join('، ') + ')' :
+                  'نشانه جدیدی در قوانین متنی پیدا نشد') + ' — نتیجه موقت';
+              scanProgressEvents.appendChild(item);
+            } : null,
           });
           renderResult(wrapped);
+          if (showDetailed && wrapped.streamingResult) {
+            scanProgressStatus.textContent = 'بررسی تمام ' +
+              formatSize(wrapped.streamingResult.bytesScanned) + ' به پایان رسید.';
+          }
         } catch (err) {
           console.error(err);
           const code = err && err.code ? String(err.code) : '';
@@ -362,6 +405,10 @@
           } else {
             hashBox.style.display = 'none';
           }
+        } else if (wrapped.streamingResult) {
+          scoreText.textContent = '';
+          hashBox.style.display = '';
+          hashInput.value = wrapped.streamingResult.sha256 || '—';
         } else if (!engineResult) {
           // مسیر آرشیو/تشخیص‌دهنده‌ای که Engine اجرا نشده و ScriptAnalyzer هم ندارد.
           scoreText.textContent = '';
@@ -381,6 +428,14 @@
           : engineResult
             ? (engineResult.reasons || []).slice()
             : [wrapped.note, ...((wrapped.detectorResult && wrapped.detectorResult.reasons) || [])].filter(Boolean);
+        if (wrapped.streamingResult) {
+          const report = wrapped.streamingResult;
+          displayReasons.push('پوشش بررسی رشته‌ها: ' + formatSize(report.bytesScanned) +
+            '؛ تحلیل PE، آرشیو و لایه‌های مکمل در این مسیر کامل نیست.');
+          displayReasons.push('تعداد نشانه‌های شناسایی‌شده: ' + report.findings.length);
+          report.findings.slice(0, 20).forEach(f => displayReasons.push(f.rule + ' (' + f.severity + ', ' + f.encoding + ')'));
+          if (report.findings.length > 20) displayReasons.push('نمایش محدود به ۲۰ مورد؛ جزئیات کامل در خروجی اسکن موجود است.');
+        }
         if (wrapped.execution && wrapped.execution.context === 'main_thread_fallback') {
           displayReasons.unshift('این مرورگر Web Worker را در دسترس قرار نداد؛ اسکن با مسیر سازگاری روی رشتهٔ اصلی انجام شد. نتیجهٔ امنیتی تغییر نکرده، اما رابط کاربری ممکن است هنگام پردازش سنگین کند شود.');
         }
