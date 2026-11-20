@@ -113,6 +113,27 @@ async function workerHostTests() {
   const hugeMsg = await waitFor(() => messages.find(m => m.type === 'scan_error' && m.requestId === 'huge-1'));
   assert.equal(hugeMsg.error.code, 'WORKER_INPUT_TOO_LARGE');
 
+  // Large-file route must emit provisional progress and never claim SAFE.
+  const originalStreamingScanner = context.MalGuardStreamingScanner;
+  context.MalGuardStreamingScanner = {
+    scan: async (file, options) => {
+      options.onProgress({ scannedBytes: 10 * 1024 * 1024, totalBytes: file.size, provisional: true });
+      return {
+        sha256: 'a'.repeat(64), fileSize: file.size, bytesScanned: file.size,
+        findings: [], finalVerdict: 'inconclusive',
+        coverage: 'complete_string_scan_only'
+      };
+    }
+  };
+  listeners.message({ data: { type: 'scan', requestId: 'big-1',
+    file: new FileLike('big.dll', Buffer.alloc(1), 65 * 1024 * 1024),
+    mode: 'pro' } });
+  const bigMsg = await waitFor(() => messages.find(m => m.type === 'scan_result' && m.requestId === 'big-1'));
+  assert.equal(bigMsg.result.finalVerdict, 'inconclusive');
+  assert.equal(bigMsg.result.hardeningError, 'large_file_partial_analyzer_coverage');
+  assert.equal(messages.some(m => m.type === 'scan_progress' && m.requestId === 'big-1'), true);
+  context.MalGuardStreamingScanner = originalStreamingScanner;
+
   // Concurrency gate: keep one request pending, then submit a second.
   let release;
   context.scanFileWithMode = () => new Promise(resolve => { release = () => resolve({ resultSchemaVersion: '1.0.0', appIntegrationVersion: '1.5.1', mode: 'pro', finalVerdict: 'safe' }); });
