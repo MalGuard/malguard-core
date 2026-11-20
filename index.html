@@ -341,6 +341,7 @@
           }
           const wrapped = await scanFileInWorker(selectedFile, currentMode, {
             signal: currentScanAbortController.signal,
+            reportMode: reportMode.value,
             onProgress: showDetailed ? (progress) => {
               if (!progress || !Number.isFinite(progress.scannedBytes) || !Number.isFinite(progress.totalBytes)) return;
               scanProgressStatus.textContent = formatSize(progress.scannedBytes) + ' از ' +
