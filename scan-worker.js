@@ -127,7 +127,11 @@ function validateScanRequest(message) {
     throw fail('WORKER_INPUT_TOO_LARGE', 'Input size exceeds the worker boundary limit.');
   }
 
-  return { requestId, file, mode: message.mode };
+  const reportMode = message.reportMode === undefined ? 'final' : message.reportMode;
+  if (reportMode !== 'final' && reportMode !== 'detailed') {
+    throw fail('INVALID_REPORT_MODE', 'Unsupported reporting mode.');
+  }
+  return { requestId, file, mode: message.mode, reportMode };
 }
 
 self.addEventListener('message', async (event) => {
@@ -171,9 +175,11 @@ self.addEventListener('message', async (event) => {
     if (request.file.size > self.MalGuardEngine.limits.maxFileSize) {
       if (!self.MalGuardStreamingScanner) throw fail('STREAMING_MODULE_MISSING', 'Large-file scanner is unavailable.');
       const summary = await self.MalGuardStreamingScanner.scan(request.file, {
-        onProgress: (progress) => self.postMessage({
-          type: 'scan_progress', requestId: request.requestId, progress
-        }),
+        onProgress: request.reportMode === 'detailed'
+          ? (progress) => self.postMessage({
+            type: 'scan_progress', requestId: request.requestId, progress
+          })
+          : undefined,
       });
       result = {
         resultSchemaVersion: self.MalGuardContract.resultSchemaVersion,
@@ -186,6 +192,16 @@ self.addEventListener('message', async (event) => {
         note: 'Large-file string indicators scanned in full, but PE/secondary analysis is not complete. SAFE cannot be returned.',
       };
     } else {
+      // Optional provisional checkpoint pass for <=64 MiB. The full
+      // legacy engine still makes the final multi-layer decision.
+      if (request.reportMode === 'detailed' && request.file.size >= 10 * 1024 * 1024) {
+        if (!self.MalGuardStreamingScanner) throw fail('STREAMING_MODULE_MISSING', 'Checkpoint scanner unavailable.');
+        await self.MalGuardStreamingScanner.scan(request.file, {
+          onProgress: (progress) => self.postMessage({
+            type: 'scan_progress', requestId: request.requestId, progress
+          }),
+        });
+      }
       result = await self.scanFileWithMode(request.file, request.mode);
     }
     const finishedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
