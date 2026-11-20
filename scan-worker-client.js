@@ -265,7 +265,8 @@ async function scanFileInWorker(file, mode, options) {
     if (signal) signal.addEventListener('abort', abortHandler, { once: true });
 
     try {
-      worker.postMessage({ type: 'scan', requestId, file, mode: normalizedMode });
+      worker.postMessage({ type: 'scan', requestId, file, mode: normalizedMode,
+        reportMode: opts.reportMode === 'detailed' ? 'detailed' : 'final' });
     } catch (error) {
       cleanupActive();
       reject(makeError('WORKER_POST_FAILED', error && error.message ? error.message : 'Could not send file to scan worker.'));
