@@ -1047,6 +1047,10 @@ function scanStringIndicators(bytes, stringRules, gtaMarkers) {
       } else if (rule.severity === 'high' || rule.severity === 'critical') {
         if (utf16Text === null) utf16Text = utf16.decode(joined).toLowerCase();
         if (utf16Text.includes(rule.pattern)) hits.set(rule.id, true);
+        else {
+          if (utf16Shifted === null) utf16Shifted = utf16.decode(joined.subarray(1)).toLowerCase();
+          if (utf16Shifted.includes(rule.pattern)) hits.set(rule.id, true);
+        }
       }
     }
     for (const marker of gtaMarkers) {
