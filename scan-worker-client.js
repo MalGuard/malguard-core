@@ -135,6 +135,16 @@ function ensureWorker() {
         return;
       }
 
+      if (data.type === 'scan_progress') {
+        if (active && String(data.requestId || '') === active.requestId &&
+            typeof active.onProgress === 'function') {
+          try { active.onProgress(data.progress); } catch (error) {
+            // Presentation failure must not cause a false security verdict.
+            console.error('Scan progress callback failed:', error);
+          }
+        }
+        return;
+      }
       if (data.type !== 'scan_result' && data.type !== 'scan_error') return;
       if (!active || String(data.requestId || '') !== active.requestId) return;
 
@@ -250,7 +260,8 @@ async function scanFileInWorker(file, mode, options) {
       terminateWorker('WORKER_ABORTED', 'Scan was cancelled. No verdict was produced.');
     };
 
-    active = { requestId, mode: normalizedMode, resolve, reject, timer, signal, abortHandler };
+    active = { requestId, mode: normalizedMode, resolve, reject, timer, signal, abortHandler,
+      onProgress: typeof opts.onProgress === 'function' ? opts.onProgress : null };
     if (signal) signal.addEventListener('abort', abortHandler, { once: true });
 
     try {
