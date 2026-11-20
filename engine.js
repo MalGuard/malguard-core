@@ -1039,6 +1039,7 @@ function scanStringIndicators(bytes, stringRules, gtaMarkers) {
     joined.set(current, prev.length);
     const asciiText = ascii.decode(joined).toLowerCase();
     let utf16Text = null;
+    let utf16Shifted = null;
     for (const rule of stringRules) {
       if (!rule.pattern || hits.has(rule.id)) continue;
       if (asciiText.includes(rule.pattern)) {
