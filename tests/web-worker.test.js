@@ -127,7 +127,7 @@ async function workerHostTests() {
   };
   listeners.message({ data: { type: 'scan', requestId: 'big-1',
     file: new FileLike('big.dll', Buffer.alloc(1), 65 * 1024 * 1024),
-    mode: 'pro' } });
+    mode: 'pro', reportMode: 'detailed' } });
   const bigMsg = await waitFor(() => messages.find(m => m.requestId === 'big-1' &&
     (m.type === 'scan_result' || m.type === 'scan_error')));
   assert.equal(bigMsg.type, 'scan_result', JSON.stringify(bigMsg));
