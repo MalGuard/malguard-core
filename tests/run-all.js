@@ -26,6 +26,7 @@ const tests=[
  'malformed-fuzz.test.js',
  'pe-fuzz.test.js',
  'performance-budget.test.js',
+ 'streaming-static-scanner.test.js',
  'web-worker.test.js',
  'final-security-audit.test.js',
  'scanner-core-acceptance.test.js',
