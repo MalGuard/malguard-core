@@ -325,7 +325,7 @@ class ScannerBridge {
       }
 
       if (beforeHandleStat.size > 64 * 1024 * 1024) {
-        return this.scanLargeHandle(handle, resolved, beforeHandleStat, mode, options);
+        return await this.scanLargeHandle(handle, resolved, beforeHandleStat, mode, options);
       }
 
       let bytes;
