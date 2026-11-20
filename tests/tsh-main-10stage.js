@@ -19,7 +19,7 @@ const STAGES = Object.freeze({
   stage3: { title:'TSH 3/10 - Core Static Detection and Parser Abuse', tests:[
     'scan-resilience.test.js','regression-corpus.test.js','quality-benchmark.test.js',
     'detector-regression.test.js','malformed-fuzz.test.js','pe-fuzz.test.js',
-    'performance-budget.test.js','web-worker.test.js','final-security-audit.test.js',
+    'performance-budget.test.js','streaming-static-scanner.test.js','web-worker.test.js','final-security-audit.test.js',
     'scanner-core-acceptance.test.js','mutation-security.test.js','mutation-sensitivity.test.js'
   ]},
   stage4: { title:'TSH 4/10 - Script, Input, Local API and Error Foundations', tests:[
