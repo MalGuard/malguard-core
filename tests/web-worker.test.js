@@ -128,7 +128,9 @@ async function workerHostTests() {
   listeners.message({ data: { type: 'scan', requestId: 'big-1',
     file: new FileLike('big.dll', Buffer.alloc(1), 65 * 1024 * 1024),
     mode: 'pro' } });
-  const bigMsg = await waitFor(() => messages.find(m => m.type === 'scan_result' && m.requestId === 'big-1'));
+  const bigMsg = await waitFor(() => messages.find(m => m.requestId === 'big-1' &&
+    (m.type === 'scan_result' || m.type === 'scan_error')));
+  assert.equal(bigMsg.type, 'scan_result', JSON.stringify(bigMsg));
   assert.equal(bigMsg.result.finalVerdict, 'inconclusive');
   assert.equal(bigMsg.result.hardeningError, 'large_file_partial_analyzer_coverage');
   assert.equal(messages.some(m => m.type === 'scan_progress' && m.requestId === 'big-1'), true);
