@@ -147,7 +147,8 @@ async function scan(file, options) {
     hash.update(chunk);
     const joined = concatenate(previous, chunk);
     const latin = ascii.decode(joined).toLowerCase();
-    const wide = utf16.decode(joined).toLowerCase();
+    let wide = null;
+    let wideShifted = null;
     for (const rule of rules.suspicious_strings) {
       if (!rule.pattern || hits.has(rule.id)) continue;
       const hasAscii = latin.includes(rule.pattern);
