@@ -66,7 +66,7 @@ const context = {
 context.window = context;
 vm.createContext(context);
 for (const filename of [
-  'malguard-contract.js', 'engine.js', 'multilayer.js', 'gta-mod-detector.js', 'archive-inspector.js',
+  'malguard-contract.js', 'engine.js', 'streaming-static-scanner.js', 'multilayer.js', 'gta-mod-detector.js', 'archive-inspector.js',
   'archive-entry-reader.js', 'script-analyzer.js', 'app.js', 'scan-worker-client.js', 'self-test.js',
 ]) vm.runInContext(source(filename), context, { filename });
 
