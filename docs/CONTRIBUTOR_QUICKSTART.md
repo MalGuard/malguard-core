@@ -27,6 +27,8 @@ node tests/run-all.js
 
 The full suite is extensive and contains platform-dependent checks. If it fails, record the exact failing test, operating system, Node.js version, and sanitized error output. A failed test is **not** evidence that a security control may be disabled. Do not claim the full suite passed if you did not run it.
 
+For more examples and safe failure-reporting guidance, see [Running tests](TESTING.md).
+
 ## Find your first contribution
 
 1. Browse [open issues](https://github.com/MalGuard/malguard-core/issues). If labels are available, start with `good first issue` or `documentation`.
