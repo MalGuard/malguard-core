@@ -12,6 +12,14 @@
 
 **OpenSSF Best Practices (Passing):** [View MalGuard Core's Passing badge status and self-assessment](https://www.bestpractices.dev/projects/16122). This badge reflects a project-submitted OpenSSF Best Practices self-assessment; it is **not** an independent security audit, malware-detection certification, or Windows Authenticode code-signing certificate.
 
+## MalGuard AI product preview
+
+[![MalGuard AI product introduction — click to watch the video](https://raw.githubusercontent.com/MalGuard/malguard.github.io/2a49306deb899f86739194cddebf343f874dea09/assets/instagram/launch-2026/malguard-ai-promo-v2-web-poster.webp)](https://malguard.site/assets/instagram/launch-2026/malguard-ai-promo-v2-web.mp4)
+
+[Watch the product introduction](https://malguard.site/assets/instagram/launch-2026/malguard-ai-promo-v2-web.mp4) · [Explore MalGuard AI](https://malguard.site/ai/)
+
+This promotional video introduces the related web product, not a runtime demonstration, independent audit, or effectiveness test of the GTA Guard scanning and isolation components in this repository.
+
 ## Try it now — no installation or account
 
 **Checking a suspicious game-mod link?** Try the [free Link Inspector](https://malguard.site/tools.html#link-inspector) on the public MalGuard website. Click **Try example** to see what a deceptive link can look like, then check a link's visible URL structure in your own browser. **The tool does not visit the destination or upload the pasted URL**, and it cannot determine whether a site is safe.
